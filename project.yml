@@ -1,0 +1,41 @@
+# Generate the Xcode project with:  brew install xcodegen && xcodegen
+name: MakerSlice
+options:
+  bundleIdPrefix: de.makerslice
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: de
+packages:
+  MakerSliceCore:
+    path: Packages/MakerSliceCore
+targets:
+  MakerSlice:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/MakerSlice
+    dependencies:
+      - package: MakerSliceCore
+        product: SliceKit
+      - package: MakerSliceCore
+        product: PrinterKit
+      - package: MakerSliceCore
+        product: MakerWorldKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.makerslice.app
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: App/MakerSlice/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        # Set your Apple team here or pick it in Xcode under Signing & Capabilities.
+        DEVELOPMENT_TEAM: ""
+      configs:
+        Debug:
+          # The slicer is compute heavy; keep it fast even in debug builds.
+          SWIFT_OPTIMIZATION_LEVEL: "-O"

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core-tests:
+    name: Core tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+      - name: Test MakerSliceCore
+        working-directory: Packages/MakerSliceCore
+        run: swift test
+
+  ios-build:
+    name: iOS app build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project MakerSlice.xcodeproj \
+            -scheme MakerSlice \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO | tail -200
+      - name: Test core on macOS
+        working-directory: Packages/MakerSliceCore
+        run: swift test
