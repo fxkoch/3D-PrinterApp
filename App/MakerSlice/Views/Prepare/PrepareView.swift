@@ -420,6 +420,7 @@ private struct ObjectRow<MenuContent: View>: View {
             Menu { menu() } label: {
                 Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
             }
+            .accessibilityIdentifier("objectMenu")
         }
     }
 }

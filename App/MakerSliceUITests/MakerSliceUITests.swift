@@ -27,9 +27,11 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("01-Entdecken")
 
         app.tabBars.buttons["Bibliothek"].tap()
+        sleep(1)
         snapshot("02-Bibliothek")
 
         app.tabBars.buttons["Drucker"].tap()
+        sleep(1)
         XCTAssertTrue(app.staticTexts["Kein Drucker"].waitForExistence(timeout: 5))
         snapshot("03-Drucker")
 
@@ -84,5 +86,53 @@ final class MakerSliceUITests: XCTestCase {
             snapshot("16-Drucken-ohne-Drucker")
         }
         app.buttons["closeProject"].tap()
+    }
+
+    /// Search Printables, open a model, download a file and slice it – the full "find & print" flow.
+    func testSearchDownloadAndSlice() {
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Entdecken"].waitForExistence(timeout: 10))
+        app.segmentedControls.buttons["Printables"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("calibration cube\n")
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'result-printables'")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 30), "Printables search should return results")
+        sleep(2)
+        snapshot("20-Suche")
+        card.tap()
+        let print = app.staticTexts["Drucken"].firstMatch
+        XCTAssertTrue(print.waitForExistence(timeout: 30), "model files should load")
+        snapshot("21-Modell")
+        print.tap()
+        let slice = app.buttons["sliceButton"]
+        XCTAssertTrue(slice.waitForExistence(timeout: 60), "downloaded model should open in the prepare screen")
+        sleep(2)
+        snapshot("22-Download-vorbereitet")
+        slice.tap()
+        XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 120), "downloaded model should slice")
+        snapshot("23-Download-geslicet")
+    }
+
+    /// Cut the sample cube with the cut tool and check that two parts result.
+    func testCutTool() {
+        app.launchArguments = ["-uiTestSampleModel"]
+        app.launch()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20))
+        let menu = app.buttons["objectMenu"].firstMatch
+        if !menu.isHittable { app.swipeUp() }
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.tap()
+        app.buttons["Teilen …"].tap()
+        XCTAssertTrue(app.buttons["confirmCut"].waitForExistence(timeout: 5))
+        sleep(2)
+        snapshot("30-Teilen")
+        app.buttons["confirmCut"].tap()
+        XCTAssertTrue(app.staticTexts["Würfel 20 mm – Teil 2"].waitForExistence(timeout: 10), "cut should create two parts")
+        snapshot("31-Geteilt")
+        app.buttons["sliceButton"].tap()
+        XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 60))
+        snapshot("32-Geteilt-geslicet")
     }
 }

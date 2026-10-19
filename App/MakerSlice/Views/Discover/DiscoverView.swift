@@ -45,7 +45,7 @@ struct DiscoverView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    if results.isEmpty && !searching {
+                    if results.isEmpty && !searching && notes.isEmpty {
                         ContentUnavailableView("Keine Treffer", systemImage: "magnifyingglass",
                                                description: Text("Suche nach einem Begriff, z. B. „Kabelhalter“ oder „Vase“."))
                             .padding(.top, 40)
@@ -102,7 +102,7 @@ struct DiscoverView: View {
         notes = []
         results = []
         searchTask = Task {
-            var collected: [[ModelSearchResult]] = []
+            var collected: [ModelSource: [ModelSearchResult]] = [:]
             var problems: [String] = []
             await withTaskGroup(of: (ModelSource, Result<[ModelSearchResult], Error>).self) { group in
                 if filter != .makerWorld {
@@ -120,28 +120,34 @@ struct DiscoverView: View {
                         }
                     }
                 }
+                // Show each source as soon as it answers.
                 for await (source, result) in group {
+                    guard !Task.isCancelled else { return }
                     switch result {
-                    case .success(let list): collected.append(list)
-                    case .failure(let error):
-                        problems.append("\(source.displayName): \(error.localizedDescription)")
+                    case .success(let list): collected[source] = list
+                    case .failure(let error): problems.append("\(source.displayName): \(error.localizedDescription)")
                     }
+                    results = Self.interleave(collected)
+                    notes = problems
                 }
             }
             guard !Task.isCancelled else { return }
-            // Interleave sources so both show up at the top.
-            var merged: [ModelSearchResult] = []
-            let longest = collected.map(\.count).max() ?? 0
-            for i in 0..<longest {
-                for list in collected where i < list.count { merged.append(list[i]) }
-            }
-            results = merged
-            notes = problems
             if problems.contains(where: { $0.hasPrefix("MakerWorld") }) {
                 notes.append("Tipp: Öffne oben rechts MakerWorld und melde dich an – danach funktioniert die Suche dort.")
             }
             searching = false
         }
+    }
+
+    /// Alternates sources so both show up at the top.
+    static func interleave(_ lists: [ModelSource: [ModelSearchResult]]) -> [ModelSearchResult] {
+        let ordered = ModelSource.allCases.compactMap { lists[$0] }
+        var merged: [ModelSearchResult] = []
+        let longest = ordered.map(\.count).max() ?? 0
+        for i in 0..<longest {
+            for list in ordered where i < list.count { merged.append(list[i]) }
+        }
+        return merged
     }
 }
 
@@ -150,34 +156,39 @@ private struct ResultCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            AsyncImage(url: result.imageURL) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    Color(.tertiarySystemFill).overlay { Image(systemName: "cube").foregroundStyle(.tertiary) }
+            Color(.tertiarySystemFill)
+                .aspectRatio(4 / 3, contentMode: .fit)
+                .overlay {
+                    AsyncImage(url: result.imageURL) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Image(systemName: "cube").foregroundStyle(.tertiary)
+                        }
+                    }
                 }
-            }
-            .frame(height: 130)
-            .frame(maxWidth: .infinity)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            Text(result.title).font(.subheadline.weight(.medium)).lineLimit(2).frame(height: 38, alignment: .top)
-            HStack(spacing: 8) {
+            Text(result.title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(2, reservesSpace: true)
+                .multilineTextAlignment(.leading)
+            HStack(spacing: 6) {
                 Text(result.source.displayName)
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
+                    .lineLimit(1)
+                    .fixedSize()
                 Spacer(minLength: 0)
-                if let likes = result.likes { Label("\(likes)", systemImage: "heart") }
-                if let downloads = result.downloads { Label(Self.short(downloads), systemImage: "arrow.down.circle") }
+                if let likes = result.likes {
+                    Label(Self.short(likes), systemImage: "heart").lineLimit(1).fixedSize()
+                }
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
-            .labelStyle(.titleAndIcon)
         }
         .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: Theme.corner))
     }
 
     static func short(_ n: Int) -> String {

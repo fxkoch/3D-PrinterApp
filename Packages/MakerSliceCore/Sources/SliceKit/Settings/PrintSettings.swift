@@ -128,8 +128,15 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         self.printer = printer
         printer.machine.applyDefaults(to: &self)
         let filament = FilamentLibrary.defaultFilament(for: printer)
-        filaments = Array(repeating: filament, count: printer.machine.toolCount)
+        filaments = (0..<printer.machine.toolCount).map { i in
+            var f = filament
+            f.color = PrintSettings.slotColors[i % PrintSettings.slotColors.count]
+            return f
+        }
     }
+
+    /// Distinct default colours so slots are easy to tell apart before the printer reports its spools.
+    public static let slotColors = ["#F5F5F0", "#2B2B2E", "#E5483C", "#2F7DE1"]
 
     public var machine: MachineProfile { printer.machine }
     public var bedSize: Double { machine.bedSize }
