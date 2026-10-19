@@ -1,20 +1,56 @@
 import Foundation
 
+/// Extra geometry attached to an object: added (e.g. connector pegs) or
+/// subtracted (connector holes) when slicing.
+public struct ObjectVolume: Sendable, Equatable {
+    public enum Kind: String, Sendable { case add, subtract }
+    public var kind: Kind
+    public var mesh: TriangleMesh
+
+    public init(kind: Kind, mesh: TriangleMesh) {
+        self.kind = kind
+        self.mesh = mesh
+    }
+}
+
 /// One printable object of an imported file, already in build-plate coordinates.
 public struct ModelObject: Identifiable, Sendable, Equatable {
     public var id = UUID()
     public var name: String
     public var mesh: TriangleMesh
-    /// Zero-based tool/extruder index (U1: 0...3).
+    /// Zero-based tool/slot index (0...3).
     public var tool: Int
     /// Plate number from a Bambu/Orca project (1-based), if known.
     public var plate: Int?
+    public var volumes: [ObjectVolume]
 
-    public init(name: String, mesh: TriangleMesh, tool: Int = 0, plate: Int? = nil) {
+    public init(name: String, mesh: TriangleMesh, tool: Int = 0, plate: Int? = nil, volumes: [ObjectVolume] = []) {
         self.name = name
         self.mesh = mesh
         self.tool = tool
         self.plate = plate
+        self.volumes = volumes
+    }
+
+    /// Bounds of the printed shape (mesh plus added volumes).
+    public var boundingBox: BoundingBox {
+        var box = mesh.boundingBox
+        for v in volumes where v.kind == .add { box.include(v.mesh.boundingBox) }
+        return box
+    }
+
+    public func transformed(_ t: Transform3D) -> ModelObject {
+        var copy = self
+        copy.mesh = mesh.transformed(t)
+        copy.volumes = volumes.map { ObjectVolume(kind: $0.kind, mesh: $0.mesh.transformed(t)) }
+        return copy
+    }
+
+    /// Moves the object so it rests on z = 0 with its XY centre at `center`.
+    public func placedOnBed(center: (x: Double, y: Double)) -> ModelObject {
+        let box = boundingBox
+        guard !box.isEmpty else { return self }
+        return transformed(.translation(Vec3(center.x - box.center.x, center.y - box.center.y, -box.min.z)))
     }
 }
 
@@ -45,8 +81,13 @@ public struct ProjectSettings: Sendable, Equatable {
     public var bottomLayers: Int?
     public var infillDensity: Double?
     public var supportEnabled: Bool?
+    public var supportOnBuildPlateOnly: Bool?
+    public var infillPattern: InfillPattern?
+    public var brimWidth: Double?
+    public var ironing: Bool?
     public var filamentColors: [String] = []
     public var filamentTypes: [String] = []
+    public var filamentVendors: [String] = []
     public var printerModel: String?
 
     static func parse(_ data: Data) -> ProjectSettings? {
@@ -67,6 +108,18 @@ public struct ProjectSettings: Sendable, Equatable {
         s.bottomLayers = double("bottom_shell_layers").map { Int($0) }
         s.infillDensity = double("sparse_infill_density").map { $0 / 100 }
         if let support = string("enable_support") { s.supportEnabled = support == "1" || support == "true" }
+        if let plate = string("support_on_build_plate_only") { s.supportOnBuildPlateOnly = plate == "1" || plate == "true" }
+        switch string("sparse_infill_pattern") {
+        case "gyroid": s.infillPattern = .gyroid
+        case "cubic", "adaptivecubic", "supportcubic": s.infillPattern = .cubic
+        case "triangles", "tri-hexagon", "stars": s.infillPattern = .triangles
+        case "line", "zig-zag", "crosshatch": s.infillPattern = .lines
+        case "grid", "rectilinear", "alignedrectilinear": s.infillPattern = .grid
+        default: break
+        }
+        if string("brim_type") == "no_brim" { s.brimWidth = 0 } else { s.brimWidth = double("brim_width") }
+        if let ironing = string("ironing_type") { s.ironing = ironing != "no ironing" }
+        s.filamentVendors = json["filament_vendor"] as? [String] ?? []
         s.filamentColors = json["filament_colour"] as? [String] ?? []
         s.filamentTypes = json["filament_type"] as? [String] ?? []
         s.printerModel = string("printer_model")

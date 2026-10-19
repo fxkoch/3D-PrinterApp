@@ -76,6 +76,23 @@ public struct Polygons: Sendable, Equatable {
         return area / 2
     }
 
+    /// Even-odd point-in-polygon test across all outlines.
+    public func contains(_ point: IntPoint) -> Bool {
+        var inside = false
+        for path in paths {
+            var j = path.count - 1
+            for i in 0..<path.count {
+                let a = path[i], b = path[j]
+                if (a.y > point.y) != (b.y > point.y) {
+                    let x = Double(b.x - a.x) * Double(point.y - a.y) / Double(b.y - a.y) + Double(a.x)
+                    if Double(point.x) < x { inside.toggle() }
+                }
+                j = i
+            }
+        }
+        return inside
+    }
+
     // MARK: - Clipper bridge
 
     public enum JoinType { case square, round, miter }

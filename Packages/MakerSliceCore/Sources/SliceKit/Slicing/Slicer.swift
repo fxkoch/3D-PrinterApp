@@ -49,7 +49,7 @@ public final class Slicer: @unchecked Sendable {
         guard !printable.isEmpty else { throw SliceError.nothingToPrint }
         var height = 0.0
         for object in printable {
-            let box = object.mesh.boundingBox
+            let box = object.boundingBox
             if box.min.x < -0.01 || box.min.y < -0.01 || box.max.x > s.bedSize + 0.01 || box.max.y > s.bedSize + 0.01 {
                 throw SliceError.outsideBed(object.name)
             }
@@ -68,7 +68,17 @@ public final class Slicer: @unchecked Sendable {
         for (n, tool) in tools.enumerated() {
             var perLayer = [Polygons](repeating: Polygons(), count: tops.count)
             for object in printable where object.tool == tool {
-                let slices = MeshSlicer.slice(object.mesh, at: mids)
+                var slices = MeshSlicer.slice(object.mesh, at: mids)
+                // Connector pegs are added, connector holes cut away.
+                for volume in object.volumes {
+                    let extra = MeshSlicer.slice(volume.mesh, at: mids)
+                    for i in 0..<tops.count where !extra[i].isEmpty {
+                        switch volume.kind {
+                        case .add: slices[i] = (slices[i] + extra[i]).union()
+                        case .subtract: slices[i] = slices[i].difference(extra[i])
+                        }
+                    }
+                }
                 for i in 0..<tops.count where !slices[i].isEmpty {
                     perLayer[i] = perLayer[i].isEmpty ? slices[i] : (perLayer[i] + slices[i]).union()
                 }
@@ -150,6 +160,22 @@ public final class Slicer: @unchecked Sendable {
         // Drop empty layers at the top (e.g. rounding past the model).
         while let last = result.last, last.islands.isEmpty { result.removeLast() }
         guard !result.isEmpty else { throw SliceError.nothingToPrint }
+
+        // 5. Print order: keep the active tool first on every layer to minimise changes.
+        var current = result.first?.islands.first?.tool ?? 0
+        for i in result.indices {
+            result[i].islands.sort { a, b in
+                if a.tool == current { return b.tool != current }
+                if b.tool == current { return false }
+                return a.tool < b.tool
+            }
+            if let last = result[i].islands.last { current = last.tool }
+        }
+
+        // 6. Purge tower for single-nozzle multi-material printers.
+        if s.primeTower, s.machine.multiMaterial == .filamentSwitcher, tools.count > 1 {
+            try PrimeTower(settings: s).insert(into: &result, footprint: all)
+        }
         progress(SliceProgress(phase: "Fertig", fraction: 1))
         return result
     }

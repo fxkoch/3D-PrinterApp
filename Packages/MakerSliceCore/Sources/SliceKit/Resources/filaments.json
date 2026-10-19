@@ -839,7 +839,7 @@
  {
   "name": "Generic PETG",
   "vendor": "Snapmaker",
-  "type": "PET",
+  "type": "PETG",
   "printer": "u1",
   "nozzleTemp": 278,
   "firstLayerNozzleTemp": 275,
@@ -866,7 +866,7 @@
  {
   "name": "Generic PETG HF",
   "vendor": "Snapmaker",
-  "type": "PET",
+  "type": "PETG",
   "printer": "u1",
   "nozzleTemp": 278,
   "firstLayerNozzleTemp": 275,

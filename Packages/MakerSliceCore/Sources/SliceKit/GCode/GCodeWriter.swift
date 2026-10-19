@@ -23,64 +23,106 @@ public struct GCodeResult: Sendable {
     public var estimate: PrintEstimate
 }
 
-/// Emits Klipper G-code for the Snapmaker U1 (four-tool toolchanger), following
-/// the start/tool-change/end sequences of the official U1 Orca profile.
-public struct U1GCodeWriter {
+/// Facts about a print that the machine dialects need.
+struct PrintContext {
+    var settings: PrintSettings
+    var layers: [SlicedLayer]
+    var usedTools: [Int]
+    var initialTool: Int
+    var firstLayerBox: (min: IntPoint, max: IntPoint)?
+    var jobName: String
+
+    var initialFilament: Filament { settings.filament(for: initialTool) }
+}
+
+/// Printer-specific G-code fragments (start, tool change, layer change, end).
+protocol MachineDialect {
+    func header(_ ctx: PrintContext) -> [String]
+    func start(_ ctx: PrintContext) -> [String]
+    func beforeLayer(_ layer: SlicedLayer, _ ctx: PrintContext) -> [String]
+    func afterLayer(_ layer: SlicedLayer, _ ctx: PrintContext) -> [String]
+    /// Lines that switch from `from` to `to`; the writer handles retraction before and travel after.
+    func toolChange(from: Int, to: Int, layer: SlicedLayer, _ ctx: PrintContext) -> [String]
+    /// Rough duration of a tool change in seconds (for the estimate).
+    var toolChangeSeconds: Double { get }
+    /// Seconds spent on homing, calibration and heating before the first layer.
+    var preparationSeconds: Double { get }
+    func end(_ ctx: PrintContext) -> [String]
+}
+
+/// Emits Klipper G-code for the selected printer. The machine-specific parts
+/// follow the official OrcaSlicer profiles of the Snapmaker U1 and Anycubic Kobra S1.
+public struct GCodeWriter {
     public let settings: PrintSettings
-    public var appVersion = "0.1"
+    public var appVersion = "0.2"
 
     public init(settings: PrintSettings) {
         self.settings = settings
     }
 
-    private static let filamentArea = Double.pi * 0.875 * 0.875 // 1.75 mm filament
+    private var dialect: MachineDialect {
+        switch settings.printer {
+        case .snapmakerU1: return U1Dialect()
+        case .kobraS1: return KobraS1Dialect()
+        }
+    }
+
+    static let filamentArea = Double.pi * 0.875 * 0.875 // 1.75 mm filament
 
     public func write(layers: [SlicedLayer], jobName: String) -> GCodeResult {
         let s = settings
+        let dialect = self.dialect
         var out = GCodeBuffer()
         var stats = MotionStats(acceleration: s.acceleration)
 
         let usedTools = Array(Set(layers.flatMap { $0.islands.map(\.tool) })).sorted()
         let initialTool = layers.first?.islands.first?.tool ?? 0
-        let initialFilament = s.filament(for: initialTool)
+        let ctx = PrintContext(settings: s, layers: layers, usedTools: usedTools, initialTool: initialTool,
+                               firstLayerBox: layers.first?.outline.boundingBox, jobName: jobName)
+        let minLayerTime = s.minLayerTime(for: usedTools)
 
         // Pass 1: body (so the header can carry estimates).
         var body = GCodeBuffer()
         var state = MachineState(tool: initialTool)
         var toolChanges = 0
+        if let pa = s.filament(for: initialTool).pressureAdvance {
+            body.line("SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(pa))")
+        }
 
         for layer in layers {
             let height = layer.height
             body.line(";LAYER_CHANGE")
             body.line(";Z:\(fmt(layer.z))")
             body.line(";HEIGHT:\(fmt(height))")
-            body.line(";BEFORE_LAYER_CHANGE")
-            body.line(";\(fmt(layer.z))")
-            body.line("G92 E0")
-            if s.enableTimelapse { body.line("TIMELAPSE_TAKE_FRAME") }
-            body.line("DEFECT_DETECTION_DETECT")
+            dialect.beforeLayer(layer, ctx).forEach { body.line($0) }
             retract(&body, &state, &stats)
             moveZ(&body, &state, &stats, to: layer.z)
-            body.line(";AFTER_LAYER_CHANGE")
-            body.line(";\(fmt(layer.z))")
-            body.line("SET_PRINT_STATS_INFO TOTAL_LAYER=\(layers.count) CURRENT_LAYER=\(layer.index + 1)")
+            dialect.afterLayer(layer, ctx).forEach { body.line($0) }
 
-            // Keep the current tool first to save a change per layer.
-            let islands = layer.islands.sorted { a, b in
-                if a.tool == state.tool { return b.tool != state.tool }
-                if b.tool == state.tool { return false }
-                return a.tool < b.tool
-            }
-            let layerTime = estimateLayerTime(islands, height: height)
-            let slowdown = layerTime > 0 && layerTime < s.minLayerTime ? layerTime / s.minLayerTime : 1
+            let layerTime = estimateLayerTime(layer.islands, height: height)
+            let slowdown = layerTime > 0 && layerTime < minLayerTime ? layerTime / minLayerTime : 1
 
-            for island in islands {
+            for island in layer.islands {
                 let filament = s.filament(for: island.tool)
                 if island.tool != state.tool {
-                    toolChange(&body, &state, &stats, to: island.tool, layer: layer, initialTool: initialTool)
+                    retract(&body, &state, &stats)
+                    dialect.toolChange(from: state.tool, to: island.tool, layer: layer, ctx).forEach { body.line($0) }
+                    body.line("M83")
+                    body.line("G92 E0")
+                    if let pa = filament.pressureAdvance { body.line("SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(pa))") }
                     toolChanges += 1
+                    stats.add(dialect.toolChangeSeconds)
+                    state.tool = island.tool
+                    // The tool change parks the head somewhere; force a full move back.
+                    state.position = IntPoint(Int64.min / 4, Int64.min / 4)
+                    state.retracted = false
+                    state.lastRole = nil
+                    state.fan = -1
+                    body.line("G1 Z\(fmt(layer.z + 1.5)) F600")
+                    state.z = layer.z + 1.5
+                    state.hopped = true
                 }
-                setFan(&body, &state, filament: filament, layerIndex: layer.index)
+                setFan(&body, &state, filament: filament, layerIndex: layer.index, role: nil)
                 for extrusion in island.extrusions {
                     guard extrusion.points.count >= 2 else { continue }
                     let start = extrusion.points[0]
@@ -92,14 +134,17 @@ public struct U1GCodeWriter {
                         } else if state.lastRole == .outerWall {
                             body.line("SET_VELOCITY_LIMIT ACCEL=\(Int(s.acceleration))")
                         }
+                        setFan(&body, &state, filament: filament, layerIndex: layer.index, role: extrusion.role)
                         state.lastRole = extrusion.role
                     }
                     body.line(";WIDTH:\(fmt(extrusion.width))")
                     unretract(&body, &state, &stats)
 
-                    let maxSpeed = filament.maxVolumetricSpeed / (extrusion.width * height)
-                    let speed = max(min(extrusion.speed, maxSpeed) * slowdown, 10)
-                    let ePerMM = extrusionPerMM(width: extrusion.width, height: height, filament: filament)
+                    let flow = extrusion.flow
+                    let maxSpeed = filament.maxVolumetricSpeed / (extrusion.width * height * max(flow, 0.05))
+                    let roleSlowdown = extrusion.role == .bridge || extrusion.role == .ironing ? 1 : slowdown
+                    let speed = max(min(extrusion.speed, maxSpeed) * roleSlowdown, 5)
+                    let ePerMM = extrusionPerMM(width: extrusion.width, height: height, filament: filament) * flow
                     var points = Array(extrusion.points.dropFirst())
                     if extrusion.closed { points.append(start) }
                     var feedSet = false
@@ -124,36 +169,39 @@ public struct U1GCodeWriter {
             }
         }
 
-        // Header with summary for Moonraker/Fluidd and the U1 screen.
+        // Header with summary for Moonraker/Fluidd and the printer screen.
         let filamentMM = state.filament
         let filamentGrams = filamentMM.reduce(into: [Int: Double]()) { acc, item in
             acc[item.key] = item.value * Self.filamentArea / 1000 * s.filament(for: item.key).density
         }
-        let estimatedSeconds = stats.seconds + Double(toolChanges) * 12 + 300 // tool changes + calibration
+        let estimatedSeconds = stats.seconds + dialect.preparationSeconds
         let estimate = PrintEstimate(seconds: estimatedSeconds, filamentMM: filamentMM, filamentGrams: filamentGrams,
                                      layerCount: layers.count, toolChanges: toolChanges)
 
-        let firstLayerBox = layers.first?.outline.boundingBox
         out.line("; generated by MakerSlice \(appVersion) on \(Self.timestamp())")
         out.line("; job: \(jobName.replacingOccurrences(of: "\n", with: " "))")
-        out.line("; printer_model = Snapmaker U1")
+        out.line("; printer_model = \(s.printer.displayName)")
         out.line("; estimated printing time (normal mode) = \(Self.orcaDuration(estimatedSeconds))")
         out.line("; total layer count = \(layers.count)")
+        out.line("; total layer number: \(layers.count)")
         out.line("; filament used [mm] = \(usedTools.map { fmt(filamentMM[$0] ?? 0) }.joined(separator: ","))")
         out.line("; filament used [g] = \(usedTools.map { fmt(filamentGrams[$0] ?? 0) }.joined(separator: ","))")
         out.line("; filament_type = \(usedTools.map { s.filament(for: $0).type }.joined(separator: ";"))")
+        out.line("; filament_colour = \(usedTools.map { s.filament(for: $0).color }.joined(separator: ";"))")
         out.line("; layer_height = \(fmt(s.layerHeight))")
         out.line("; first_layer_height = \(fmt(s.firstLayerHeight))")
         out.line("; max_layer_z = \(fmt(layers.last?.z ?? 0))")
         out.line("; nozzle_diameter = \(fmt(s.nozzleDiameter))")
-        out.line("; curr_bed_type = \(s.plateType.rawValue)")
+        dialect.header(ctx).forEach { out.line($0) }
         out.line("")
-        out.append(startGCode(initialTool: initialTool, filament: initialFilament, firstLayerBox: firstLayerBox,
-                              totalLayers: layers.count))
+        dialect.start(ctx).forEach { out.line($0) }
         out.line("M83")
         out.line("G90")
         out.append(body.text)
-        out.append(endGCode(usedTools: usedTools, state: &state))
+        if !state.retracted {
+            out.line("G1 E-\(fmt5(s.filament(for: state.tool).retractLength)) F\(Int(s.retractSpeed * 60))")
+        }
+        dialect.end(ctx).forEach { out.line($0) }
         return GCodeResult(gcode: out.text, estimate: estimate)
     }
 
@@ -167,18 +215,19 @@ public struct U1GCodeWriter {
         if needsRetract {
             retract(&g, &state, &stats)
             if settings.zHop > 0 && !state.hopped {
-                g.line("G1 Z\(fmt(layerZ + settings.zHop)) F\(Int(min(settings.travelSpeed, 20) * 60))")
+                g.line("G1 Z\(fmt(layerZ + settings.zHop)) F\(Int(20 * 60))")
                 stats.move(settings.zHop, speed: 20)
                 state.hopped = true
             }
         }
         g.line("G1 X\(fmt(p.mmX)) Y\(fmt(p.mmY)) F\(Int(settings.travelSpeed * 60))")
-        stats.move(dist, speed: settings.travelSpeed)
+        stats.move(min(dist, 400), speed: settings.travelSpeed)
         state.position = p
         if state.hopped {
             g.line("G1 Z\(fmt(layerZ)) F\(Int(20 * 60))")
             stats.move(settings.zHop, speed: 20)
             state.hopped = false
+            state.z = layerZ
         }
     }
 
@@ -228,8 +277,11 @@ public struct U1GCodeWriter {
         stats.move(2, speed: settings.travelSpeed)
     }
 
-    private func setFan(_ g: inout GCodeBuffer, _ state: inout MachineState, filament: Filament, layerIndex: Int) {
-        let target = layerIndex < filament.fanOffLayers ? 0 : Int((filament.fanSpeed * 255).rounded())
+    /// Part cooling: off for the first layers, full for bridges/overhangs, filament default otherwise.
+    private func setFan(_ g: inout GCodeBuffer, _ state: inout MachineState, filament: Filament, layerIndex: Int, role: ExtrusionRole?) {
+        var speed = layerIndex < filament.fanOffLayers ? 0 : filament.fanSpeed
+        if layerIndex > 0, role == .bridge { speed = max(speed, filament.overhangFanSpeed) }
+        let target = Int((speed * 255).rounded())
         guard target != state.fan else { return }
         g.line(target == 0 ? "M107" : "M106 S\(target)")
         state.fan = target
@@ -246,196 +298,16 @@ public struct U1GCodeWriter {
         for island in islands {
             let filament = settings.filament(for: island.tool)
             for e in island.extrusions {
-                let maxSpeed = filament.maxVolumetricSpeed / (e.width * height)
+                let maxSpeed = filament.maxVolumetricSpeed / (e.width * height * max(e.flow, 0.05))
                 t += e.lengthMM / max(min(e.speed, maxSpeed), 1)
             }
         }
         return t
     }
 
-    // MARK: - U1 sequences (from the official Snapmaker U1 Orca profile)
-
-    private func toolChange(_ g: inout GCodeBuffer, _ state: inout MachineState, _ stats: inout MotionStats,
-                            to next: Int, layer: SlicedLayer, initialTool: Int) {
-        let s = settings
-        let filament = s.filament(for: next)
-        retract(&g, &state, &stats)
-        let speed = min(s.travelSpeed, 350)
-        g.line("; Change Tool\(state.tool) -> Tool\(next) (layer \(layer.index))")
-        g.line("G91")
-        g.line("G1 Z1.5 F600")
-        g.line("G90")
-        g.line("G1 F\(Int(speed * 60))")
-        let temp = layer.index == 0 ? filament.firstLayerNozzleTemp : filament.nozzleTemp
-        g.line("M109 S\(temp) T\(next)")
-        g.line("M400")
-        g.line("T\(next)")
-        if filament.type == "PVA" { g.line("SET_VELOCITY_LIMIT ACCEL=3000") }
-        if next != initialTool { g.line("SM_PRINT_PREEXTRUDE_FILAMENT INDEX=\(next)") }
-        g.line("G90")
-        g.line("M83")
-        g.line("G92 E0")
-        state.tool = next
-        // The macro parks the tool; we don't know where, so force a full move back.
-        state.position = IntPoint(Int64.min / 4, Int64.min / 4)
-        state.retracted = false
-        state.lastRole = nil
-        state.fan = -1
-        g.line("G1 Z\(fmt(layer.z + 1.5)) F600")
-        state.z = layer.z + 1.5
-        state.hopped = true
-        stats.add(30)
-    }
-
-    private func startGCode(initialTool t: Int, filament f: Filament, firstLayerBox: (min: IntPoint, max: IntPoint)?,
-                            totalLayers: Int) -> String {
-        let s = settings
-        let bed = f.firstLayerBedTemp
-        let nozzle = f.nozzleTemp
-        let purifier: String
-        if f.vitrificationTemp <= 50 {
-            purifier = "SET_PURIFIER_MODE MODE=1 DESIRE_TEMP=42 ALARM_TEMP=48 FAN_SPEED=0.6 DELAY_OFF=0 ; strong cooling"
-        } else if f.vitrificationTemp <= 70 {
-            purifier = "SET_PURIFIER_MODE MODE=1 DESIRE_TEMP=45 ALARM_TEMP=51 FAN_SPEED=0.6 DELAY_OFF=0 ; weak cooling"
-        } else {
-            purifier = "SET_PURIFIER_MODE MODE=3 DESIRE_TEMP=45 FAN_SPEED=0.6 DELAY_OFF=600 ; keep warm"
-        }
-        let highTemp = s.plateType == .highTemp
-        let zOffset = highTemp ? " Z_OFFSET -0.07" : ""
-        let bedMesh = bedMeshCommand(firstLayerBox: firstLayerBox, zOffset: highTemp ? " Z_OFFSET=-0.07" : "")
-
-        var lines: [String] = []
-        lines.append("SET_PRINT_AUTO_BED_LEVELING ENABLE=\(s.enableBedLeveling ? 1 : 0)")
-        lines.append("SET_TIME_LAPSE_CAMERA ENABLE=\(s.enableTimelapse ? 1 : 0)")
-        lines.append("PRINT_START")
-        lines.append("DEFECT_DETECTION_START")
-        lines.append("SET_PRINT_STATS_INFO TOTAL_LAYER=\(totalLayers) CURRENT_LAYER=0")
-        if s.enableTimelapse { lines.append("TIMELAPSE_START") }
-        lines += [
-            "M140 S\(bed)",
-            "M104 T\(t) S140",
-            "M204 S10000",
-            ";===== top cover purifier =====",
-            purifier,
-            "G28 X Y",
-            "DEFECT_DETECT_NOODLE_FIRST",
-            ";===== bed foreign object detection =====",
-            "T\(t)",
-            "G90",
-            "DEFECT_DETECTION_DETECT_BED",
-            ";===== tool head check =====",
-            "SM_PRINT_CHECK_SWITCH_EXTRUDER",
-            ";===== auto feed & flow calibration =====",
-            "SM_PRINT_EXTRUDER_PREHEAT EXTRUDER=1 TEMP=140",
-            "SM_PRINT_AUTO_FEED EXTRUDER=0",
-            "SM_PRINT_FLOW_CALIBRATE EXTRUDER=0",
-            "SM_PRINT_EXTRUDER_PREHEAT EXTRUDER=2 TEMP=140",
-            "SM_PRINT_AUTO_FEED EXTRUDER=1",
-            "SM_PRINT_FLOW_CALIBRATE EXTRUDER=1",
-            "SM_PRINT_EXTRUDER_PREHEAT EXTRUDER=3 TEMP=140",
-            "SM_PRINT_AUTO_FEED EXTRUDER=2",
-            "SM_PRINT_FLOW_CALIBRATE EXTRUDER=2",
-            "SM_PRINT_AUTO_FEED EXTRUDER=3",
-            "SM_PRINT_FLOW_CALIBRATE EXTRUDER=3",
-            "M104 S0 T0 A0",
-            "M104 S0 T1 A0",
-            "M104 S0 T2 A0",
-            "M104 S0 T3 A0",
-            ";===== pre-extrude filament =====",
-            "M104 T\(t) S\(nozzle)",
-            "T\(t)",
-            "M109 T\(t) S\(nozzle)",
-            "SM_PRINT_PREEXTRUDE_FILAMENT INDEX=\(t)",
-            "M104 T\(t) S\(nozzle - 90)",
-            ";===== rough homing =====",
-            "T\(t)",
-            "M106 S255",
-            "M106 P2 S0",
-            "MOVE_TO_DISCARD_FILAMENT_POSITION",
-            "M109 T\(t) S\(nozzle - 90)",
-            "ROUGHLY_CLEAN_NOZZLE_WITH_DISCARD",
-            "MOVE_TO_XY_IDLE_POSITION_EXTRUDER",
-            "M107",
-            "G28 Z I140 J140",
-            ";===== detect build plate =====",
-            "M107",
-            "DETECT_BED_PLATE",
-            ";===== deep nozzle cleaning =====",
-            "M106 S255",
-            "G90",
-            "G0 Z5 F10000",
-            "MOVE_TO_DISCARD_FILAMENT_POSITION",
-            "M109 S\(nozzle - 50)",
-            "ROUGHLY_CLEAN_NOZZLE",
-            "MOVE_TO_XY_IDLE_POSITION_EXTRUDER",
-            "FINELY_CLEAN_NOZZLE_STAGE_1",
-            "M104 S\(nozzle - 90)",
-            "G0 Z5 F10000",
-            "MOVE_TO_DISCARD_FILAMENT_POSITION",
-            "ROUGHLY_CLEAN_NOZZLE",
-            "MOVE_TO_XY_IDLE_POSITION_EXTRUDER",
-            "FINELY_CLEAN_NOZZLE_STAGE_2",
-            ";===== fine homing =====",
-            "M106 S255",
-            "M109 S\(nozzle - 90)",
-            "M190 S\(bed)",
-            "M107 P2",
-            "G90",
-            "G0 Z5 F10000",
-            "WAIT_CHAMBER_TEMP TIMEOUT=180",
-            "M107",
-            "G28 Z\(zOffset)",
-            ";===== bed leveling =====",
-            "M107",
-            bedMesh,
-            ";===== prime line =====",
-            "G90",
-            "G1 Z1.5",
-            "G0 X85 Y1 Z2 F18000",
-            "M109 S\(f.firstLayerNozzleTemp)",
-            "G1 Z0.2",
-            "M83",
-            "G1 X185 E15 F360",
-            "G1 Z1.5",
-            "G90",
-            "M106 S0",
-        ]
-        return lines.joined(separator: "\n") + "\n"
-    }
-
-    /// Adaptive bed mesh limited to the first-layer footprint, like Orca does.
-    private func bedMeshCommand(firstLayerBox: (min: IntPoint, max: IntPoint)?, zOffset: String) -> String {
-        let margin = 5.0
-        var minX = 3.0, minY = 3.0, maxX = 267.0, maxY = 267.0
-        if let box = firstLayerBox {
-            minX = max(3, box.min.mmX - margin); minY = max(3, box.min.mmY - margin)
-            maxX = min(267, box.max.mmX + margin); maxY = min(267, box.max.mmY + margin)
-            if maxX - minX < 10 { maxX = min(267, minX + 10) }
-            if maxY - minY < 10 { maxY = min(267, minY + 10) }
-        }
-        let cx = max(3, min(7, Int(((maxX - minX) / 50).rounded(.up)) + 1))
-        let cy = max(3, min(7, Int(((maxY - minY) / 50).rounded(.up)) + 1))
-        let algo = min(cx, cy) >= 4 ? "bicubic" : "lagrange"
-        return "BED_MESH_CALIBRATE mesh_min=\(fmt(minX)),\(fmt(minY)) mesh_max=\(fmt(maxX)),\(fmt(maxY)) "
-            + "ALGORITHM=\(algo) PROBE_COUNT=\(cx),\(cy) ADAPTIVE=0 ADAPTIVE_MARGIN=0\(zOffset)"
-    }
-
-    private func endGCode(usedTools: [Int], state: inout MachineState) -> String {
-        var lines: [String] = []
-        if !state.retracted {
-            lines.append("G1 E-\(fmt5(settings.filament(for: state.tool).retractLength)) F\(Int(settings.retractSpeed * 60))")
-        }
-        lines.append("M107")
-        lines.append("PRINT_END")
-        if settings.enableTimelapse { lines.append("TIMELAPSE_STOP") }
-        lines.append("; U1 nozzle flow metadata, in logical filament order")
-        lines.append("; filament_volume_type = " + usedTools.map { _ in "standard" }.joined(separator: ","))
-        return lines.joined(separator: "\n") + "\n"
-    }
-
     // MARK: - Formatting
 
-    private static func timestamp() -> String {
+    static func timestamp() -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd 'at' HH:mm:ss"
@@ -458,7 +330,7 @@ private struct MachineState {
     var tool: Int
     var position = IntPoint(0, 0)
     var z = 0.0
-    var retracted = true // the prime line ends retracted-equivalent; first unretract primes
+    var retracted = true // the first unretract primes the nozzle
     var hopped = false
     var fan = -1
     var lastRole: ExtrusionRole?
@@ -510,12 +382,11 @@ struct GCodeBuffer {
 func formatDecimal(_ value: Double, digits: Int) -> String {
     var scale = 1.0
     for _ in 0..<digits { scale *= 10 }
-    var scaled = (abs(value) * scale).rounded()
+    let scaled = (abs(value) * scale).rounded()
     if !scaled.isFinite { return "0" }
     let negative = value < 0 && scaled != 0
     let intScale = Int64(scale)
     let n = Int64(scaled)
-    scaled = 0
     let whole = n / intScale
     var frac = n % intScale
     var result = negative ? "-" : ""

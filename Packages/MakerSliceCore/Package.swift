@@ -24,7 +24,7 @@ let package = Package(
             path: "Sources/CZip",
             linkerSettings: [.linkedLibrary("z")]
         ),
-        .target(name: "SliceKit", dependencies: ["CClipper", "CZip"]),
+        .target(name: "SliceKit", dependencies: ["CClipper", "CZip"], resources: [.process("Resources")]),
         .target(name: "PrinterKit"),
         .target(name: "MakerWorldKit"),
         .testTarget(name: "SliceKitTests", dependencies: ["SliceKit"]),

@@ -56,7 +56,22 @@ struct LayerToolpathGenerator {
         let solidAngle = layerIndex % 2 == 0 ? 45.0 : 135.0
         if !solid.isEmpty {
             let topPart = visibleTop.intersection(solid)
-            let internalSolid = solid.difference(topPart)
+            var internalSolid = solid.difference(topPart)
+
+            // Bridges: solid areas hanging over air (not the first layer).
+            if s.detectBridges, layerIndex > 0, let support = below(1), !internalSolid.isEmpty {
+                let bridgeArea = internalSolid.difference(support.offset(0.2)).offset(-0.1).offset(0.1)
+                    .filterSmall(minArea: 1.0)
+                if !bridgeArea.isEmpty {
+                    let anchored = bridgeArea.offset(innerW).intersection(internalSolid.union(bridgeArea))
+                    let angle = bestBridgeAngle(bridgeArea, support: support)
+                    extrusions.append(contentsOf: lines(in: anchored, angle: angle, spacing: innerW, phase: 0).map {
+                        Extrusion(role: .bridge, points: $0, closed: false, width: innerW,
+                                  speed: s.bridgeSpeed, flow: s.bridgeFlow)
+                    })
+                    internalSolid = internalSolid.difference(anchored)
+                }
+            }
             if !topPart.isEmpty {
                 extrusions.append(contentsOf: lines(in: topPart, angle: solidAngle, spacing: innerW, phase: 0).map {
                     Extrusion(role: .topSurface, points: $0, closed: false, width: innerW,
@@ -68,6 +83,14 @@ struct LayerToolpathGenerator {
                 extrusions.append(contentsOf: lines(in: internalSolid, angle: solidAngle, spacing: innerW, phase: 0).map {
                     Extrusion(role: role, points: $0, closed: false, width: innerW,
                               speed: isFirstLayer ? s.firstLayerInfillSpeed : s.solidInfillSpeed)
+                })
+            }
+            // Ironing: a second, nearly flow-less pass that smooths visible tops.
+            if s.ironing, !isFirstLayer, !topPart.isEmpty {
+                let ironArea = topPart.offset(-innerW / 2)
+                extrusions.append(contentsOf: lines(in: ironArea, angle: solidAngle + 90, spacing: s.ironingSpacing, phase: 0).map {
+                    Extrusion(role: .ironing, points: $0, closed: false, width: innerW,
+                              speed: s.ironingSpeed, flow: s.ironingFlow * s.ironingSpacing / innerW)
                 })
             }
         }
@@ -132,7 +155,81 @@ struct LayerToolpathGenerator {
             let spacing = 3 * width / d
             let shift = z * 0.7071
             return [0.0, 120, 240].flatMap { lines(in: area, angle: $0, spacing: spacing, phase: shift) }
+        case .gyroid:
+            return gyroid(in: area, spacing: width / d * 1.2)
         }
+    }
+
+    /// Gyroid surface sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x) = 0 cut at this
+    /// layer's height. Depending on z we solve for y(x) or x(y), whichever has a
+    /// solution everywhere, which yields continuous wavy lines.
+    func gyroid(in area: Polygons, spacing: Double) -> [Path] {
+        guard let box = area.boundingBox else { return [] }
+        let period = 2 * spacing
+        let k = 2 * Double.pi / period // mm → radians
+        let zr = z * k
+        let solveForY = abs(cos(zr)) >= abs(sin(zr))
+        let minA = (solveForY ? box.min.mmX : box.min.mmY) - period
+        let maxA = (solveForY ? box.max.mmX : box.max.mmY) + period
+        let minB = (solveForY ? box.min.mmY : box.min.mmX) - period
+        let maxB = (solveForY ? box.max.mmY : box.max.mmX) + period
+        let step = period / 24
+        let firstRow = Int(floor(minB / period)) - 1
+        let lastRow = Int(ceil(maxB / period)) + 1
+        var raw: [Path] = []
+        for row in firstRow...lastRow {
+            for sign in [-1.0, 1.0] {
+                var path: Path = []
+                var a = minA
+                while a <= maxA {
+                    let ar = a * k
+                    // p·cos(b) + q·sin(b) = d. One of p/q is constant and non-zero for this
+                    // layer; using it as the reference keeps the phase continuous.
+                    let p: Double, q: Double, d: Double
+                    let b: Double
+                    if solveForY {
+                        p = sin(ar); q = cos(zr); d = -sin(zr) * cos(ar)
+                        let psi = atan(p / q)
+                        let r = q / cos(psi)
+                        let s0 = asin(max(-1, min(1, d / r)))
+                        b = (sign > 0 ? s0 - psi : Double.pi - s0 - psi) / k + Double(row) * period
+                    } else {
+                        p = sin(zr); q = cos(ar); d = -sin(ar) * cos(zr)
+                        let phi = atan(q / p)
+                        let r = p / cos(phi)
+                        b = (phi + sign * acos(max(-1, min(1, d / r)))) / k + Double(row) * period
+                    }
+                    path.append(solveForY ? IntPoint(mmX: a, mmY: b) : IntPoint(mmX: b, mmY: a))
+                    a += step
+                }
+                if path.count >= 2 { raw.append(path) }
+            }
+        }
+        let clipped = area.clip(lines: raw).filter { path in
+            guard let f = path.first, let l = path.last else { return false }
+            return path.count > 2 || f.distance(to: l) > 0.3 * Units.perMM
+        }
+        return Self.nearestNeighborOrder(clipped)
+    }
+
+    /// Direction in which bridge lines are anchored on supported material at both
+    /// ends (ties: shorter spans win).
+    private func bestBridgeAngle(_ area: Polygons, support: Polygons) -> Double {
+        let probeArea = area.offset(1.5)
+        var best = 0.0, bestScore = -Double.infinity
+        for angle in stride(from: 0.0, to: 180.0, by: 15) {
+            let probe = lines(in: probeArea, angle: angle, spacing: 1.0, phase: 0)
+            guard !probe.isEmpty else { continue }
+            var anchored = 0
+            var total = 0.0
+            for line in probe {
+                if support.contains(line[0]) && support.contains(line[line.count - 1]) { anchored += 1 }
+                total += line[0].distance(to: line[line.count - 1])
+            }
+            let score = Double(anchored) / Double(probe.count) - total / Double(probe.count) / 1e7
+            if score > bestScore { bestScore = score; best = angle }
+        }
+        return best
     }
 
     /// Parallel lines at `angle` (degrees) spaced `spacing` mm apart, clipped to

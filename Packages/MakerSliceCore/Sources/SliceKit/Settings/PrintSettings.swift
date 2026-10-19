@@ -1,7 +1,7 @@
 import Foundation
 
 public enum InfillPattern: String, Codable, CaseIterable, Sendable, Identifiable {
-    case lines, grid, triangles, cubic
+    case lines, grid, triangles, cubic, gyroid
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
@@ -9,6 +9,17 @@ public enum InfillPattern: String, Codable, CaseIterable, Sendable, Identifiable
         case .grid: return "Gitter"
         case .triangles: return "Dreiecke"
         case .cubic: return "Kubisch"
+        case .gyroid: return "Gyroid"
+        }
+    }
+
+    public var explanation: String {
+        switch self {
+        case .lines: return "Am schnellsten, aber nur in einer Richtung je Schicht stabil."
+        case .grid: return "Schnell und solide – guter Standard."
+        case .triangles: return "Sehr steif in der Ebene, gut für flache Teile."
+        case .cubic: return "Stabil in alle Richtungen bei wenig Material."
+        case .gyroid: return "Gleichmäßig fest in alle Richtungen, ideal für Funktionsteile und flexible Materialien."
         }
     }
 }
@@ -32,77 +43,15 @@ public enum PlateType: String, Codable, CaseIterable, Sendable, Identifiable {
     public var displayName: String {
         switch self {
         case .texturedPEI: return "Strukturierte PEI-Platte"
-        case .highTemp: return "Glatte PEI-Platte (High Temp)"
+        case .highTemp: return "Glatte PEI-Platte"
         }
     }
 }
 
-/// Material preset. Values follow the Snapmaker U1 Orca profiles.
-public struct Filament: Codable, Hashable, Sendable, Identifiable {
-    public var id: String { name }
-    public var name: String
-    public var type: String
-    public var nozzleTemp: Int
-    public var firstLayerNozzleTemp: Int
-    public var bedTemp: Int
-    public var firstLayerBedTemp: Int
-    /// Part cooling fan speed in 0...1.
-    public var fanSpeed: Double
-    /// Layers printed without part cooling at the start.
-    public var fanOffLayers: Int
-    /// Maximum volumetric flow in mm³/s.
-    public var maxVolumetricSpeed: Double
-    public var retractLength: Double
-    public var flowRatio: Double
-    /// Glass transition temperature – drives the U1 chamber purifier mode.
-    public var vitrificationTemp: Int
-    /// g/cm³, for weight estimates.
-    public var density: Double
-    /// Hex colour "#RRGGBB" for previews.
-    public var color: String
-
-    public init(name: String, type: String, nozzleTemp: Int, firstLayerNozzleTemp: Int? = nil,
-                bedTemp: Int, firstLayerBedTemp: Int? = nil, fanSpeed: Double, fanOffLayers: Int = 1,
-                maxVolumetricSpeed: Double, retractLength: Double = 0.8, flowRatio: Double = 0.98,
-                vitrificationTemp: Int, density: Double, color: String = "#FCE94F") {
-        self.name = name
-        self.type = type
-        self.nozzleTemp = nozzleTemp
-        self.firstLayerNozzleTemp = firstLayerNozzleTemp ?? nozzleTemp
-        self.bedTemp = bedTemp
-        self.firstLayerBedTemp = firstLayerBedTemp ?? bedTemp
-        self.fanSpeed = fanSpeed
-        self.fanOffLayers = fanOffLayers
-        self.maxVolumetricSpeed = maxVolumetricSpeed
-        self.retractLength = retractLength
-        self.flowRatio = flowRatio
-        self.vitrificationTemp = vitrificationTemp
-        self.density = density
-        self.color = color
-    }
-
-    public static let pla = Filament(name: "Generic PLA", type: "PLA", nozzleTemp: 220, bedTemp: 60, firstLayerBedTemp: 65,
-                                     fanSpeed: 1, maxVolumetricSpeed: 12, vitrificationTemp: 45, density: 1.24)
-    public static let plaHighSpeed = Filament(name: "Generic PLA High Speed", type: "PLA", nozzleTemp: 230, bedTemp: 60, firstLayerBedTemp: 65,
-                                              fanSpeed: 1, maxVolumetricSpeed: 21, vitrificationTemp: 45, density: 1.24)
-    public static let plaCF = Filament(name: "Generic PLA-CF", type: "PLA-CF", nozzleTemp: 230, bedTemp: 60,
-                                       fanSpeed: 1, maxVolumetricSpeed: 12, vitrificationTemp: 45, density: 1.21)
-    public static let petg = Filament(name: "Generic PETG", type: "PETG", nozzleTemp: 250, firstLayerNozzleTemp: 245, bedTemp: 70,
-                                      fanSpeed: 0.4, fanOffLayers: 3, maxVolumetricSpeed: 10, retractLength: 1.0,
-                                      vitrificationTemp: 64, density: 1.27)
-    public static let tpu = Filament(name: "Generic TPU", type: "TPU", nozzleTemp: 230, bedTemp: 40,
-                                     fanSpeed: 0.7, maxVolumetricSpeed: 3.6, retractLength: 0.4, flowRatio: 1.0,
-                                     vitrificationTemp: 30, density: 1.21)
-    public static let abs = Filament(name: "Generic ABS", type: "ABS", nozzleTemp: 260, bedTemp: 100,
-                                     fanSpeed: 0.3, fanOffLayers: 3, maxVolumetricSpeed: 16, vitrificationTemp: 94, density: 1.05)
-    public static let asa = Filament(name: "Generic ASA", type: "ASA", nozzleTemp: 260, bedTemp: 100,
-                                     fanSpeed: 0.3, fanOffLayers: 3, maxVolumetricSpeed: 16, vitrificationTemp: 100, density: 1.07)
-
-    public static let presets: [Filament] = [.pla, .plaHighSpeed, .plaCF, .petg, .tpu, .abs, .asa]
-}
-
-/// Everything the slicer needs. Defaults mirror "0.20 Standard @Snapmaker U1 (0.4 nozzle)".
+/// Everything the slicer needs. Defaults mirror the "0.20mm Standard" Orca profiles.
 public struct PrintSettings: Codable, Equatable, Sendable {
+    public var printer: PrinterModel = .snapmakerU1
+
     // Quality
     public var layerHeight: Double = 0.2
     public var firstLayerHeight: Double = 0.25
@@ -132,8 +81,18 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var travelSpeed: Double = 500
     public var acceleration: Double = 10000
     public var outerWallAcceleration: Double = 5000
-    /// Layers faster than this (seconds) get slowed down for cooling.
-    public var minLayerTime: Double = 4
+    /// Layers faster than this (seconds) get slowed down for cooling (0 = filament default).
+    public var minLayerTime: Double = 0
+
+    // Surfaces
+    public var ironing: Bool = false
+    public var ironingSpeed: Double = 30
+    /// Ironing flow as a fraction of a normal line.
+    public var ironingFlow: Double = 0.1
+    public var ironingSpacing: Double = 0.15
+    public var detectBridges: Bool = true
+    public var bridgeSpeed: Double = 50
+    public var bridgeFlow: Double = 0.9
 
     // Support & adhesion
     public var support: SupportMode = .off
@@ -145,6 +104,11 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var skirtLoops: Int = 1
     public var skirtDistance: Double = 3
 
+    // Multi-material
+    /// Purge tower for single-nozzle multi-material (Kobra S1 + ACE).
+    public var primeTower: Bool = false
+    public var primeTowerWidth: Double = 30
+
     // Travel
     public var retractSpeed: Double = 30
     public var retractMinTravel: Double = 1
@@ -152,20 +116,50 @@ public struct PrintSettings: Codable, Equatable, Sendable {
 
     // Machine
     public var plateType: PlateType = .texturedPEI
-    public var bedSize: Double = 270
-    public var maxHeight: Double = 270
-    /// Material loaded in each of the four U1 tool heads.
+    /// Material loaded in each of the four tool heads / ACE slots.
     public var filaments: [Filament] = [.pla, .pla, .pla, .pla]
     public var enableTimelapse: Bool = true
     public var enableBedLeveling: Bool = true
 
     public init() {}
 
+    /// Settings with the machine's defaults and its default material.
+    public init(printer: PrinterModel) {
+        self.printer = printer
+        printer.machine.applyDefaults(to: &self)
+        let filament = FilamentLibrary.defaultFilament(for: printer)
+        filaments = Array(repeating: filament, count: printer.machine.toolCount)
+    }
+
+    public var machine: MachineProfile { printer.machine }
+    public var bedSize: Double { machine.bedSize }
+    public var maxHeight: Double { machine.maxHeight }
+
     public func filament(for tool: Int) -> Filament {
         filaments.indices.contains(tool) ? filaments[tool] : filaments.first ?? .pla
     }
 
-    /// Applies values from a Bambu/Orca project file, keeping U1 machine settings.
+    /// Effective minimum layer time: explicit setting or the strictest used filament.
+    public func minLayerTime(for tools: [Int]) -> Double {
+        if minLayerTime > 0 { return minLayerTime }
+        return tools.map { filament(for: $0).minLayerTime }.max() ?? 4
+    }
+
+    /// Switches to another printer, keeping the user's process choices where sensible.
+    public mutating func switchPrinter(to model: PrinterModel) {
+        guard model != printer else { return }
+        let keep = (layerHeight, wallLoops, topLayers, bottomLayers, infillDensity, infillPattern, support, brimWidth, ironing)
+        let colors = filaments.map(\.color)
+        let types = filaments.map(\.type)
+        self = PrintSettings(printer: model)
+        (layerHeight, wallLoops, topLayers, bottomLayers, infillDensity, infillPattern, support, brimWidth, ironing) = keep
+        for i in filaments.indices {
+            if i < types.count, let f = FilamentLibrary.bestMatch(type: types[i], printer: model) { filaments[i] = f }
+            if i < colors.count { filaments[i].color = colors[i] }
+        }
+    }
+
+    /// Applies values from a Bambu/Orca project file, keeping this printer's machine settings.
     public mutating func apply(_ project: ProjectSettings) {
         if let v = project.layerHeight, (0.05...0.4).contains(v) { layerHeight = v }
         if let v = project.firstLayerHeight, (0.1...0.4).contains(v) { firstLayerHeight = v }
@@ -173,13 +167,17 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         if let v = project.topLayers, (0...20).contains(v) { topLayers = v }
         if let v = project.bottomLayers, (0...20).contains(v) { bottomLayers = v }
         if let v = project.infillDensity, (0...1).contains(v) { infillDensity = v }
-        if let v = project.supportEnabled { support = v ? .buildPlateOnly : .off }
-        for (i, type) in project.filamentTypes.prefix(4).enumerated() {
-            if let preset = Filament.presets.first(where: { $0.type.caseInsensitiveCompare(type) == .orderedSame }) {
+        if let p = project.infillPattern { infillPattern = p }
+        if let v = project.supportEnabled { support = v ? (project.supportOnBuildPlateOnly == false ? .everywhere : .buildPlateOnly) : .off }
+        if let v = project.brimWidth, (0...20).contains(v) { brimWidth = v }
+        if let v = project.ironing { ironing = v }
+        for (i, type) in project.filamentTypes.prefix(filaments.count).enumerated() {
+            let vendor = i < project.filamentVendors.count ? project.filamentVendors[i] : nil
+            if let preset = FilamentLibrary.bestMatch(type: type, vendor: vendor, printer: printer) {
                 filaments[i] = preset
             }
         }
-        for (i, color) in project.filamentColors.prefix(4).enumerated() where color.hasPrefix("#") {
+        for (i, color) in project.filamentColors.prefix(filaments.count).enumerated() where color.hasPrefix("#") {
             filaments[i].color = String(color.prefix(7))
         }
     }
@@ -190,9 +188,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         public var id: String { rawValue }
         public var displayName: String {
             switch self {
-            case .draft: return "Schnell (0,28 mm)"
-            case .standard: return "Standard (0,20 mm)"
-            case .fine: return "Fein (0,12 mm)"
+            case .draft: return "Schnell"
+            case .standard: return "Standard"
+            case .fine: return "Fein"
             }
         }
         public var layerHeight: Double {
@@ -206,8 +204,36 @@ public struct PrintSettings: Codable, Equatable, Sendable {
 
     public mutating func apply(_ quality: Quality) {
         layerHeight = quality.layerHeight
-        firstLayerHeight = quality == .fine ? 0.2 : 0.25
+        firstLayerHeight = printer == .kobraS1 ? 0.2 : (quality == .fine ? 0.2 : 0.25)
         topLayers = Int((1.0 / quality.layerHeight).rounded(.up))
         bottomLayers = Int((0.6 / quality.layerHeight).rounded(.up))
+    }
+
+    // Tolerant decoding so settings saved by older versions still load.
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        func d<T: Decodable>(_ key: CodingKeys, _ value: inout T) {
+            if let v = try? c.decodeIfPresent(T.self, forKey: key) { value = v }
+        }
+        d(.printer, &printer)
+        d(.layerHeight, &layerHeight); d(.firstLayerHeight, &firstLayerHeight); d(.nozzleDiameter, &nozzleDiameter)
+        d(.lineWidth, &lineWidth); d(.outerWallLineWidth, &outerWallLineWidth); d(.firstLayerLineWidth, &firstLayerLineWidth)
+        d(.wallLoops, &wallLoops); d(.topLayers, &topLayers); d(.bottomLayers, &bottomLayers)
+        d(.infillDensity, &infillDensity); d(.infillPattern, &infillPattern); d(.infillOverlap, &infillOverlap)
+        d(.outerWallSpeed, &outerWallSpeed); d(.innerWallSpeed, &innerWallSpeed); d(.infillSpeed, &infillSpeed)
+        d(.solidInfillSpeed, &solidInfillSpeed); d(.topSurfaceSpeed, &topSurfaceSpeed); d(.firstLayerSpeed, &firstLayerSpeed)
+        d(.firstLayerInfillSpeed, &firstLayerInfillSpeed); d(.supportSpeed, &supportSpeed); d(.travelSpeed, &travelSpeed)
+        d(.acceleration, &acceleration); d(.outerWallAcceleration, &outerWallAcceleration); d(.minLayerTime, &minLayerTime)
+        d(.ironing, &ironing); d(.ironingSpeed, &ironingSpeed); d(.ironingFlow, &ironingFlow); d(.ironingSpacing, &ironingSpacing)
+        d(.detectBridges, &detectBridges); d(.bridgeSpeed, &bridgeSpeed); d(.bridgeFlow, &bridgeFlow)
+        d(.support, &support); d(.supportAngle, &supportAngle); d(.supportTopZDistance, &supportTopZDistance)
+        d(.supportXYDistance, &supportXYDistance); d(.supportSpacing, &supportSpacing)
+        d(.brimWidth, &brimWidth); d(.skirtLoops, &skirtLoops); d(.skirtDistance, &skirtDistance)
+        d(.primeTower, &primeTower); d(.primeTowerWidth, &primeTowerWidth)
+        d(.retractSpeed, &retractSpeed); d(.retractMinTravel, &retractMinTravel); d(.zHop, &zHop)
+        d(.plateType, &plateType); d(.filaments, &filaments)
+        d(.enableTimelapse, &enableTimelapse); d(.enableBedLeveling, &enableBedLeveling)
+        while filaments.count < machine.toolCount { filaments.append(filaments.last ?? .pla) }
     }
 }
