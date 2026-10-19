@@ -71,8 +71,8 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             locked { connAck = cont }
-            conn.stateUpdateHandler = { [weak self] state in
-                guard let self else { return }
+            conn.stateUpdateHandler = { [weak self, weak conn] state in
+                guard let self, let conn else { return }
                 switch state {
                 case .ready:
                     let clientID = "makerslice-\(UUID().uuidString.prefix(8))"
@@ -80,9 +80,9 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
                                                 keepAlive: 60))
                     self.receiveLoop(conn)
                 case .failed(let error):
-                    self.handleDisconnect(error.localizedDescription)
+                    self.handleDisconnect(error.localizedDescription, from: conn)
                 case .cancelled:
-                    self.handleDisconnect(nil)
+                    self.handleDisconnect(nil, from: conn)
                 default:
                     break
                 }
@@ -124,8 +124,10 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         }
     }
 
-    private func handleDisconnect(_ reason: String?) {
+    private func handleDisconnect(_ reason: String?, from conn: NWConnection) {
         let (wasConnected, ack, waiters): (Bool, CheckedContinuation<Void, Error>?, [CheckedContinuation<Int, Error>]) = locked {
+            // A replaced connection reporting late must not tear down the current one.
+            guard mqtt === conn else { return (false, nil, []) }
             let w = connected
             connected = false
             mqtt = nil
@@ -170,7 +172,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
                 packets.forEach(self.handle)
             }
             if error != nil || isComplete {
-                self.handleDisconnect(error?.localizedDescription)
+                self.handleDisconnect(error?.localizedDescription, from: conn)
                 return
             }
             self.receiveLoop(conn)
