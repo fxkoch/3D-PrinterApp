@@ -90,6 +90,8 @@ public struct SlicedLayer: Sendable {
     public var z: Double
     public var height: Double
     public var islands: [ToolIsland]
+    /// Spiral-vase layer: the outer wall rises continuously from the previous layer's Z.
+    public var isSpiral = false
     /// Outline of the printed part (all tools) – handy for previews.
     public var outline: Polygons
 }

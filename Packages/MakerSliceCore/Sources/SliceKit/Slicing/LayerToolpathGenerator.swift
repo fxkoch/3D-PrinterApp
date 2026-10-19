@@ -12,11 +12,26 @@ struct LayerToolpathGenerator {
     /// Minimum area (mm²) for an island to be worth printing.
     private let minArea = 0.05
 
-    func generate(region: Polygons, above: (Int) -> Polygons?, below: (Int) -> Polygons?) -> [Extrusion] {
+    /// Spiral-vase layers print only one rising outer wall.
+    var isSpiral: Bool { settings.spiralVase && layerIndex >= settings.bottomLayers }
+
+    func generate(region rawRegion: Polygons, above: (Int) -> Polygons?, below: (Int) -> Polygons?) -> [Extrusion] {
         let s = settings
         let outerW = isFirstLayer ? s.firstLayerLineWidth : s.outerWallLineWidth
         let innerW = isFirstLayer ? s.firstLayerLineWidth : s.lineWidth
+        // Elephant foot: the squished first layer bulges out, so pull it in a little.
+        let region = isFirstLayer && s.elephantFootCompensation > 0
+            ? rawRegion.offset(-s.elephantFootCompensation) : rawRegion
         var walls: [[Extrusion]] = []
+
+        if isSpiral {
+            // Only the largest outline, as one loop starting at the back so layers join up.
+            let outline = region.offset(-outerW / 2)
+            guard let largest = outline.paths.max(by: { abs(Polygons.signedArea($0)) < abs(Polygons.signedArea($1)) }) else { return [] }
+            var points = seamOrdered(largest, loop: 0, position: .aligned)
+            if s.fuzzySkin { points = fuzzed(points) }
+            return [Extrusion(role: .outerWall, points: points, closed: true, width: outerW, speed: s.outerWallSpeed)]
+        }
 
         // Walls: successive insets. Each inset is printed as closed loops.
         var current = region.offset(-outerW / 2)
@@ -28,7 +43,9 @@ struct LayerToolpathGenerator {
             let width = loop == 0 ? outerW : innerW
             let speed = isFirstLayer ? s.firstLayerSpeed : (loop == 0 ? s.outerWallSpeed : s.innerWallSpeed)
             walls.append(current.paths.filter { abs(Polygons.signedArea($0)) / 1e6 > minArea }.map {
-                Extrusion(role: role, points: seamOrdered($0), closed: true, width: width, speed: speed)
+                var points = seamOrdered($0, loop: loop, position: s.seamPosition)
+                if loop == 0, s.fuzzySkin, !isFirstLayer { points = fuzzed(points) }
+                return Extrusion(role: role, points: points, closed: true, width: width, speed: speed)
             })
             lastInset = current
             lastWidth = width
@@ -41,8 +58,8 @@ struct LayerToolpathGenerator {
         let infillArea = lastInset.offset(-(lastWidth / 2) + s.infillOverlap * innerW)
             .offset(-0.05).offset(0.05) // drop slivers
         var extrusions: [Extrusion] = []
-        // Inner walls first, outer wall last: better surface finish and accuracy.
-        for wall in walls.reversed() { extrusions.append(contentsOf: wall) }
+        // Inner → outer gives the cleanest surface; outer → inner the most accurate dimensions and overhangs.
+        for wall in (s.wallOrder == .innerOuter ? walls.reversed() : walls) { extrusions.append(contentsOf: wall) }
         guard !infillArea.isEmpty else { return extrusions }
 
         // Solid surfaces: anything not covered by enough layers above/below.
@@ -73,15 +90,17 @@ struct LayerToolpathGenerator {
                 }
             }
             if !topPart.isEmpty {
-                extrusions.append(contentsOf: lines(in: topPart, angle: solidAngle, spacing: innerW, phase: 0).map {
-                    Extrusion(role: .topSurface, points: $0, closed: false, width: innerW,
+                extrusions.append(contentsOf: surface(topPart, pattern: s.topSurfacePattern, angle: solidAngle, width: innerW).map {
+                    Extrusion(role: .topSurface, points: $0.points, closed: $0.closed, width: innerW,
                               speed: isFirstLayer ? s.firstLayerSpeed : s.topSurfaceSpeed)
                 })
             }
             if !internalSolid.isEmpty {
-                let role: ExtrusionRole = isFirstLayer || below(1) == nil ? .bottomSurface : .solidInfill
-                extrusions.append(contentsOf: lines(in: internalSolid, angle: solidAngle, spacing: innerW, phase: 0).map {
-                    Extrusion(role: role, points: $0, closed: false, width: innerW,
+                let isBottom = isFirstLayer || below(1) == nil
+                let role: ExtrusionRole = isBottom ? .bottomSurface : .solidInfill
+                let pattern: SurfacePattern = isBottom ? s.bottomSurfacePattern : .lines
+                extrusions.append(contentsOf: surface(internalSolid, pattern: pattern, angle: solidAngle, width: innerW).map {
+                    Extrusion(role: role, points: $0.points, closed: $0.closed, width: innerW,
                               speed: isFirstLayer ? s.firstLayerInfillSpeed : s.solidInfillSpeed)
                 })
             }
@@ -235,7 +254,7 @@ struct LayerToolpathGenerator {
     /// Parallel lines at `angle` (degrees) spaced `spacing` mm apart, clipped to
     /// `area`, ordered to keep travel short. Lines align to a global grid so
     /// consecutive layers stack.
-    func lines(in area: Polygons, angle: Double, spacing: Double, phase: Double) -> [Path] {
+    func lines(in area: Polygons, angle: Double, spacing: Double, phase: Double, monotonic: Bool = false) -> [Path] {
         guard let box = area.boundingBox, spacing > 0.01 else { return [] }
         let a = angle * .pi / 180
         let dir = (x: cos(a), y: sin(a))
@@ -257,7 +276,26 @@ struct LayerToolpathGenerator {
             guard let f = path.first, let l = path.last else { return false }
             return f.distance(to: l) > 0.3 * Units.perMM
         }
+        if monotonic { return Self.monotonicOrder(clipped, normal: normal) }
         return Self.nearestNeighborOrder(clipped)
+    }
+
+    /// Lines strictly side by side in one sweep (no jumping back), alternating direction.
+    /// Gives evenly blended, streak-free top surfaces.
+    static func monotonicOrder(_ paths: [Path], normal: (x: Double, y: Double)) -> [Path] {
+        func key(_ p: Path) -> Double {
+            let m = (x: Double(p[0].x + p[p.count - 1].x) / 2, y: Double(p[0].y + p[p.count - 1].y) / 2)
+            return m.x * normal.x + m.y * normal.y
+        }
+        var ordered = paths.sorted { key($0) < key($1) }
+        guard !ordered.isEmpty else { return ordered }
+        for i in 1..<ordered.count {
+            let end = ordered[i - 1][ordered[i - 1].count - 1]
+            if end.distanceSquared(to: ordered[i][ordered[i].count - 1]) < end.distanceSquared(to: ordered[i][0]) {
+                ordered[i].reverse()
+            }
+        }
+        return ordered
     }
 
     /// Greedy ordering that also flips lines to start at the closer end.
@@ -283,11 +321,101 @@ struct LayerToolpathGenerator {
         return ordered
     }
 
-    /// Rotates a loop so it starts at the rear-most point (aligned seam at the back).
-    private func seamOrdered(_ path: Path) -> Path {
-        guard let idx = path.indices.max(by: { path[$0].y == path[$1].y ? path[$0].x > path[$1].x : path[$0].y < path[$1].y }) else {
-            return path
+    /// Fills a solid surface with the chosen pattern.
+    func surface(_ area: Polygons, pattern: SurfacePattern, angle: Double, width: Double) -> [(points: Path, closed: Bool)] {
+        switch pattern {
+        case .lines:
+            return lines(in: area, angle: angle, spacing: width, phase: 0).map { ($0, false) }
+        case .monotonic:
+            return lines(in: area, angle: angle, spacing: width, phase: 0, monotonic: true).map { ($0, false) }
+        case .concentric:
+            // Rings following the outline, outside in.
+            var rings: [(Path, Bool)] = []
+            var ring = area.offset(-width / 2)
+            var guardCount = 0
+            while !ring.isEmpty, guardCount < 2000 {
+                for path in ring.paths where abs(Polygons.signedArea(path)) / 1e6 > minArea {
+                    rings.append((path, true))
+                }
+                ring = ring.offset(-width)
+                guardCount += 1
+            }
+            return rings
+        }
+    }
+
+    /// Rotates a loop so it starts at the seam.
+    func seamOrdered(_ path: Path, loop: Int, position: SeamPosition) -> Path {
+        guard path.count > 2 else { return path }
+        let idx: Int
+        switch position {
+        case .aligned:
+            // Rear-most point, so seams line up into one straight line at the back.
+            idx = path.indices.max(by: { path[$0].y == path[$1].y ? path[$0].x > path[$1].x : path[$0].y < path[$1].y })!
+        case .corner:
+            // The sharpest corner hides the seam best; fall back to the rear if the loop is round.
+            let n = path.count
+            var best = -1, bestTurn = 0.35 // ≈ 20°
+            for i in 0..<n {
+                let a = path[(i + n - 1) % n], b = path[i], c = path[(i + 1) % n]
+                let v1 = (x: Double(b.x - a.x), y: Double(b.y - a.y)), v2 = (x: Double(c.x - b.x), y: Double(c.y - b.y))
+                let l1 = (v1.x * v1.x + v1.y * v1.y).squareRoot(), l2 = (v2.x * v2.x + v2.y * v2.y).squareRoot()
+                guard l1 > 0, l2 > 0 else { continue }
+                let turn = abs(atan2(v1.x * v2.y - v1.y * v2.x, v1.x * v2.x + v1.y * v2.y))
+                // Prefer rear corners on ties so seams still group together.
+                if turn > bestTurn + 0.01 || (abs(turn - bestTurn) <= 0.01 && best >= 0 && b.y > path[best].y) {
+                    bestTurn = turn
+                    best = i
+                }
+            }
+            idx = best >= 0 ? best : seamIndexRear(path)
+        case .random:
+            var rng = SplitMix(seed: UInt64(layerIndex &* 7919 &+ loop &* 104_729) &+ UInt64(truncatingIfNeeded: path[0].x))
+            idx = Int(rng.next() % UInt64(path.count))
         }
         return Array(path[idx...] + path[..<idx])
+    }
+
+    private func seamIndexRear(_ path: Path) -> Int {
+        path.indices.max(by: { path[$0].y == path[$1].y ? path[$0].x > path[$1].x : path[$0].y < path[$1].y }) ?? 0
+    }
+
+    /// Fuzzy skin: resample the loop and push each point randomly in or out.
+    func fuzzed(_ path: Path) -> Path {
+        let s = settings
+        guard path.count > 2, s.fuzzySkinThickness > 0 else { return path }
+        let step = max(s.fuzzySkinPointDistance, 0.1) * Units.perMM
+        let amp = s.fuzzySkinThickness * Units.perMM
+        var rng = SplitMix(seed: UInt64(layerIndex &* 31 &+ 17) &+ UInt64(truncatingIfNeeded: path[0].y))
+        var result: Path = []
+        let n = path.count
+        for i in 0..<n {
+            let a = path[i], b = path[(i + 1) % n]
+            let dx = Double(b.x - a.x), dy = Double(b.y - a.y)
+            let len = (dx * dx + dy * dy).squareRoot()
+            guard len > 0 else { continue }
+            // Outward normal for counter-clockwise loops; holes run clockwise so it flips correctly.
+            let nx = dy / len, ny = -dx / len
+            let count = max(1, Int(len / step))
+            for k in 0..<count {
+                let t = Double(k) / Double(count)
+                let r = (Double(rng.next() % 10_000) / 10_000 - 0.5) * amp
+                result.append(IntPoint(a.x + Int64(dx * t + nx * r), a.y + Int64(dy * t + ny * r)))
+            }
+        }
+        return result.count > 2 ? result : path
+    }
+}
+
+/// Small deterministic random generator (same G-code for the same input).
+struct SplitMix {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }

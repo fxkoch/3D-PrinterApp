@@ -95,8 +95,12 @@ public struct GCodeWriter {
             body.line(";Z:\(fmt(layer.z))")
             body.line(";HEIGHT:\(fmt(height))")
             dialect.beforeLayer(layer, ctx).forEach { body.line($0) }
-            retract(&body, &state, &stats)
-            moveZ(&body, &state, &stats, to: layer.z)
+            // Spiral layers rise during the wall itself – no retract, no separate Z move.
+            let spiralFromZ = layer.isSpiral ? state.z : nil
+            if !layer.isSpiral {
+                retract(&body, &state, &stats)
+                moveZ(&body, &state, &stats, to: layer.z)
+            }
             dialect.afterLayer(layer, ctx).forEach { body.line($0) }
 
             let layerTime = estimateLayerTime(layer.islands, height: height)
@@ -126,7 +130,16 @@ public struct GCodeWriter {
                 for extrusion in island.extrusions {
                     guard extrusion.points.count >= 2 else { continue }
                     let start = extrusion.points[0]
-                    travel(&body, &state, &stats, to: start, layerZ: layer.z)
+                    if spiralFromZ != nil {
+                        // Short hop to the next loop's start while staying in the vase wall.
+                        if state.position.distance(to: start) / Units.perMM > 0.001 {
+                            body.line("G1 X\(fmt(start.mmX)) Y\(fmt(start.mmY)) F\(Int(settings.travelSpeed * 60))")
+                            stats.move(state.position.distance(to: start) / Units.perMM, speed: settings.travelSpeed)
+                            state.position = start
+                        }
+                    } else {
+                        travel(&body, &state, &stats, to: start, layerZ: layer.z)
+                    }
                     if state.lastRole != extrusion.role {
                         body.line(";TYPE:\(extrusion.role.gcodeLabel)")
                         if extrusion.role == .outerWall {
@@ -148,21 +161,31 @@ public struct GCodeWriter {
                     var points = Array(extrusion.points.dropFirst())
                     if extrusion.closed { points.append(start) }
                     var feedSet = false
+                    // Spiral vase: Z climbs linearly with the distance along the loop.
+                    let spiralLength = spiralFromZ != nil ? max(extrusion.lengthMM, 0.001) : 0
+                    var travelled = 0.0
                     for p in points {
                         let dist = state.position.distance(to: p) / Units.perMM
                         guard dist > 0.001 else { continue }
                         let e = dist * ePerMM
+                        var zPart = ""
+                        if let fromZ = spiralFromZ {
+                            travelled += dist
+                            let z = fromZ + (layer.z - fromZ) * min(travelled / spiralLength, 1)
+                            zPart = " Z\(fmt(z))"
+                            state.z = z
+                        }
                         if feedSet {
-                            body.line("G1 X\(fmt(p.mmX)) Y\(fmt(p.mmY)) E\(fmt5(e))")
+                            body.line("G1 X\(fmt(p.mmX)) Y\(fmt(p.mmY))\(zPart) E\(fmt5(e))")
                         } else {
-                            body.line("G1 X\(fmt(p.mmX)) Y\(fmt(p.mmY)) E\(fmt5(e)) F\(Int(speed * 60))")
+                            body.line("G1 X\(fmt(p.mmX)) Y\(fmt(p.mmY))\(zPart) E\(fmt5(e)) F\(Int(speed * 60))")
                             feedSet = true
                         }
                         stats.move(dist, speed: speed)
                         state.position = p
                         state.filament[island.tool, default: 0] += e
                     }
-                    if extrusion.closed, extrusion.role == .outerWall {
+                    if extrusion.closed, extrusion.role == .outerWall, spiralFromZ == nil {
                         wipeInward(&body, &state, &stats, along: extrusion.points)
                     }
                 }

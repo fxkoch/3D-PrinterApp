@@ -107,6 +107,7 @@ final class AppModel {
         var settings = settings(for: model)
         settings.filaments = printers.suggestedFilaments(for: printer, current: settings.filaments, model: model)
         let loaded = printers.loadedTypes(printer)
+        let humidity = printers.status(of: printer)?.filamentBox?.humidity
         Task {
             let result = await Task.detached(priority: .userInitiated) { () -> Result<ImportedModel, Error> in
                 do { return .success(try work()) } catch { return .failure(error) }
@@ -116,6 +117,7 @@ final class AppModel {
             case .success(let model):
                 let p = PrintProject(name: name, imported: model, settings: settings)
                 p.loadedTypes = loaded
+                p.dryerHumidity = humidity
                 p.refreshRecommendations()
                 sendState = .idle
                 project = p

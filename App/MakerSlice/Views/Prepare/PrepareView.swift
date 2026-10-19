@@ -245,6 +245,7 @@ struct PrepareView: View {
             Divider()
             HStack {
                 Text("Füllung")
+                HelpButton(key: .infillPattern)
                 Spacer()
                 Menu(project.settings.infillPattern.displayName) {
                     Picker("Muster", selection: $project.settings.infillPattern) {
@@ -256,20 +257,30 @@ struct PrepareView: View {
             Slider(value: $project.settings.infillDensity, in: 0...1, step: 0.05)
 
             Divider()
-            Picker("Stützen", selection: $project.settings.support) {
-                ForEach(SupportMode.allCases) { Text($0.displayName).tag($0) }
+            HelpRow(key: .support) {
+                Picker("Stützen", selection: $project.settings.support) {
+                    ForEach(SupportMode.allCases) { Text($0.displayName).tag($0) }
+                }
             }
-            Toggle("Brim (Haftrand)", isOn: Binding(
-                get: { project.settings.brimWidth > 0 },
-                set: { project.settings.brimWidth = $0 ? 5 : 0 }
-            ))
-            Toggle("Oberseite glätten (Ironing)", isOn: $project.settings.ironing)
+            HelpRow(key: .brimWidth) {
+                Toggle("Brim (Haftrand)", isOn: Binding(
+                    get: { project.settings.brimWidth > 0 },
+                    set: { project.settings.brimWidth = $0 ? 5 : 0 }
+                ))
+            }
+            HelpRow(key: .ironing) {
+                Toggle("Oberseite glätten (Ironing)", isOn: $project.settings.ironing)
+            }
             if project.settings.machine.multiMaterial == .filamentSwitcher, project.usedTools.count > 1 {
-                Toggle("Reinigungsturm", isOn: $project.settings.primeTower)
+                HelpRow(key: .primeTower) {
+                    Toggle("Reinigungsturm", isOn: $project.settings.primeTower)
+                }
             }
             if project.settings.machine.supportsPlateTypes.count > 1 {
-                Picker("Druckplatte", selection: $project.settings.plateType) {
-                    ForEach(project.settings.machine.supportsPlateTypes) { Text($0.displayName).tag($0) }
+                HelpRow(key: .plateType) {
+                    Picker("Druckplatte", selection: $project.settings.plateType) {
+                        ForEach(project.settings.machine.supportsPlateTypes) { Text($0.displayName).tag($0) }
+                    }
                 }
             }
             if !app.expertMode {

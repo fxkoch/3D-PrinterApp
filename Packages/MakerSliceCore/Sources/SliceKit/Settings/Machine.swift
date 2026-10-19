@@ -62,6 +62,8 @@ public struct MachineProfile: Equatable, Sendable {
             s.retractSpeed = 30
             s.primeTower = false
             s.skirtLoops = 1
+            s.elephantFootCompensation = 0.15
+            s.wallOrder = .innerOuter
         case .kobraS1:
             s.firstLayerHeight = 0.2
             s.travelSpeed = 300
@@ -69,6 +71,8 @@ public struct MachineProfile: Equatable, Sendable {
             s.retractSpeed = 40
             s.primeTower = true
             s.skirtLoops = 0
+            s.elephantFootCompensation = 0.075
+            s.wallOrder = .outerInner
             s.plateType = .texturedPEI
             s.enableTimelapse = false
         }

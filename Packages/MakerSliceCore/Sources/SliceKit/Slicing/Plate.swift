@@ -70,7 +70,7 @@ public struct SliceJob: Sendable {
     public func run(isCancelled: @escaping () -> Bool = { false },
                     progress: @escaping (SliceProgress) -> Void = { _ in }) throws -> Output {
         let layers = try Slicer(settings: settings, isCancelled: isCancelled).slice(objects, progress: progress)
-        let result = GCodeWriter(settings: settings).write(layers: layers, jobName: name)
+        let result = GCodeWriter(settings: settings.effective).write(layers: layers, jobName: name)
         return Output(layers: layers, gcode: result.gcode, estimate: result.estimate)
     }
 }

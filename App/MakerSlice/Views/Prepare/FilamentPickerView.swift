@@ -120,23 +120,23 @@ struct FilamentEditor: View {
         NavigationStack {
             Form {
                 Section("Temperaturen") {
-                    intStepper("Düse", $filament.nozzleTemp, 160...320, "°C")
-                    intStepper("Düse 1. Schicht", $filament.firstLayerNozzleTemp, 160...320, "°C")
-                    intStepper("Bett", $filament.bedTemp, 0...120, "°C")
-                    intStepper("Bett 1. Schicht", $filament.firstLayerBedTemp, 0...120, "°C")
-                    intStepper("Bett (glatte Platte)", $filament.smoothPlateBedTemp, 0...120, "°C")
+                    intStepper(.nozzleTemp, $filament.nozzleTemp, 160...320, "°C")
+                    intStepper(.firstLayerNozzleTemp, $filament.firstLayerNozzleTemp, 160...320, "°C")
+                    intStepper(.bedTemp, $filament.bedTemp, 0...120, "°C")
+                    intStepper(.firstLayerBedTemp, $filament.firstLayerBedTemp, 0...120, "°C")
+                    intStepper(.smoothPlateBedTemp, $filament.smoothPlateBedTemp, 0...120, "°C")
                 }
                 Section("Kühlung") {
-                    percent("Lüfter", $filament.fanSpeed)
-                    percent("Lüfter Brücken", $filament.overhangFanSpeed)
-                    intStepper("Ohne Lüfter (Schichten)", $filament.fanOffLayers, 0...10, "")
-                    doubleStepper("Min. Schichtzeit", $filament.minLayerTime, 0...30, 1, "s")
+                    percent(.fanSpeed, $filament.fanSpeed)
+                    percent(.overhangFanSpeed, $filament.overhangFanSpeed)
+                    intStepper(.fanOffLayers, $filament.fanOffLayers, 0...10, "", step: 1)
+                    doubleStepper(.filamentMinLayerTime, $filament.minLayerTime, 0...30, 1, "s")
                 }
                 Section("Fluss") {
-                    doubleStepper("Max. Volumenstrom", $filament.maxVolumetricSpeed, 1...40, 0.5, "mm³/s")
-                    doubleStepper("Flussfaktor", $filament.flowRatio, 0.8...1.2, 0.01, "")
-                    doubleStepper("Rückzug", $filament.retractLength, 0...5, 0.1, "mm")
-                    doubleStepper("Pressure Advance", Binding(get: { filament.pressureAdvance ?? 0 },
+                    doubleStepper(.maxVolumetricSpeed, $filament.maxVolumetricSpeed, 1...40, 0.5, "mm³/s")
+                    doubleStepper(.flowRatio, $filament.flowRatio, 0.8...1.2, 0.01, "")
+                    doubleStepper(.retractLength, $filament.retractLength, 0...5, 0.1, "mm")
+                    doubleStepper(.pressureAdvance, Binding(get: { filament.pressureAdvance ?? 0 },
                                                               set: { filament.pressureAdvance = $0 > 0 ? $0 : nil }),
                                   0...0.2, 0.005, "")
                 }
@@ -157,23 +157,30 @@ struct FilamentEditor: View {
         }
     }
 
-    private func intStepper(_ title: String, _ value: Binding<Int>, _ range: ClosedRange<Int>, _ unit: String) -> some View {
-        Stepper(value: value, in: range, step: 5) {
-            LabeledContent(title, value: "\(value.wrappedValue) \(unit)")
+    private func intStepper(_ key: SettingKey, _ value: Binding<Int>, _ range: ClosedRange<Int>, _ unit: String,
+                            step: Int = 5) -> some View {
+        HelpRow(key: key) {
+            Stepper(value: value, in: range, step: step) {
+                LabeledContent(key.help.title, value: "\(value.wrappedValue) \(unit)")
+            }
         }
     }
 
-    private func doubleStepper(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double>, _ step: Double,
+    private func doubleStepper(_ key: SettingKey, _ value: Binding<Double>, _ range: ClosedRange<Double>, _ step: Double,
                                _ unit: String) -> some View {
-        Stepper(value: value, in: range, step: step) {
-            LabeledContent(title, value: Self.format(value.wrappedValue, step: step) + (unit.isEmpty ? "" : " \(unit)"))
+        HelpRow(key: key) {
+            Stepper(value: value, in: range, step: step) {
+                LabeledContent(key.help.title, value: Self.format(value.wrappedValue, step: step) + (unit.isEmpty ? "" : " \(unit)"))
+            }
         }
     }
 
-    private func percent(_ title: String, _ value: Binding<Double>) -> some View {
-        VStack(alignment: .leading) {
-            LabeledContent(title, value: "\(Int((value.wrappedValue * 100).rounded())) %")
-            Slider(value: value, in: 0...1, step: 0.05)
+    private func percent(_ key: SettingKey, _ value: Binding<Double>) -> some View {
+        HelpRow(key: key) {
+            VStack(alignment: .leading) {
+                LabeledContent(key.help.title, value: "\(Int((value.wrappedValue * 100).rounded())) %")
+                Slider(value: value, in: 0...1, step: 0.05)
+            }
         }
     }
 

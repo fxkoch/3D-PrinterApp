@@ -38,6 +38,8 @@ final class PrintProject: Identifiable {
     @ObservationIgnored private var sliceTask: Task<Void, Never>?
     @ObservationIgnored private var adviceTask: Task<Void, Never>?
     @ObservationIgnored var loadedTypes: [String?] = []
+    /// Humidity in the ACE Pro dryer, if the printer reports it.
+    @ObservationIgnored var dryerHumidity: Double?
 
     init(name: String, imported: ImportedModel, settings base: PrintSettings) {
         self.name = name
@@ -178,13 +180,14 @@ final class PrintProject: Identifiable {
 
     func refreshRecommendations() {
         adviceTask?.cancel()
-        let objects = self.objects, settings = self.settings, loaded = loadedTypes
+        let objects = self.objects, settings = self.settings, loaded = loadedTypes, humidity = dryerHumidity
         analyzing = true
         adviceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000) // debounce
             guard !Task.isCancelled else { return }
             let recs = await Task.detached(priority: .utility) {
-                PrintAdvisor.recommendations(objects: objects, settings: settings, loadedTypes: loaded)
+                PrintAdvisor.recommendations(objects: objects, settings: settings, loadedTypes: loaded,
+                                             dryerHumidity: humidity)
             }.value
             guard let self, !Task.isCancelled else { return }
             self.recommendations = recs

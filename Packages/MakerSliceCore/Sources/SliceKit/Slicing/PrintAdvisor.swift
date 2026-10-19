@@ -18,6 +18,9 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case primeTower(Bool)
         case autoSplit(objectID: UUID)
         case useLoadedFilament(slot: Int, type: String)
+        case retraction(slot: Int, length: Double)
+        case elephantFoot(Double)
+        case spiralVase(Bool)
     }
 
     public var id: String
@@ -93,8 +96,9 @@ public enum PrintAdvisor {
     }
 
     /// - Parameter loadedTypes: material reported by the printer per slot (nil = unknown/empty).
+    /// - Parameter dryerHumidity: relative humidity (%) reported by the ACE Pro, if known.
     public static func recommendations(objects: [ModelObject], settings s: PrintSettings,
-                                       loadedTypes: [String?] = []) -> [Recommendation] {
+                                       loadedTypes: [String?] = [], dryerHumidity: Double? = nil) -> [Recommendation] {
         var result: [Recommendation] = []
         let analyses = objects.map { analyze($0, supportAngle: s.supportAngle) }
         let usedTools = Set(objects.map(\.tool))
@@ -212,6 +216,8 @@ public enum PrintAdvisor {
                 icon: "square.stack.3d.up", severity: .warning, action: .primeTower(true)))
         }
 
+        result += materialAdvice(objects: objects, settings: s, usedTools: usedTools, dryerHumidity: dryerHumidity)
+
         // Compare with what is loaded in the printer.
         for tool in usedTools.sorted() where tool < loadedTypes.count {
             let configured = s.filament(for: tool)
@@ -249,6 +255,10 @@ public enum PrintAdvisor {
         case .walls(let n): s.wallLoops = n
         case .plate(let p): s.plateType = p
         case .primeTower(let on): s.primeTower = on
+        case .retraction(let slot, let length):
+            if slot < s.filaments.count { s.filaments[slot].retractLength = length }
+        case .elephantFoot(let value): s.elephantFootCompensation = value
+        case .spiralVase(let on): s.spiralVase = on
         case .useLoadedFilament(let slot, let type):
             if slot < s.filaments.count, var f = FilamentLibrary.bestMatch(type: type, printer: s.printer) {
                 f.color = s.filaments[slot].color
@@ -261,5 +271,99 @@ public enum PrintAdvisor {
             objects.insert(contentsOf: parts, at: index)
             if let arranged = PlateArranger.arrange(objects, bedSize: s.bedSize) { objects = arranged }
         }
+    }
+
+    /// Printer- and material-specific advice collected from manufacturer notes and community experience.
+    static func materialAdvice(objects: [ModelObject], settings s: PrintSettings, usedTools: Set<Int>,
+                               dryerHumidity: Double?) -> [Recommendation] {
+        var result: [Recommendation] = []
+        let tools = usedTools.sorted()
+        let label = { (tool: Int) in s.printer == .kobraS1 ? "Slot \(tool + 1)" : "T\(tool + 1)" }
+        let flexTools = tools.filter { s.filament(for: $0).isFlexible }
+        let types = Set(tools.map { s.filament(for: $0).type.uppercased() })
+
+        // TPU.
+        if !flexTools.isEmpty {
+            switch s.printer {
+            case .kobraS1:
+                result.append(Recommendation(
+                    id: "kobra-tpu", title: "TPU nicht über die ACE Pro",
+                    detail: "Die ACE Pro kann weiches TPU nicht zuverlässig fördern und es kann sich im Schlauch verklemmen. TPU über den externen Spulenhalter direkt in den Druckkopf führen" + (tools.count > 1 ? " – und nicht mit Farbwechseln kombinieren." : "."),
+                    icon: "exclamationmark.triangle", severity: .warning))
+            case .snapmakerU1:
+                result.append(Recommendation(
+                    id: "u1-tpu", title: "TPU am U1",
+                    detail: "Langsam drucken (max. ca. 3,5 mm³/s) und kurz zurückziehen. Ein langer Rückzug beim Werkzeugwechsel (Standard 10 mm) verursacht bei TPU oft Staus – MakerSlice zieht nur um den Filament-Rückzug zurück.",
+                    icon: "info.circle", severity: .info))
+            }
+            for tool in flexTools where s.filament(for: tool).retractLength > 1.0 {
+                result.append(Recommendation(
+                    id: "tpu-retract-\(tool)", title: "\(label(tool)): Rückzug für TPU kürzen",
+                    detail: String(format: "%.1f mm Rückzug ist für TPU zu viel – das weiche Filament staucht sich und verstopft. 0,8 mm empfohlen.",
+                                   s.filament(for: tool).retractLength),
+                    icon: "arrow.uturn.backward", severity: .suggestion, action: .retraction(slot: tool, length: 0.8)))
+            }
+        }
+
+        // Moisture-sensitive materials.
+        let hygroscopic = types.filter { t in ["PETG", "TPU", "TPE", "PA", "PC", "PVA", "PET"].contains { t.hasPrefix($0) } }
+        if let humidity = dryerHumidity, s.printer == .kobraS1, humidity > 40, !hygroscopic.isEmpty {
+            result.append(Recommendation(
+                id: "ace-humid", title: "Filament ist feucht (ACE: \(Int(humidity)) %)",
+                detail: "\(hygroscopic.sorted().joined(separator: ", ")) zieht Feuchtigkeit und druckt dann mit Fäden, Blasen und schwachen Schichten. Vor dem Druck in der ACE Pro trocknen (Drucker → Trocknen, 50 °C für 6–8 h).",
+                icon: "humidity", severity: .warning))
+        } else if !hygroscopic.isEmpty {
+            result.append(Recommendation(
+                id: "dry", title: "\(hygroscopic.sorted().joined(separator: ", ")) trocken verarbeiten",
+                detail: "Feuchtes Filament knistert, zieht Fäden und wird spröde. PETG 6–8 h bei 60–65 °C trocknen, TPU 50–55 °C, PA/PC 70–80 °C." + (s.printer == .kobraS1 ? " Die ACE Pro trocknet bis 55 °C direkt im Drucker." : ""),
+                icon: "drop.triangle", severity: .info))
+        }
+
+        // PETG.
+        if types.contains(where: { $0.hasPrefix("PETG") }) {
+            result.append(Recommendation(
+                id: "petg-tips", title: "PETG: Fäden vermeiden",
+                detail: "Bei Fäden die Düse in 5-°C-Schritten kühler stellen (230–240 °C), Rückzug 0,8–2 mm, Lüfter 30–50 %. Stützen mit 0,25 mm Abstand – PETG klebt sonst fest.",
+                icon: "scribble", severity: .info))
+            if s.elephantFootCompensation < 0.15 {
+                result.append(Recommendation(
+                    id: "petg-foot", title: "Elefantenfuß ausgleichen",
+                    detail: "PETG läuft auf der heißen ersten Schicht breiter. 0,2 mm Ausgleich hält die Unterkante maßhaltig.",
+                    icon: "arrow.down.right.and.arrow.up.left", severity: .suggestion, action: .elephantFoot(0.2)))
+            }
+        }
+
+        // Connectors need an accurate first layer.
+        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1 {
+            result.append(Recommendation(
+                id: "connector-foot", title: "Passgenaue Steckverbindungen",
+                detail: "Geteilte Teile mit Zapfen/Dübeln passen nur, wenn die erste Schicht nicht ausbeult. Elefantenfuß-Ausgleich auf 0,15 mm setzen.",
+                icon: "puzzlepiece", severity: .suggestion, action: .elephantFoot(0.15)))
+        }
+
+        // Kobra S1 nozzle wiper.
+        if s.printer == .kobraS1 {
+            result.append(Recommendation(
+                id: "kobra-wiper", title: "Düsenspitze prüfen",
+                detail: "Der Abstreifer des Kobra S1 hinterlässt manchmal Filamentreste an der Düse, die beim Start über die erste Schicht schleifen. Spitze vor dem Druck kurz kontrollieren.",
+                icon: "eye", severity: .info))
+        }
+
+        // Spiral vase sanity checks.
+        if s.spiralVase {
+            if objects.count > 1 || tools.count > 1 {
+                result.append(Recommendation(
+                    id: "vase-multi", title: "Vasenmodus nur für ein Objekt",
+                    detail: "Der Vasenmodus druckt eine einzige ununterbrochene Wand. Mehrere Objekte oder Farben sind damit nicht möglich.",
+                    icon: "exclamationmark.triangle", severity: .warning, action: .spiralVase(false)))
+            }
+            if s.support != .off {
+                result.append(Recommendation(
+                    id: "vase-support", title: "Stützen im Vasenmodus",
+                    detail: "Stützen unterbrechen die Spirale. Vasenmodelle sollten ohne Überhänge auskommen.",
+                    icon: "building.columns", severity: .suggestion, action: .support(.off)))
+            }
+        }
+        return result
     }
 }

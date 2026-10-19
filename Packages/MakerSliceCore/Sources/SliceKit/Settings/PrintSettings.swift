@@ -48,6 +48,44 @@ public enum PlateType: String, Codable, CaseIterable, Sendable, Identifiable {
     }
 }
 
+/// Where each wall loop starts and ends (the visible "seam").
+public enum SeamPosition: String, Codable, CaseIterable, Sendable, Identifiable {
+    case aligned, corner, random
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .aligned: return "Hinten ausgerichtet"
+        case .corner: return "In Ecken versteckt"
+        case .random: return "Zufällig verteilt"
+        }
+    }
+}
+
+/// Order of the wall loops within a layer.
+public enum WallOrder: String, Codable, CaseIterable, Sendable, Identifiable {
+    case innerOuter, outerInner
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .innerOuter: return "Innen → außen"
+        case .outerInner: return "Außen → innen"
+        }
+    }
+}
+
+/// Line pattern for visible top and bottom surfaces.
+public enum SurfacePattern: String, Codable, CaseIterable, Sendable, Identifiable {
+    case monotonic, lines, concentric
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .monotonic: return "Monoton"
+        case .lines: return "Linien"
+        case .concentric: return "Konzentrisch"
+        }
+    }
+}
+
 /// Everything the slicer needs. Defaults mirror the "0.20mm Standard" Orca profiles.
 public struct PrintSettings: Codable, Equatable, Sendable {
     public var printer: PrinterModel = .snapmakerU1
@@ -93,6 +131,20 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var detectBridges: Bool = true
     public var bridgeSpeed: Double = 50
     public var bridgeFlow: Double = 0.9
+    public var topSurfacePattern: SurfacePattern = .monotonic
+    public var bottomSurfacePattern: SurfacePattern = .monotonic
+
+    // Walls & special modes
+    public var seamPosition: SeamPosition = .aligned
+    public var wallOrder: WallOrder = .innerOuter
+    /// Shrinks the first layer inwards (mm) so the squished line doesn't bulge out.
+    public var elephantFootCompensation: Double = 0.15
+    /// Spiral vase: one continuous outer wall, rising steadily, no top and no infill.
+    public var spiralVase: Bool = false
+    /// Random jitter on the outer wall for a textured, grippy surface.
+    public var fuzzySkin: Bool = false
+    public var fuzzySkinThickness: Double = 0.3
+    public var fuzzySkinPointDistance: Double = 0.8
 
     // Support & adhesion
     public var support: SupportMode = .off
@@ -139,6 +191,19 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public static let slotColors = ["#F5F5F0", "#2B2B2E", "#E5483C", "#2F7DE1"]
 
     public var machine: MachineProfile { printer.machine }
+
+    /// Settings as the slicer uses them: special modes override conflicting values.
+    public var effective: PrintSettings {
+        var s = self
+        if spiralVase {
+            s.wallLoops = 1
+            s.topLayers = 0
+            s.infillDensity = 0
+            s.ironing = false
+            s.bottomLayers = max(bottomLayers, 1)
+        }
+        return s
+    }
     public var bedSize: Double { machine.bedSize }
     public var maxHeight: Double { machine.maxHeight }
 
@@ -239,6 +304,10 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.brimWidth, &brimWidth); d(.skirtLoops, &skirtLoops); d(.skirtDistance, &skirtDistance)
         d(.primeTower, &primeTower); d(.primeTowerWidth, &primeTowerWidth)
         d(.retractSpeed, &retractSpeed); d(.retractMinTravel, &retractMinTravel); d(.zHop, &zHop)
+        d(.topSurfacePattern, &topSurfacePattern); d(.bottomSurfacePattern, &bottomSurfacePattern)
+        d(.seamPosition, &seamPosition); d(.wallOrder, &wallOrder); d(.elephantFootCompensation, &elephantFootCompensation)
+        d(.spiralVase, &spiralVase); d(.fuzzySkin, &fuzzySkin)
+        d(.fuzzySkinThickness, &fuzzySkinThickness); d(.fuzzySkinPointDistance, &fuzzySkinPointDistance)
         d(.plateType, &plateType); d(.filaments, &filaments)
         d(.enableTimelapse, &enableTimelapse); d(.enableBedLeveling, &enableBedLeveling)
         while filaments.count < machine.toolCount { filaments.append(filaments.last ?? .pla) }

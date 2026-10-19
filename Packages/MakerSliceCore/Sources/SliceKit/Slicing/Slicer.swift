@@ -27,7 +27,7 @@ public final class Slicer: @unchecked Sendable {
     private let isCancelled: () -> Bool
 
     public init(settings: PrintSettings, isCancelled: @escaping () -> Bool = { false }) {
-        self.settings = settings
+        self.settings = settings.effective
         self.isCancelled = isCancelled
     }
 
@@ -135,7 +135,9 @@ public final class Slicer: @unchecked Sendable {
                         islands.insert(ToolIsland(tool: supportTool, extrusions: supportPaths), at: 0)
                     }
                 }
-                out[i] = SlicedLayer(index: i, z: tops[i], height: height, islands: islands, outline: all[i])
+                var layer = SlicedLayer(index: i, z: tops[i], height: height, islands: islands, outline: all[i])
+                layer.isSpiral = s.spiralVase && i >= s.bottomLayers
+                out[i] = layer
                 lock.lock()
                 done += 1
                 let fraction = 0.4 + 0.55 * Double(done) / Double(tops.count)
