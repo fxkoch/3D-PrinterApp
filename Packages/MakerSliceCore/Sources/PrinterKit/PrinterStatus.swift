@@ -25,6 +25,14 @@ public struct PrinterStatus: Sendable, Equatable {
 
     /// Filament loaded in a tool head, as reported by the U1's RFID reader.
     public struct LoadedFilament: Sendable, Equatable {
+        public init(present: Bool, vendor: String? = nil, type: String? = nil, subType: String? = nil, color: String? = nil) {
+            self.present = present
+            self.vendor = vendor
+            self.type = type
+            self.subType = subType
+            self.color = color
+        }
+
         public var present: Bool
         public var vendor: String?
         public var type: String?
@@ -37,6 +45,16 @@ public struct PrinterStatus: Sendable, Equatable {
             return [vendor, type, subType].compactMap { $0 }.filter { $0 != "NONE" && !$0.isEmpty }.joined(separator: " ")
                 .nilIfEmpty ?? "Unbekannt"
         }
+    }
+
+    /// Filament dryer/box state (Anycubic ACE Pro).
+    public struct FilamentBox: Sendable, Equatable {
+        public var temperature: Double?
+        public var humidity: Double?
+        public var drying: Bool = false
+        public var dryingTarget: Double?
+        public var dryingRemainingMinutes: Double?
+        public var activeSlot: Int?
     }
 
     public var state: JobState = .unknown
@@ -53,11 +71,26 @@ public struct PrinterStatus: Sendable, Equatable {
     public var activeTool: Int?
     public var filaments: [LoadedFilament] = []
     public var position: [Double] = []
+    public var chamber: Heater?
+    /// Part-cooling fan in percent.
+    public var fanPercent: Double?
+    public var auxFanPercent: Double?
+    /// 1 silent, 2 standard, 3 sport (Anycubic).
+    public var speedMode: Int?
+    public var lightOn: Bool?
+    public var filamentBox: FilamentBox?
+    public var firmware: String?
+    public var cameraStreamURL: URL?
+    /// Remaining time reported by the printer itself, if any.
+    public var reportedRemainingSeconds: Double?
+    /// Anycubic task id of the running job.
+    public var taskID: String?
 
     public init() {}
 
     /// Remaining time estimated from progress (like Fluidd's "file" estimate).
     public var remainingSeconds: Double? {
+        if let r = reportedRemainingSeconds, state == .printing || state == .paused { return r }
         guard state == .printing || state == .paused, progress > 0.01 else { return nil }
         return printDuration / progress - printDuration
     }
@@ -138,4 +171,105 @@ public struct PrinterStatus: Sendable, Equatable {
 
 extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+// MARK: - Anycubic LAN reports
+
+extension PrinterStatus {
+    /// Merges one Anycubic MQTT report (`type` = topic kind, `data` = payload "data").
+    public mutating func applyAnycubic(type: String, data: [String: Any]) {
+        func num(_ v: Any?) -> Double? { jsonNumber(v) }
+        func applyTemps(_ t: [String: Any]) {
+            if tools.isEmpty { tools = [Heater(temperature: 0, target: 0)] }
+            if let v = num(t["curr_nozzle_temp"]) { tools[0].temperature = v }
+            if let v = num(t["target_nozzle_temp"]) { tools[0].target = v }
+            if let v = num(t["curr_hotbed_temp"]) { bed.temperature = v }
+            if let v = num(t["target_hotbed_temp"]) { bed.target = v }
+            if let v = num(t["curr_chamber_temp"]) {
+                chamber = Heater(temperature: v, target: num(t["target_chamber_temp"]) ?? chamber?.target ?? 0)
+            }
+        }
+        func applyProject(_ p: [String: Any]) {
+            if let v = num(p["progress"]) { progress = v / 100 }
+            if let v = num(p["curr_layer"]) { currentLayer = Int(v) }
+            if let v = num(p["total_layers"]) { totalLayers = Int(v) }
+            if let v = num(p["remain_time"]) { reportedRemainingSeconds = v * 60 }
+            if let v = num(p["print_time"]) { printDuration = v }
+            if let f = p["filename"] as? String, !f.isEmpty { fileName = f }
+            if let t = p["taskid"] { taskID = "\(t)" }
+            if let st = p["state"] as? String { state = Self.anycubicState(st, pause: num(p["pause"])) }
+        }
+        switch type {
+        case "info":
+            if let t = data["temp"] as? [String: Any] { applyTemps(t) }
+            if let v = data["version"] as? String { firmware = v }
+            if let v = num(data["print_speed_mode"]) { speedMode = Int(v) }
+            if let v = num(data["fan_speed_pct"]) { fanPercent = v }
+            if let v = num(data["aux_fan_speed_pct"]) { auxFanPercent = v }
+            if let project = data["project"] as? [String: Any], !project.isEmpty {
+                applyProject(project)
+            } else if (data["state"] as? String) == "free" {
+                if state == .printing || state == .paused || state == .unknown { state = .standby }
+                if let last = data["last_project"] as? [String: Any], let st = last["state"] as? String {
+                    let s = Self.anycubicState(st, pause: nil)
+                    if s == .complete || s == .cancelled || s == .error { state = s }
+                    if let f = last["filename"] as? String { fileName = f }
+                }
+            }
+            if let urls = data["urls"] as? [String: Any], let rtsp = urls["rtspUrl"] as? String { cameraStreamURL = URL(string: rtsp) }
+        case "tempature", "temperature":
+            applyTemps(data)
+        case "fan":
+            if let v = num(data["fan_speed_pct"]) { fanPercent = v }
+            if let v = num(data["aux_fan_speed_pct"]) { auxFanPercent = v }
+        case "print":
+            if data["progress"] != nil { applyProject(data) }
+        case "light":
+            let light = (data["lights"] as? [[String: Any]])?.first ?? data
+            if let st = num(light["status"]) { lightOn = st != 0 }
+        case "multiColorBox":
+            guard let box = (data["multi_color_box"] as? [[String: Any]])?.first else { return }
+            var fb = filamentBox ?? FilamentBox()
+            if let v = num(box["temp"]) { fb.temperature = v }
+            let dry = box["drying_status"] as? [String: Any]
+            if let v = num(box["humidity"]) ?? num(dry?["humidity"]) { fb.humidity = v }
+            if let dry {
+                if let st = num(dry["status"]) { fb.drying = st != 0 }
+                if let v = num(dry["target_temp"]) { fb.dryingTarget = v }
+                if let v = num(dry["remain_time"]) { fb.dryingRemainingMinutes = v }
+            }
+            if let v = num(box["loaded_slot"]) { fb.activeSlot = v >= 0 ? Int(v) : nil }
+            filamentBox = fb
+            if let slots = box["slots"] as? [[String: Any]] {
+                for slot in slots {
+                    guard let idx = num(slot["index"]).map(Int.init), idx >= 0, idx < 16 else { continue }
+                    while filaments.count <= idx { filaments.append(LoadedFilament(present: false)) }
+                    let type = (slot["type"] as? String) ?? ""
+                    var color: String?
+                    if let rgb = slot["color"] as? [Any], rgb.count >= 3 {
+                        let c = rgb.prefix(3).map { Int(num($0) ?? 0) }
+                        color = String(format: "#%02X%02X%02X", c[0], c[1], c[2])
+                    }
+                    filaments[idx] = LoadedFilament(present: !type.isEmpty, vendor: (slot["sku"] as? String).flatMap { $0.isEmpty ? nil : "Anycubic" },
+                                                    type: type.isEmpty ? nil : type, subType: nil, color: color)
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    static func anycubicState(_ s: String, pause: Double?) -> JobState {
+        if let p = pause, p == 1 || p == 2 { return .paused }
+        switch s {
+        case "printing", "resumed", "resuming", "preheating", "auto_leveling", "vibrating", "flow_calibrating", "updated", "busy":
+            return .printing
+        case "paused", "pausing": return .paused
+        case "finished", "complete", "done": return .complete
+        case "stoped", "stopped", "canceled", "cancelled", "stopping": return .cancelled
+        case "failed": return .error
+        case "free": return .standby
+        default: return .printing
+        }
+    }
 }

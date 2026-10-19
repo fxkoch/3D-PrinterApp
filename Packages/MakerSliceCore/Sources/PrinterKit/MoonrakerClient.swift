@@ -26,12 +26,38 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
     /// Host or IP, optionally with port ("192.168.1.50" or "u1.local:7125").
     public var host: String
     public var apiKey: String?
+    /// "snapmakerU1" or "kobraS1" (matches SliceKit's PrinterModel).
+    public var model: String
+    public var kind: ConnectionKind
 
-    public init(id: UUID = UUID(), name: String, host: String, apiKey: String? = nil) {
+    public init(id: UUID = UUID(), name: String, host: String, apiKey: String? = nil,
+                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker) {
         self.id = id
         self.name = name
         self.host = host
         self.apiKey = apiKey
+        self.model = model
+        self.kind = kind
+    }
+
+    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        host = try c.decode(String.self, forKey: .host)
+        apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey)
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? "snapmakerU1"
+        kind = try c.decodeIfPresent(ConnectionKind.self, forKey: .kind) ?? .moonraker
+    }
+
+    /// Bare host name or IP without scheme/port.
+    public var hostOnly: String {
+        var h = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let r = h.range(of: "://") { h = String(h[r.upperBound...]) }
+        if h.hasPrefix("[") , let end = h.firstIndex(of: "]") { return String(h[...end]) }
+        return String(h.split(separator: "/").first?.split(separator: ":").first ?? "")
     }
 
     public var baseURL: URL? {
@@ -45,7 +71,7 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
 }
 
 /// Talks to Moonraker, which the Snapmaker U1 firmware runs on port 7125.
-public final class MoonrakerClient: @unchecked Sendable {
+public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public let connection: PrinterConnection
     private let session: URLSession
 
@@ -96,8 +122,7 @@ public final class MoonrakerClient: @unchecked Sendable {
     // MARK: - Jobs
 
     /// Uploads G-code into the printer's `gcodes` root and optionally starts it.
-    public func upload(gcode: Data, fileName: String, startPrint: Bool,
-                       progress: (@Sendable (Double) -> Void)? = nil) async throws {
+    public func upload(gcode: Data, fileName: String, startPrint: Bool, mapping: [SlotMapping] = []) async throws {
         let boundary = "MakerSlice-\(UUID().uuidString)"
         var body = Data()
         func field(_ name: String, _ value: String) {
@@ -112,10 +137,8 @@ public final class MoonrakerClient: @unchecked Sendable {
         var request = try makeRequest("/server/files/upload", method: "POST")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 600
-        progress?(0)
         let (data, response) = try await perform { try await self.session.upload(for: request, from: body) }
         try check(response, data)
-        progress?(1)
     }
 
     public func startPrint(fileName: String) async throws {
@@ -135,6 +158,62 @@ public final class MoonrakerClient: @unchecked Sendable {
 
     public func setBedTemperature(_ t: Int) async throws { try await runGCode("M140 S\(t)") }
     public func setToolTemperature(tool: Int, _ t: Int) async throws { try await runGCode("M104 T\(tool) S\(t)") }
+
+    public func setLight(_ on: Bool) async throws {
+        // Klipper has no standard light object; most machines (incl. the U1) expose a cavity LED macro.
+        try await runGCode(on ? "SET_LED LED=cavity_led WHITE=1" : "SET_LED LED=cavity_led WHITE=0")
+    }
+
+    public func calibration() async throws -> CalibrationData {
+        let json = try await getJSON("/printer/objects/query?bed_mesh&gcode_move&extruder&extruder1&extruder2&extruder3&configfile=settings")
+        guard let result = json["result"] as? [String: Any], let status = result["status"] as? [String: Any] else {
+            throw PrinterError.badResponse
+        }
+        return MoonrakerClient.parseCalibration(status)
+    }
+
+    static func parseCalibration(_ status: [String: Any]) -> CalibrationData {
+        let num = jsonNumber
+        var cal = CalibrationData()
+        if let mesh = status["bed_mesh"] as? [String: Any], let matrix = mesh["probed_matrix"] as? [[Any]], !matrix.isEmpty,
+           let mn = mesh["mesh_min"] as? [Any], let mx = mesh["mesh_max"] as? [Any], mn.count >= 2, mx.count >= 2 {
+            let points = matrix.map { $0.compactMap(num) }
+            if points.first?.isEmpty == false {
+                cal.bedMesh = CalibrationData.BedMesh(profile: mesh["profile_name"] as? String ?? "default",
+                                                      min: (num(mn[0]) ?? 0, num(mn[1]) ?? 0),
+                                                      max: (num(mx[0]) ?? 0, num(mx[1]) ?? 0), points: points)
+            }
+        }
+        if let gm = status["gcode_move"] as? [String: Any], let origin = gm["homing_origin"] as? [Any], origin.count >= 3 {
+            cal.zOffset = num(origin[2])
+        }
+        for name in ["extruder", "extruder1", "extruder2", "extruder3"] {
+            if let e = status[name] as? [String: Any], let pa = num(e["pressure_advance"]) { cal.pressureAdvance[name] = pa }
+        }
+        if let cfg = status["configfile"] as? [String: Any], let settings = cfg["settings"] as? [String: Any],
+           let shaper = settings["input_shaper"] as? [String: Any] {
+            for key in ["shaper_type_x", "shaper_freq_x", "shaper_type_y", "shaper_freq_y"] {
+                if let v = shaper[key] { cal.inputShaper[key] = "\(v)" }
+            }
+        }
+        return cal
+    }
+
+    public func recentEvents() async throws -> [PrinterEvent] {
+        let json = try await getJSON("/server/gcode_store?count=100")
+        guard let result = json["result"] as? [String: Any], let store = result["gcode_store"] as? [[String: Any]] else {
+            throw PrinterError.badResponse
+        }
+        return store.compactMap { item in
+            guard let message = item["message"] as? String, item["type"] as? String == "response" else { return nil }
+            let time = jsonNumber(item["time"]) ?? Date().timeIntervalSince1970
+            let level: PrinterEvent.Level = message.hasPrefix("!!") ? .error : message.lowercased().contains("warn") ? .warning : .info
+            return PrinterEvent(date: Date(timeIntervalSince1970: time), level: level,
+                                message: message.trimmingCharacters(in: CharacterSet(charactersIn: "!/ ")), source: "Konsole")
+        }
+    }
+
+    public func disconnect() {}
 
     public struct RemoteFile: Sendable, Identifiable, Hashable {
         public var id: String { path }
@@ -224,5 +303,17 @@ public final class MoonrakerClient: @unchecked Sendable {
     private func parse(_ data: Data) throws -> [String: Any] {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw PrinterError.badResponse }
         return json
+    }
+}
+
+/// Reads a JSON number regardless of how the platform bridged it.
+func jsonNumber(_ any: Any?) -> Double? {
+    switch any {
+    case let d as Double: return d
+    case let i as Int: return Double(i)
+    case let b as Bool: return b ? 1 : 0
+    case let n as NSNumber: return n.doubleValue
+    case let s as String: return Double(s)
+    default: return nil
     }
 }

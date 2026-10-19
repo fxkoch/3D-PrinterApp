@@ -104,7 +104,7 @@ final class AppModel {
         sendState = .uploading
         do {
             let data = Data(output.gcode.utf8)
-            try await client.upload(gcode: data, fileName: project.gcodeFileName, startPrint: startPrint)
+            try await client.upload(gcode: data, fileName: project.gcodeFileName, startPrint: startPrint, mapping: [])
             sendState = .done
             // Remember choices for the next model.
             defaultSettings = project.settings
