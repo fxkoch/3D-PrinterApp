@@ -14,6 +14,9 @@ targets:
     platform: iOS
     sources:
       - path: App/MakerSlice
+    scheme:
+      testTargets:
+        - MakerSliceUITests
     dependencies:
       - package: MakerSliceCore
         product: SliceKit
@@ -39,3 +42,16 @@ targets:
         Debug:
           # The slicer is compute heavy; keep it fast even in debug builds.
           SWIFT_OPTIMIZATION_LEVEL: "-O"
+  MakerSliceUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: App/MakerSliceUITests
+    dependencies:
+      - target: MakerSlice
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: de.makerslice.app.uitests
+        TEST_TARGET_NAME: MakerSlice
+        CODE_SIGN_STYLE: Automatic

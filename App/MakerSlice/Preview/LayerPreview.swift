@@ -29,7 +29,7 @@ struct LayerPreview: View {
             CGPoint(x: p.mmX * scale + offsetX, y: offsetY - p.mmY * scale)
         }
         if let previous {
-            var outline = Path()
+            var outline = SwiftUI.Path()
             for poly in previous.outline.paths {
                 outline.addLines(poly.map(point))
                 outline.closeSubpath()
@@ -38,7 +38,7 @@ struct LayerPreview: View {
         }
         for island in layer.islands {
             for e in island.extrusions {
-                var path = Path()
+                var path = SwiftUI.Path()
                 path.addLines(e.points.map(point))
                 if e.closed { path.closeSubpath() }
                 let color = color(for: e.role, tool: island.tool, filaments: filaments)

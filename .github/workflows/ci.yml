@@ -40,6 +40,31 @@ jobs:
           echo "=== tail ==="
           tail -15 build.log
           exit $status
+      - name: UI tests on simulator
+        run: |
+          set +e
+          DEVICE=$(xcrun simctl list devices available | grep -E "iPhone 1[5-7]( Pro)? \(" | head -1 | sed -E 's/^ *(iPhone[^(]*) \(.*/\1/' | xargs)
+          echo "Using simulator: $DEVICE"
+          xcodebuild test \
+            -project MakerSlice.xcodeproj \
+            -scheme MakerSlice \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            -resultBundlePath UITests.xcresult \
+            CODE_SIGNING_ALLOWED=NO > test.log 2>&1
+          status=$?
+          grep -E "error:|Test Case .*(passed|failed)|XCTAssert|Executed" test.log | head -80
+          tail -20 test.log
+          mkdir -p screenshots
+          xcrun xcresulttool export attachments --path UITests.xcresult --output-path screenshots || true
+          ls screenshots | head -50
+          exit $status
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots
+          if-no-files-found: ignore
       - name: Test core on macOS
         working-directory: Packages/MakerSliceCore
         run: swift test
