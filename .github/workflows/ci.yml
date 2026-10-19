@@ -28,12 +28,18 @@ jobs:
         run: xcodegen
       - name: Build for simulator
         run: |
-          set -o pipefail
+          set +e
           xcodebuild build \
             -project MakerSlice.xcodeproj \
             -scheme MakerSlice \
             -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO | tail -200
+            CODE_SIGNING_ALLOWED=NO > build.log 2>&1
+          status=$?
+          echo "=== errors ==="
+          grep -E "error:|fatal error" build.log | sort -u | head -150
+          echo "=== tail ==="
+          tail -15 build.log
+          exit $status
       - name: Test core on macOS
         working-directory: Packages/MakerSliceCore
         run: swift test

@@ -76,7 +76,7 @@ final class MakerWorldBrowser: NSObject {
 
     private func fetchText(_ path: String) async throws -> (Int, String) {
         let result = try await webView.callAsyncJavaScript(
-            MakerWorld.fetchTextJS, arguments: ["path": path], in: nil, in: .defaultClient
+            MakerWorld.fetchTextJS, arguments: ["path": path], in: nil, contentWorld: .defaultClient
         )
         guard let dict = result as? [String: Any] else { throw BrowserError.requestFailed(0) }
         let status = (dict["status"] as? NSNumber)?.intValue ?? 0
@@ -92,7 +92,7 @@ final class MakerWorldBrowser: NSObject {
         }
         // Fallback: the page embeds the design in its Next.js data.
         if let next = try await webView.callAsyncJavaScript(MakerWorld.nextDataJS, arguments: [:], in: nil,
-                                                             in: .defaultClient) as? String,
+                                                             contentWorld: .defaultClient) as? String,
            let design = MakerWorldDesign(nextData: next), !design.profiles.isEmpty {
             return design
         }
