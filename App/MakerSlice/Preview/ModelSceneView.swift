@@ -34,6 +34,7 @@ struct ModelSceneView: UIViewRepresentable {
         private let bedNode = SCNNode()
         private let planeNode = SCNNode()
         private var signature: [String] = []
+        private var framedIDs: [UUID] = []
         private var bedSignature = 0.0
 
         func makeScene() -> SCNScene {
@@ -83,6 +84,8 @@ struct ModelSceneView: UIViewRepresentable {
                 }
             }
             frameCamera(on: BoundingBox.empty, bedSize: bedSize)
+            framedIDs = [] // re-frame the objects on the new bed
+            signature = []
         }
 
         /// Points the camera at the objects (or the whole bed when empty), keeping the bed in view for context.
@@ -109,9 +112,11 @@ struct ModelSceneView: UIViewRepresentable {
                 return "\(o.id)-\(o.tool)-\(o.mesh.vertices.count)-\(o.volumes.count)-\(b.min.x)-\(b.min.y)-\(b.max.z)-\(color)"
             }
             guard newSignature != signature else { return }
-            let objectsChanged = newSignature.map { $0.split(separator: "-").prefix(5).joined() } != signature.map { $0.split(separator: "-").prefix(5).joined() }
             signature = newSignature
-            if objectsChanged {
+            // Re-frame when the set of objects changes (new model, cut, duplicate), not on recolouring.
+            let ids = objects.map(\.id)
+            if ids != framedIDs {
+                framedIDs = ids
                 var box = BoundingBox.empty
                 objects.forEach { box.include($0.boundingBox) }
                 frameCamera(on: box, bedSize: bedSize)
