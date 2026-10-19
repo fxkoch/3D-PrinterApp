@@ -133,6 +133,14 @@ public struct Polygons: Sendable, Equatable {
         }
     }
 
+    /// Splits the outlines into triangles (for closing cut faces).
+    public func triangulated() -> [Path] {
+        guard !isEmpty else { return [] }
+        return Polygons.withFlat(paths) { xy, counts, n in
+            Polygons.consumePaths(cc_triangulate(xy, counts, n))
+        }.filter { $0.count == 3 }
+    }
+
     /// Returns the parts of the open polylines `lines` that lie inside `self`.
     public func clip(lines: [Path]) -> [Path] {
         guard !isEmpty, !lines.isEmpty else { return [] }

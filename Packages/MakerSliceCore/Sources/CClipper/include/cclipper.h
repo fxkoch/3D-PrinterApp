@@ -37,6 +37,10 @@ cc_paths *cc_clip_lines(const int64_t *line_xy, const size_t *line_counts, size_
 /// Removes vertices closer than `epsilon` to the simplified outline.
 cc_paths *cc_simplify(const int64_t *xy, const size_t *counts, size_t path_count, double epsilon);
 
+/// Triangulates non-intersecting polygons (outer + holes). Each result path has 3 points.
+/// Returns NULL when the input cannot be triangulated.
+cc_paths *cc_triangulate(const int64_t *xy, const size_t *counts, size_t path_count);
+
 /// Signed area of a single closed path (positive = counter-clockwise).
 double cc_area(const int64_t *xy, size_t count);
 

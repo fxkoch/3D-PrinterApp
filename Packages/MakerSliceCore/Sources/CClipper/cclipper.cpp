@@ -94,6 +94,12 @@ cc_paths *cc_simplify(const int64_t *xy, const size_t *counts, size_t path_count
     return fromPaths(SimplifyPaths(toPaths(xy, counts, path_count), epsilon, true));
 }
 
+cc_paths *cc_triangulate(const int64_t *xy, const size_t *counts, size_t path_count) {
+    Paths64 solution;
+    if (Triangulate(toPaths(xy, counts, path_count), solution, true) != TriangulateResult::success) return nullptr;
+    return fromPaths(solution);
+}
+
 double cc_area(const int64_t *xy, size_t count) {
     Path64 path;
     path.reserve(count);
