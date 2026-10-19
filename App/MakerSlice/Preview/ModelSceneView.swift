@@ -82,8 +82,22 @@ struct ModelSceneView: UIViewRepresentable {
                     bedNode.addChildNode(node)
                 }
             }
-            cameraNode.position = SCNVector3(0, Float(bedSize) * 0.85, Float(bedSize) * 1.2)
-            cameraNode.look(at: SCNVector3(0, 10, 0))
+            frameCamera(on: BoundingBox.empty, bedSize: bedSize)
+        }
+
+        /// Points the camera at the objects (or the whole bed when empty), keeping the bed in view for context.
+        private func frameCamera(on box: BoundingBox, bedSize: Double) {
+            let c = bedSize / 2
+            var target = SCNVector3(0, 10, 0)
+            var distance = Float(bedSize) * 1.45
+            if !box.isEmpty {
+                let size = box.size
+                let extent = max(size.x, size.y, size.z, 40)
+                target = SCNVector3(Float(box.center.x - c), Float(size.z / 2), Float(-(box.center.y - c)))
+                distance = Float(min(extent * 2.6 + 30, bedSize * 1.45))
+            }
+            cameraNode.position = SCNVector3(target.x, target.y + distance * 0.55, target.z + distance * 0.83)
+            cameraNode.look(at: target)
         }
 
         func update(objects: [ModelObject], filaments: [Filament], bedSize: Double, cutPlane: (CutAxis, Double)?) {
@@ -95,7 +109,13 @@ struct ModelSceneView: UIViewRepresentable {
                 return "\(o.id)-\(o.tool)-\(o.mesh.vertices.count)-\(o.volumes.count)-\(b.min.x)-\(b.min.y)-\(b.max.z)-\(color)"
             }
             guard newSignature != signature else { return }
+            let objectsChanged = newSignature.map { $0.split(separator: "-").prefix(5).joined() } != signature.map { $0.split(separator: "-").prefix(5).joined() }
             signature = newSignature
+            if objectsChanged {
+                var box = BoundingBox.empty
+                objects.forEach { box.include($0.boundingBox) }
+                frameCamera(on: box, bedSize: bedSize)
+            }
             modelsNode.childNodes.forEach { $0.removeFromParentNode() }
             for object in objects {
                 let hex = filaments.isEmpty ? "#3D8BFF" : filaments[min(object.tool, filaments.count - 1)].color

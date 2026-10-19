@@ -120,11 +120,15 @@ final class MakerSliceUITests: XCTestCase {
         app.launchArguments = ["-uiTestSampleModel"]
         app.launch()
         XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20))
+        // Bring the objects panel above the bottom bar before using its menu.
+        app.scrollViews.element(boundBy: 0).swipeUp()
+        sleep(1)
         let menu = app.buttons["objectMenu"].firstMatch
-        if !menu.isHittable { app.swipeUp() }
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
         menu.tap()
-        app.buttons["Teilen …"].tap()
+        let cut = app.buttons["Teilen …"].firstMatch
+        XCTAssertTrue(cut.waitForExistence(timeout: 5), "object menu should offer the cut tool")
+        cut.tap()
         XCTAssertTrue(app.buttons["confirmCut"].waitForExistence(timeout: 5))
         sleep(2)
         snapshot("30-Teilen")
