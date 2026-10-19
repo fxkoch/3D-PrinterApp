@@ -30,21 +30,25 @@ struct RootView: View {
         @Bindable var model = model
         TabView(selection: $model.tab) {
             DiscoverView()
-                .tabItem { Label("Entdecken", systemImage: "globe") }
+                .tabItem { Label("Entdecken", systemImage: "magnifyingglass") }
                 .tag(AppTab.discover)
             LibraryView()
                 .tabItem { Label("Bibliothek", systemImage: "square.stack.3d.up") }
                 .tag(AppTab.library)
-            PrinterView()
+            PrintersView()
                 .tabItem { Label("Drucker", systemImage: "printer") }
-                .tag(AppTab.printer)
+                .tag(AppTab.printers)
+                .badge(model.log.errorCount > 0 ? Text("!") : nil)
+            SettingsView()
+                .tabItem { Label("Einstellungen", systemImage: "gearshape") }
+                .tag(AppTab.settings)
         }
         .fullScreenCover(item: $model.project) { project in
             PrepareView(project: project)
         }
         .overlay {
             if model.isLoadingModel {
-                ProgressView("Modell wird geladen …")
+                ProgressView(model.loadingMessage)
                     .padding(24)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
             }

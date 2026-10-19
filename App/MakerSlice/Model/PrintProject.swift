@@ -15,7 +15,10 @@ final class PrintProject: Identifiable {
     }
     private(set) var objects: [ModelObject] = []
     var settings: PrintSettings {
-        didSet { if settings != oldValue { invalidate() } }
+        didSet {
+            if settings.printer != oldValue.printer { rearrange(objects) }
+            if settings != oldValue { invalidate() }
+        }
     }
 
     enum SliceState {
@@ -27,7 +30,14 @@ final class PrintProject: Identifiable {
 
     private(set) var state: SliceState = .idle
     private(set) var warning: String?
-    private var sliceTask: Task<Void, Never>?
+    private(set) var recommendations: [Recommendation] = []
+    private(set) var analyzing = false
+    /// Recommendations the user dismissed for this project.
+    var dismissed: Set<String> = []
+
+    @ObservationIgnored private var sliceTask: Task<Void, Never>?
+    @ObservationIgnored private var adviceTask: Task<Void, Never>?
+    @ObservationIgnored var loadedTypes: [String?] = []
 
     init(name: String, imported: ImportedModel, settings base: PrintSettings) {
         self.name = name
@@ -38,7 +48,7 @@ final class PrintProject: Identifiable {
         plate = imported.plates.first
         layoutPlate()
         if imported.hasPaintedColors {
-            warning = "Das Modell enthält Farbbemalung. Sie wird nicht übernommen – jedes Objekt wird mit einem Druckkopf gedruckt."
+            warning = "Das Modell enthält Farbbemalung. Sie wird nicht übernommen – jedes Objekt wird mit einem Slot gedruckt."
         }
     }
 
@@ -56,17 +66,21 @@ final class PrintProject: Identifiable {
         Array(Set(objects.map(\.tool))).sorted()
     }
 
+    var openRecommendations: [Recommendation] {
+        recommendations.filter { $0.action != nil && !dismissed.contains($0.id) }
+    }
+
     // MARK: - Editing
 
     func setTool(_ tool: Int, for objectID: ModelObject.ID) {
         guard let idx = objects.firstIndex(where: { $0.id == objectID }) else { return }
         objects[idx].tool = tool
-        invalidate()
+        changed()
     }
 
     func remove(_ objectID: ModelObject.ID) {
         objects.removeAll { $0.id == objectID }
-        invalidate()
+        changed()
     }
 
     func duplicate(_ objectID: ModelObject.ID) {
@@ -87,7 +101,9 @@ final class PrintProject: Identifiable {
     func layFlat(_ objectID: ModelObject.ID) {
         guard let idx = objects.firstIndex(where: { $0.id == objectID }) else { return }
         var list = objects
+        // Volumes follow the main mesh only for simple objects; lay-flat resets them.
         list[idx].mesh = list[idx].mesh.laidFlat()
+        list[idx].volumes = []
         rearrange(list)
     }
 
@@ -95,12 +111,38 @@ final class PrintProject: Identifiable {
         rearrange(objects)
     }
 
+    /// Replaces an object by the pieces of a cut.
+    func cut(_ objectID: ModelObject.ID, options: CutOptions) throws {
+        guard let idx = objects.firstIndex(where: { $0.id == objectID }) else { return }
+        let parts = try MeshCutter.cut(objects[idx], options)
+        var list = objects
+        list.remove(at: idx)
+        list.insert(contentsOf: parts, at: idx)
+        rearrange(list)
+    }
+
+    func autoSplit(_ objectID: ModelObject.ID) throws {
+        try apply(.autoSplit(objectID: objectID))
+    }
+
+    func apply(_ action: Recommendation.Action) throws {
+        var s = settings
+        var list = objects
+        try PrintAdvisor.apply(action, settings: &s, objects: &list)
+        objects = list
+        settings = s
+        if PlateArranger.arrange(objects, bedSize: settings.bedSize) == nil {
+            warning = "Die Objekte passen nicht auf das Druckbett."
+        }
+        changed()
+    }
+
     private func transform(_ objectID: ModelObject.ID, _ t: Transform3D) {
         guard let idx = objects.firstIndex(where: { $0.id == objectID }) else { return }
         var list = objects
-        let center = list[idx].mesh.boundingBox.center
+        let center = list[idx].boundingBox.center
         let toOrigin = Transform3D.translation(Vec3(-center.x, -center.y, 0))
-        list[idx].mesh = list[idx].mesh.transformed(toOrigin.then(t))
+        list[idx] = list[idx].transformed(toOrigin.then(t))
         rearrange(list)
     }
 
@@ -110,9 +152,9 @@ final class PrintProject: Identifiable {
             warning = nil
         } else {
             objects = list
-            warning = "Die Objekte passen nicht auf das 270 × 270 mm Druckbett."
+            warning = "Nicht alles passt auf das \(Int(settings.bedSize)) × \(Int(settings.bedSize)) mm Druckbett. Zu große Teile lassen sich über „Teilen“ zerlegen."
         }
-        invalidate()
+        changed()
     }
 
     private func layoutPlate() {
@@ -121,11 +163,33 @@ final class PrintProject: Identifiable {
         if let centered = PlateArranger.recenter(selection, bedSize: settings.bedSize) {
             objects = centered
             warning = nil
+            changed()
         } else {
             rearrange(selection)
-            return
         }
+    }
+
+    private func changed() {
         invalidate()
+        refreshRecommendations()
+    }
+
+    // MARK: - Advice
+
+    func refreshRecommendations() {
+        adviceTask?.cancel()
+        let objects = self.objects, settings = self.settings, loaded = loadedTypes
+        analyzing = true
+        adviceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000) // debounce
+            guard !Task.isCancelled else { return }
+            let recs = await Task.detached(priority: .utility) {
+                PrintAdvisor.recommendations(objects: objects, settings: settings, loadedTypes: loaded)
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            self.recommendations = recs
+            self.analyzing = false
+        }
     }
 
     // MARK: - Slicing
@@ -143,14 +207,18 @@ final class PrintProject: Identifiable {
         let cancelFlag = CancelFlag()
         sliceTask = Task { [weak self] in
             let progressHandler: @Sendable (SliceProgress) -> Void = { p in
-                Task { @MainActor [weak self] in
+                Task { @MainActor in
                     guard let self, case .slicing = self.state else { return }
                     self.state = .slicing(phase: p.phase, fraction: p.fraction)
                 }
             }
             let result = await withTaskCancellationHandler {
-                await Task.detached(priority: .userInitiated) {
-                    Result { try job.run(isCancelled: { cancelFlag.isSet }, progress: progressHandler) }
+                await Task.detached(priority: .userInitiated) { () -> Result<SliceJob.Output, Error> in
+                    do {
+                        return .success(try job.run(isCancelled: { cancelFlag.isSet }, progress: progressHandler))
+                    } catch {
+                        return .failure(error)
+                    }
                 }.value
             } onCancel: {
                 cancelFlag.set()

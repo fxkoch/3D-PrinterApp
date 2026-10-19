@@ -83,6 +83,34 @@ final class MakerWorldBrowser: NSObject {
         return (status, dict["body"] as? String ?? "")
     }
 
+    /// True once a makerworld.com page is loaded (needed for same-origin API calls).
+    var isOnMakerWorld: Bool {
+        currentURL?.host?.contains("makerworld") == true
+    }
+
+    /// Keyword search (empty = trending). Runs inside the MakerWorld page.
+    func search(_ keyword: String, order: SearchOrder) async throws -> [ModelSearchResult] {
+        for _ in 0..<50 where !isOnMakerWorld || isLoading {
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        let (status, body) = try await fetchText(MakerWorld.searchPath(keyword, order: order))
+        guard status == 200 else { throw BrowserError.requestFailed(status) }
+        return MakerWorld.parseSearch(Data(body.utf8))
+    }
+
+    /// Loads design details (title, print profiles) for any design id.
+    func loadDesign(id: Int) async throws -> MakerWorldDesign {
+        for _ in 0..<50 where !isOnMakerWorld || isLoading {
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        let (status, body) = try await fetchText(MakerWorld.designPath(id))
+        if status == 200, let design = MakerWorldDesign(json: Data(body.utf8)), !design.profiles.isEmpty {
+            return design
+        }
+        if status != 200 { throw BrowserError.requestFailed(status) }
+        throw BrowserError.noProfiles
+    }
+
     /// Loads design details (title, print profiles) for the open model page.
     func loadDesign() async throws -> MakerWorldDesign {
         guard let model else { throw BrowserError.notOnModelPage }
