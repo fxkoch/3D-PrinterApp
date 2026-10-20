@@ -24,6 +24,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     private var lastQuery = Date.distantPast
     private var pingTimer: DispatchSourceTimer?
     private var packetID: UInt16 = 1
+    private var rawReports: [String: Data] = [:]
 
     public init(connection: PrinterConnection) {
         self.connection = connection
@@ -215,6 +216,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         guard parts.count >= 2, parts.last == "report" else { return }
         let type = String(parts[parts.count - 2])
         let data = json["data"] as? [String: Any] ?? [:]
+        locked { rawReports[type] = payload }
         if let code = jsonNumber(json["code"]), code != 200, code != 0 {
             log(.error, "\(type): \(json["msg"] as? String ?? "Fehler") (Code \(Int(code)))")
         }
@@ -393,6 +395,9 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         default: return key.replacingOccurrences(of: "_", with: " ")
         }
     }
+
+    /// Latest raw JSON report per message type (info, tempature, fan, light, …) – for diagnosing parser differences.
+    public func latestRawReports() -> [String: Data] { locked { rawReports } }
 
     public func recentEvents() async throws -> [PrinterEvent] {
         locked { events }
