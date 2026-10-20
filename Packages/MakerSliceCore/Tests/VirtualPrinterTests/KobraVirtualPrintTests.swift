@@ -56,7 +56,7 @@ final class KobraVirtualPrintTests: XCTestCase {
         XCTAssertEqual(status.filaments.map(\.type), ["PLA", "PLA", "PETG", nil])
         XCTAssertFalse(status.filaments[3].present)
         XCTAssertEqual(status.filamentBox?.humidity ?? 0, 46, accuracy: 5)
-        XCTAssertEqual(status.state, .standby)
+        XCTAssertFalse([.printing, .paused].contains(status.state), "idle (or showing the previous job's result)")
 
         // 2. Two colours: slot 1 (white PLA) and slot 3 (red PETG) – advisor flags PETG/humidity sensibly.
         var settings = PrintSettings(printer: .kobraS1)
