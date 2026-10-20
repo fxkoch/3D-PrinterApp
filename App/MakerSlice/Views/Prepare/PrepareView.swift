@@ -72,6 +72,9 @@ struct PrepareView: View {
             .sheet(item: $cutObject) { object in
                 CutView(project: project, object: object)
             }
+            .sheet(isPresented: Binding(get: { project.profileReport != nil }, set: { if !$0 { project.dismissProfile() } })) {
+                if let report = project.profileReport { ProjectProfileView(project: project, report: report) }
+            }
             .sheet(isPresented: $showAdvice) {
                 RecommendationsView(project: project, mode: .review)
             }

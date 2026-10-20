@@ -36,6 +36,9 @@ final class PrintProject: Identifiable {
     /// Recommendations the user dismissed for this project.
     var dismissed: Set<String> = []
 
+    /// What is special in the profile the downloaded model brings along; shown to the user before anything is taken over.
+    private(set) var profileReport: ProfileReport?
+
     @ObservationIgnored private var sliceTask: Task<Void, Never>?
     @ObservationIgnored private var adviceTask: Task<Void, Never>?
     @ObservationIgnored var loadedTypes: [String?] = []
@@ -46,7 +49,11 @@ final class PrintProject: Identifiable {
         self.name = name
         self.imported = imported
         var s = base
-        if let project = imported.projectSettings { s.apply(project) }
+        if let project = imported.projectSettings {
+            s.applyMaterials(project)
+            let report = ProfileAdvisor.analyze(project: project, settings: s)
+            if !report.isEmpty { profileReport = report }
+        }
         settings = s
         plate = imported.plates.first
         layoutPlate()
@@ -54,6 +61,14 @@ final class PrintProject: Identifiable {
             warning = "Das Modell enthält Farbbemalung. Sie wird nicht übernommen – jedes Objekt wird mit einem Slot gedruckt."
         }
     }
+
+    /// Takes over the chosen differences of the model's profile.
+    func applyProfile(_ changes: [ProfileChange]) {
+        settings = ProfileAdvisor.apply(changes, to: settings)
+        profileReport = nil
+    }
+
+    func dismissProfile() { profileReport = nil }
 
     var output: SliceJob.Output? {
         if case .done(let o) = state { return o }

@@ -3,7 +3,7 @@ import Foundation
 /// Writes arranged objects as an OrcaSlicer/Bambu-compatible 3MF: one object per model object with its
 /// tool in `model_settings.config`; connector pegs become extra parts, connector holes negative parts.
 public enum ThreeMFWriter {
-    public static func write(_ objects: [ModelObject]) -> Data {
+    public static func write(_ objects: [ModelObject], layerGCodes: [LayerGCode] = []) -> Data {
         var resources = ""
         var build = ""
         var settings = ""
@@ -81,12 +81,23 @@ public enum ThreeMFWriter {
         </Relationships>
 
         """
-        return ZipArchive.write([
+        var files: [(path: String, data: Data)] = [
             ("[Content_Types].xml", Data(contentTypes.utf8)),
             ("_rels/.rels", Data(rels.utf8)),
             ("3D/3dmodel.model", Data(model.utf8)),
             ("Metadata/model_settings.config", Data(modelSettings.utf8)),
-        ])
+        ]
+        let codes = layerGCodes.filter { !$0.lines.filter(LayerGCode.isAllowed).isEmpty }
+        if !codes.isEmpty {
+            var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<custom_gcodes_per_layer>\n<plate>\n<plate_info id=\"1\"/>\n"
+            for code in codes {
+                let text = escape(code.lines.filter(LayerGCode.isAllowed).joined(separator: "\n")).replacingOccurrences(of: "\n", with: "&#10;")
+                xml += "<layer top_z=\"\(formatDecimal(code.z, digits: 4))\" type=\"4\" extruder=\"1\" color=\"\" extra=\"\(text)\" gcode=\"\(text)\"/>\n"
+            }
+            xml += "<mode value=\"SingleExtruder\"/>\n</plate>\n</custom_gcodes_per_layer>\n"
+            files.append(("Metadata/custom_gcode_per_layer.xml", Data(xml.utf8)))
+        }
+        return ZipArchive.write(files)
     }
 
     private static func meshXML(_ mesh: TriangleMesh) -> String {

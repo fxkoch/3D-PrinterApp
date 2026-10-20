@@ -71,7 +71,7 @@ final class AppModel {
             printers.add(PrinterConnection(name: "Virtueller Kobra S1", host: "127.0.0.1",
                                            model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
         }
-        if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") {
+        if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") || ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") {
             loadSample()
         }
     }
@@ -153,6 +153,16 @@ final class AppModel {
 
     /// Small built-in test model (used by UI tests and the empty library).
     func loadSample() {
+        if ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") {
+            // A temperature tower as downloaded from the internet: own flow, ironing and temperature steps.
+            let config = ##"{"print_settings_id":"0.20mm Standard @BBL X1C","printer_model":"Bambu Lab X1 Carbon","layer_height":"0.2","ironing_type":"top","print_flow_ratio":"0.95","seam_gap":"0","filament_type":["PETG"],"nozzle_temperature":["290"],"filament_flow_ratio":["0.93"],"outer_wall_speed":"120"}"##
+            let xml = ##"<custom_gcodes_per_layer><plate><plate_info id="1"/><layer top_z="0.2" type="4" extruder="1" color="" extra="M104 S290" gcode="M104 S290"/><layer top_z="5.2" type="4" extruder="1" color="" extra="M104 S280" gcode="M104 S280"/></plate></custom_gcodes_per_layer>"##
+            load(name: "Temperaturturm") {
+                ImportedModel(objects: [ModelObject(name: "Turm", mesh: SampleModels.cube(20))],
+                              projectSettings: ProjectSettings.fromConfig(Data(config.utf8), layerGCodeXML: Data(xml.utf8)))
+            }
+            return
+        }
         load(name: "Kalibrierwürfel") {
             ImportedModel(objects: [ModelObject(name: "Würfel 20 mm", mesh: SampleModels.cube(20))])
         }

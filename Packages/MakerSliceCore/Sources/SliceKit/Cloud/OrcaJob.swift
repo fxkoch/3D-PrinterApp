@@ -36,7 +36,7 @@ public struct OrcaJob: Sendable {
             },
         ]
         self.manifest = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
-        model = ThreeMFWriter.write(objects)
+        model = ThreeMFWriter.write(objects, layerGCodes: settings.layerGCodes)
     }
 
     // MARK: - Mapping to Orca keys

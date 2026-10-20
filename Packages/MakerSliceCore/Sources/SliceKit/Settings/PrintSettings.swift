@@ -177,6 +177,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     /// They only take effect when slicing in the cloud with OrcaSlicer.
     public var extraOptions: [String: String] = [:]
 
+    /// G-code taken over from a project file, inserted before the layer at the given height (e.g. temperature towers).
+    public var layerGCodes: [LayerGCode] = []
+
     public init() {}
 
     /// Settings with the machine's defaults and its default material.
@@ -247,6 +250,11 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         if let v = project.supportEnabled { support = v ? (project.supportOnBuildPlateOnly == false ? .everywhere : .buildPlateOnly) : .off }
         if let v = project.brimWidth, (0...20).contains(v) { brimWidth = v }
         if let v = project.ironing { ironing = v }
+        applyMaterials(project)
+    }
+
+    /// Takes over the filament types, vendors and colours of a project file (the material mapping), not the process values.
+    public mutating func applyMaterials(_ project: ProjectSettings) {
         for (i, type) in project.filamentTypes.prefix(filaments.count).enumerated() {
             let vendor = i < project.filamentVendors.count ? project.filamentVendors[i] : nil
             if let preset = FilamentLibrary.bestMatch(type: type, vendor: vendor, printer: printer) {
@@ -314,7 +322,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.fuzzySkinThickness, &fuzzySkinThickness); d(.fuzzySkinPointDistance, &fuzzySkinPointDistance)
         d(.plateType, &plateType); d(.filaments, &filaments)
         d(.enableTimelapse, &enableTimelapse); d(.enableBedLeveling, &enableBedLeveling)
-        d(.extraOptions, &extraOptions)
+        d(.extraOptions, &extraOptions); d(.layerGCodes, &layerGCodes)
         while filaments.count < machine.toolCount { filaments.append(filaments.last ?? .pla) }
     }
 }

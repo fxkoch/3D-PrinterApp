@@ -95,9 +95,15 @@ public struct GCodeWriter {
             body.line("SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(pa))")
         }
 
+        var pendingLayerGCodes = s.layerGCodes.map { ($0.z, $0.lines.filter(LayerGCode.isAllowed)) }.filter { !$0.1.isEmpty }
         for layer in layers {
             let height = layer.height
             body.line(";LAYER_CHANGE")
+            while let next = pendingLayerGCodes.first, next.0 <= layer.z + 0.001 {
+                body.line("; vom Modell eingefügt (Höhe \(fmt(next.0)))")
+                next.1.forEach { body.line($0) }
+                pendingLayerGCodes.removeFirst()
+            }
             body.line(";Z:\(fmt(layer.z))")
             body.line(";HEIGHT:\(fmt(height))")
             dialect.beforeLayer(layer, ctx).forEach { body.line($0) }

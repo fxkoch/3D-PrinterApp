@@ -86,6 +86,20 @@ final class MakerSliceUITests: XCTestCase {
         }
     }
 
+    /// A downloaded model with its own profile: the app asks before taking it over.
+    func testAsksBeforeTakingOverModelProfile() {
+        app.launchArguments += ["-uiTestProfileModel"]
+        app.launch()
+        let apply = app.buttons["profileApply"]
+        XCTAssertTrue(apply.waitForExistence(timeout: 20), "the profile question should appear")
+        snapshot("60-Profil-Rueckfrage")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Düsentemperatur'")).firstMatch.exists)
+        apply.tap()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 10))
+        XCTAssertFalse(apply.exists, "the question must go away after the choice")
+        snapshot("61-Profil-uebernommen")
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

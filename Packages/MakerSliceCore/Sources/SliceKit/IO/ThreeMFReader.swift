@@ -89,6 +89,21 @@ public struct ProjectSettings: Sendable, Equatable {
     public var filamentTypes: [String] = []
     public var filamentVendors: [String] = []
     public var printerModel: String?
+    /// Name of the process preset the file was made with (`print_settings_id`).
+    public var profileName: String?
+    /// Every single-valued setting of the project, OrcaSlicer key → value.
+    public var raw: [String: String] = [:]
+    /// Per-filament settings (temperatures, flow, fan …), OrcaSlicer key → one value per filament.
+    public var perFilament: [String: [String]] = [:]
+    /// G-code the project inserts at certain heights (e.g. temperature towers change the nozzle temperature).
+    public var layerGCodes: [LayerGCode] = []
+
+    /// Reads `Metadata/project_settings.config` (JSON) and optionally `Metadata/custom_gcode_per_layer.xml`.
+    public static func fromConfig(_ config: Data, layerGCodeXML: Data? = nil) -> ProjectSettings? {
+        guard var project = parse(config) else { return nil }
+        if let xml = layerGCodeXML { project.layerGCodes = LayerGCode.parse(xml) }
+        return project
+    }
 
     static func parse(_ data: Data) -> ProjectSettings? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -123,7 +138,57 @@ public struct ProjectSettings: Sendable, Equatable {
         s.filamentColors = json["filament_colour"] as? [String] ?? []
         s.filamentTypes = json["filament_type"] as? [String] ?? []
         s.printerModel = string("printer_model")
+        s.profileName = string("print_settings_id")
+        for (key, value) in json {
+            if let v = value as? String { s.raw[key] = v }
+            else if let list = value as? [String] {
+                if list.count == 1 { s.raw[key] = list[0] }
+                s.perFilament[key] = list
+            }
+        }
         return s
+    }
+}
+
+extension ProjectSettings {
+    func withLayerGCodes(_ codes: [LayerGCode]) -> ProjectSettings {
+        var copy = self
+        copy.layerGCodes = codes
+        return copy
+    }
+}
+
+/// G-code a project inserts before the layer at height `z`.
+public struct LayerGCode: Codable, Sendable, Hashable {
+    public var z: Double
+    public var lines: [String]
+
+    public init(z: Double, lines: [String]) {
+        self.z = z
+        self.lines = lines
+    }
+
+    /// Commands that only change temperature, fan, speed, flow or pressure advance – the only ones taken over from a file.
+    static let allowedPrefixes = ["M104", "M109", "M140", "M190", "M106", "M107", "M220", "M221", "M900", "M572", "SET_PRESSURE_ADVANCE", "M117"]
+
+    static func isAllowed(_ line: String) -> Bool {
+        let command = line.trimmingCharacters(in: .whitespaces).uppercased()
+        return allowedPrefixes.contains { command == $0 || command.hasPrefix($0 + " ") }
+    }
+
+    /// Reads `Metadata/custom_gcode_per_layer.xml` (Bambu Studio / OrcaSlicer).
+    static func parse(_ data: Data) -> [LayerGCode] {
+        var result: [LayerGCode] = []
+        XMLTagScanner(data: data).forEachTag { tag in
+            guard tag.localName == "layer", !tag.isClosing, let z = tag.attribute("top_z").flatMap(Double.init) else { return }
+            let type = tag.attribute("type").flatMap(Int.init)
+            let gcode = tag.attribute("gcode").flatMap { $0.isEmpty ? nil : $0 } ?? (type == 4 ? tag.attribute("extra") : nil)
+            guard let gcode else { return }
+            let lines = gcode.replacingOccurrences(of: "&#10;", with: "\n").replacingOccurrences(of: "&#13;", with: "")
+                .split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            if !lines.isEmpty { result.append(LayerGCode(z: z, lines: lines)) }
+        }
+        return result.sorted { $0.z < $1.z }
     }
 }
 
@@ -189,7 +254,11 @@ public enum ThreeMFReader {
 
         let settings: (objects: [String: ObjectSettings], plateForObject: [String: Int]) =
             try zip.contents(of: "Metadata/model_settings.config").map(parseModelSettings) ?? ([:], [:])
-        let project = try zip.contents(of: "Metadata/project_settings.config").flatMap(ProjectSettings.parse)
+        var project = try zip.contents(of: "Metadata/project_settings.config").flatMap(ProjectSettings.parse)
+        if let xml = try zip.contents(of: "Metadata/custom_gcode_per_layer.xml") {
+            let codes = LayerGCode.parse(xml)
+            if !codes.isEmpty { project = (project ?? ProjectSettings()).withLayerGCodes(codes) }
+        }
 
         var result: [ModelObject] = []
         for (index, item) in buildItems.enumerated() where item.printable {
