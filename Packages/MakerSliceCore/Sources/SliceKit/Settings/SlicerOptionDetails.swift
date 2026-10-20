@@ -5,6 +5,8 @@ public enum SettingDiagram: String, Sendable, CaseIterable {
     case layerHeight, lineWidth, wallCount, infillDensity, ironing, seam, scarfSeam, bridge, overhang
     case elephantFoot, arcFitting, supportGap, brim, fuzzySkin, crossingWalls, holeSize, topShell
     case flow, stringing, wallOrder, polyhole, thinWall, primeTower
+    case speed, acceleration, jerk, infillPattern, surfacePattern, supportType, supportInterface, raft, skirt, wipe
+    case gapFill, bridgeDensity, interlocking, flush, gcodeText, preheat, spiralVase, printSequence, filamentAssign, minFeature
 
     /// Captions for the left (less / off) and right (more / on) picture.
     public var captions: (String, String) {
@@ -29,9 +31,29 @@ public enum SettingDiagram: String, Sendable, CaseIterable {
         case .flow: return ("zu wenig Fluss", "zu viel Fluss")
         case .stringing: return ("mit Fäden", "ohne Fäden")
         case .wallOrder: return ("innen → außen", "außen → innen")
-        case .polyhole: return ("Loch als Vieleck", "Polyhole")
+        case .polyhole: return ("rundes Loch (zu eng)", "Polyhole (passt)")
         case .thinWall: return ("Lücke", "Einzellinie")
         case .primeTower: return ("ohne Turm", "mit Turm")
+        case .speed: return ("langsam", "schnell")
+        case .acceleration: return ("sanft beschleunigt", "stark beschleunigt")
+        case .jerk: return ("niedriger Ruck", "hoher Ruck")
+        case .infillPattern: return ("Gitter-Muster", "Wellen-Muster (Gyroid)")
+        case .surfacePattern: return ("parallele Linien", "konzentrisch")
+        case .supportType: return ("normaler Support", "Baum-Support")
+        case .supportInterface: return ("ohne Kontaktschicht", "mit Kontaktschicht")
+        case .raft: return ("ohne Raft", "mit Raft")
+        case .skirt: return ("ohne Schürze", "mit Schürze")
+        case .wipe: return ("ohne Abwischen", "mit Abwischen")
+        case .gapFill: return ("Lücke bleibt", "Lücke gefüllt")
+        case .bridgeDensity: return ("lockere Brücke", "dichte Brücke")
+        case .interlocking: return ("glatte Grenze", "Verzahnung")
+        case .flush: return ("in den Turm", "in die Füllung")
+        case .gcodeText: return ("kompakter G-Code", "ausführlicher G-Code")
+        case .preheat: return ("ohne Vorheizen", "mit Vorheizen")
+        case .spiralVase: return ("Schicht für Schicht", "Spirale (Vase)")
+        case .printSequence: return ("Schicht für Schicht", "Objekt für Objekt")
+        case .filamentAssign: return ("ein Filament", "Filament je Bereich")
+        case .minFeature: return ("Detail fehlt", "Detail gedruckt")
         }
     }
 }
@@ -46,7 +68,7 @@ public struct SlicerOptionDetail: Sendable, Equatable {
 }
 
 public enum SlicerOptionDetails {
-    public static func detail(for key: String) -> SlicerOptionDetail? { all[key] }
+    public static func detail(for key: String) -> SlicerOptionDetail? { all[key] ?? generated[key] }
 
     private static func d(_ meaning: String, more: String? = nil, less: String? = nil, example: String? = nil, diagram: SettingDiagram? = nil) -> SlicerOptionDetail {
         SlicerOptionDetail(meaning: meaning, more: more, less: less, example: example, diagram: diagram)
@@ -86,13 +108,13 @@ public enum SlicerOptionDetails {
             less: "Klassische Naht mit sichtbarem Punkt.",
             example: "Besonders sinnvoll bei Rundungen und einfarbigen Teilen, wo die Naht sonst auffällt.", diagram: .scarfSeam),
         "seam_slope_conditional": d("Nutzt die Schrägnaht nur dort, wo sie sinnvoll ist (glatte Flächen), nicht an Ecken oder Überhängen.",
-            more: "Bessere Ergebnisse auf glatten Flächen, weniger Fehler an Ecken."),
+            more: "Bessere Ergebnisse auf glatten Flächen, weniger Fehler an Ecken.", diagram: .scarfSeam),
         "staggered_inner_seams": d("Versetzt die Nähte der Innenwände gegenüber der Außennaht.",
             more: "Die Nähte der Innenwände liegen nicht übereinander – gleichmäßigere Festigkeit.",
-            less: "Alle Nähte liegen auf einer Linie – kann eine Schwachstelle bilden."),
+            less: "Alle Nähte liegen auf einer Linie – kann eine Schwachstelle bilden.", diagram: .seam),
         "wipe_on_loops": d("Zieht die Düse am Ende der Wand ein Stück nach innen, damit der Kunststoff nicht an der Naht ausblutet.",
             more: "Weniger Tröpfchen und Klumpen an der Naht, besonders bei PETG.",
-            less: "Schneller, aber die Naht kann kleine Kleckse zeigen."),
+            less: "Schneller, aber die Naht kann kleine Kleckse zeigen.", diagram: .wipe),
         "resolution": d("Wie fein die Modellkontur in G-Code übersetzt wird. Kleinere Werte folgen der Rundung genauer.",
             more: "Kleinere Datei und schnelleres Slicen, aber eckige Rundungen.",
             less: "Sehr glatte Rundungen, aber riesige G-Code-Dateien, die manche Drucker ruckeln lassen.",
@@ -112,7 +134,7 @@ public enum SlicerOptionDetails {
             less: "Unterkante bauscht leicht aus.",
             example: "0,1–0,2 mm bei PLA; bei höherer Bett-Temperatur eher mehr.", diagram: .elephantFoot),
         "precise_outer_wall": d("Berechnet die Position der Außenwand genauer, damit das Maß auch mit Innenwänden stimmt.",
-            more: "Maßgenauere Außenflächen, besonders bei Passungen."),
+            more: "Maßgenauere Außenflächen, besonders bei Passungen.", diagram: .holeSize),
         "hole_to_polyhole": d("Wandelt runde Löcher in ein Vieleck um, dessen Ecken genau auf dem Sollmaß liegen. Gedruckte Löcher sind sonst meist zu klein.",
             more: "Schrauben und Stifte passen besser in Löcher.",
             less: "Runde Löcher, aber oft zu eng.", example: "Besonders hilfreich bei kleinen Löchern bis ca. 8 mm.", diagram: .polyhole),
@@ -174,4 +196,59 @@ public enum SlicerOptionDetails {
         "reduce_infill_retraction": d("Vermeidet Rückzüge, wenn der Weg nur über Füllung führt.",
             more: "Weniger Rückzüge – wichtig für TPU.", less: "Mehr Rückzüge, weniger Fädenziehen.", diagram: .stringing),
     ]
+}
+
+extension SettingKey {
+    /// The same setting in the vendor slicer's list, for the detailed explanation and picture.
+    public var slicerOptionKey: String? {
+        switch self {
+        case .layerHeight: return "layer_height"
+        case .firstLayerHeight: return "initial_layer_print_height"
+        case .lineWidth: return "line_width"
+        case .outerWallLineWidth: return "outer_wall_line_width"
+        case .wallLoops: return "wall_loops"
+        case .topLayers: return "top_shell_layers"
+        case .bottomLayers: return "bottom_shell_layers"
+        case .wallOrder: return "wall_sequence"
+        case .seamPosition: return "seam_position"
+        case .infillPattern: return "sparse_infill_pattern"
+        case .infillDensity: return "sparse_infill_density"
+        case .infillOverlap: return "infill_wall_overlap"
+        case .topSurfacePattern: return "top_surface_pattern"
+        case .bottomSurfacePattern: return "bottom_surface_pattern"
+        case .ironing: return "ironing_type"
+        case .ironingSpeed: return "ironing_speed"
+        case .ironingFlow: return "ironing_flow"
+        case .ironingSpacing: return "ironing_spacing"
+        case .detectBridges: return "thick_bridges"
+        case .bridgeSpeed: return "bridge_speed"
+        case .bridgeFlow: return "bridge_flow"
+        case .outerWallSpeed: return "outer_wall_speed"
+        case .innerWallSpeed: return "inner_wall_speed"
+        case .infillSpeed: return "sparse_infill_speed"
+        case .solidInfillSpeed: return "internal_solid_infill_speed"
+        case .topSurfaceSpeed: return "top_surface_speed"
+        case .firstLayerSpeed: return "initial_layer_speed"
+        case .travelSpeed: return "travel_speed"
+        case .acceleration: return "default_acceleration"
+        case .outerWallAcceleration: return "outer_wall_acceleration"
+        case .support: return "enable_support"
+        case .supportAngle: return "support_threshold_angle"
+        case .supportTopZDistance: return "support_top_z_distance"
+        case .supportXYDistance: return "support_object_xy_distance"
+        case .supportSpacing: return "support_base_pattern_spacing"
+        case .brimWidth: return "brim_width"
+        case .skirtLoops: return "skirt_loops"
+        case .skirtDistance: return "skirt_distance"
+        case .elephantFootCompensation: return "elefant_foot_compensation"
+        case .primeTower: return "enable_prime_tower"
+        case .primeTowerWidth: return "prime_tower_width"
+        case .spiralVase: return "spiral_mode"
+        case .fuzzySkin: return "fuzzy_skin"
+        case .fuzzySkinThickness: return "fuzzy_skin_thickness"
+        case .fuzzySkinPointDistance: return "fuzzy_skin_point_distance"
+        case .zHop, .retractSpeed, .retractMinTravel: return nil
+        default: return nil
+        }
+    }
 }

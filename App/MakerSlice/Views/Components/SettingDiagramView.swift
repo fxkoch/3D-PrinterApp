@@ -85,6 +85,26 @@ struct SettingDiagramPainter {
         case .polyhole: polyhole(v)
         case .thinWall: thinWall(v)
         case .primeTower: primeTower(v)
+        case .speed: speed(v)
+        case .acceleration: acceleration(v)
+        case .jerk: jerk(v)
+        case .infillPattern: infillPattern(v)
+        case .surfacePattern: surfacePattern(v)
+        case .supportType: supportType(v)
+        case .supportInterface: supportInterface(v)
+        case .raft: raft(v)
+        case .skirt: skirt(v)
+        case .wipe: wipe(v)
+        case .gapFill: gapFill(v)
+        case .bridgeDensity: bridgeDensity(v)
+        case .interlocking: interlocking(v)
+        case .flush: flush(v)
+        case .gcodeText: gcodeText(v)
+        case .preheat: preheat(v)
+        case .spiralVase: spiralVase(v)
+        case .printSequence: printSequence(v)
+        case .filamentAssign: filamentAssign(v)
+        case .minFeature: minFeature(v)
         }
     }
 
@@ -337,6 +357,197 @@ struct SettingDiagramPainter {
         } else {
             line([pt(0.15, 0.5), pt(0.85, 0.5)], plastic, width: 9)
         }
+    }
+
+    private func speed(_ v: Int) {
+        line([pt(0.1, 0.62), pt(0.9, 0.62)], plastic, width: 6)
+        let n = v == 0 ? 2 : 5
+        for i in 0..<n {
+            let x = 0.2 + 0.7 * CGFloat(i) / CGFloat(max(n - 1, 1)) * (v == 0 ? 0.4 : 1)
+            line([pt(x, 0.28), pt(x + 0.07, 0.38), pt(x, 0.48)], ink, width: 2.5)
+        }
+        if v == 1 { line([pt(0.12, 0.2), pt(0.5, 0.2)], hint, width: 2); line([pt(0.12, 0.78), pt(0.4, 0.78)], hint, width: 2) }
+    }
+
+    private func acceleration(_ v: Int) {
+        line([pt(0.1, 0.75), pt(0.75, 0.75), pt(0.75, 0.15)], plastic, width: 5)
+        if v == 1 {
+            var p = SwiftUI.Path()
+            p.move(to: pt(0.75, 0.5))
+            for i in 0..<8 { p.addLine(to: pt(0.75 + (i % 2 == 0 ? 0.04 : -0.04) * (1 - CGFloat(i) / 9), 0.5 - CGFloat(i + 1) * 0.04)) }
+            stroke(p, bad, width: 1.5)
+            ctx.draw(Text("Wellen").font(.caption2), at: pt(0.88, 0.3), anchor: .center)
+        }
+    }
+
+    private func jerk(_ v: Int) {
+        if v == 0 {
+            var p = SwiftUI.Path()
+            p.move(to: pt(0.1, 0.75)); p.addLine(to: pt(0.62, 0.75)); p.addQuadCurve(to: pt(0.78, 0.55), control: pt(0.78, 0.75)); p.addLine(to: pt(0.78, 0.15))
+            stroke(p, plastic, width: 5)
+            ctx.draw(Text("Ecke rund").font(.caption2), at: pt(0.4, 0.4), anchor: .center)
+        } else {
+            line([pt(0.1, 0.75), pt(0.78, 0.75), pt(0.78, 0.15)], plastic, width: 5)
+            line([pt(0.74, 0.72), pt(0.8, 0.78)], bad, width: 3)
+            ctx.draw(Text("scharfe Ecke").font(.caption2), at: pt(0.4, 0.4), anchor: .center)
+        }
+    }
+
+    private func infillPattern(_ v: Int) {
+        stroke(SwiftUI.Path(rect(0.2, 0.1, 0.6, 0.8)), plastic, width: 3)
+        if v == 0 {
+            for i in 1..<5 { let x = 0.2 + 0.12 * CGFloat(i); line([pt(x, 0.1), pt(x, 0.9)], plastic.opacity(0.7), width: 1.5) }
+            for i in 1..<7 { let y = 0.1 + 0.1 * CGFloat(i); line([pt(0.2, y), pt(0.8, y)], plastic.opacity(0.7), width: 1.5) }
+        } else {
+            for k in 0..<2 {
+                var p = SwiftUI.Path()
+                p.move(to: pt(0.2, 0.5))
+                for i in 0...40 { let x = 0.2 + 0.6 * CGFloat(i) / 40; p.addLine(to: pt(x, 0.5 + 0.3 * CGFloat(sin(Double(i) / 40 * 6.28 + Double(k) * 3.14)))) }
+                stroke(p, plastic.opacity(0.8), width: 1.8)
+            }
+        }
+    }
+
+    private func surfacePattern(_ v: Int) {
+        if v == 0 {
+            for i in 0..<8 { let y = 0.14 + 0.1 * CGFloat(i); line([pt(0.15, y), pt(0.85, y)], plastic, width: 4) }
+        } else {
+            for i in 0..<4 {
+                let d = CGFloat(i) * 0.08
+                stroke(SwiftUI.Path(rect(0.15 + d, 0.12 + d * 1.2, 0.7 - 2 * d, 0.76 - 2.4 * d)), plastic, width: 3.5)
+            }
+        }
+    }
+
+    private func supportType(_ v: Int) {
+        fill(SwiftUI.Path(rect(0.15, 0.18, 0.7, 0.1)), plastic)
+        if v == 0 {
+            for i in 0..<6 { let x = 0.2 + 0.12 * CGFloat(i); line([pt(x, 0.28), pt(x, 0.9)], ink.opacity(0.7), width: 2.5) }
+        } else {
+            for x in [0.3, 0.5, 0.7] as [CGFloat] {
+                line([pt(x, 0.28), pt(x, 0.5), pt(0.5, 0.7), pt(0.5, 0.9)], ink.opacity(0.7), width: 2.5)
+            }
+        }
+    }
+
+    private func supportInterface(_ v: Int) {
+        fill(SwiftUI.Path(rect(0.15, 0.1, 0.7, 0.1)), plastic)
+        if v == 1 { fill(SwiftUI.Path(rect(0.15, 0.21, 0.7, 0.07)), ink.opacity(0.8)) }
+        for i in 0..<6 { let x = 0.2 + 0.12 * CGFloat(i); line([pt(x, v == 1 ? 0.28 : 0.2), pt(x, 0.9)], ink.opacity(0.6), width: 2.5) }
+    }
+
+    private func raft(_ v: Int) {
+        line([pt(0.05, 0.9), pt(0.95, 0.9)], ink, width: 2)
+        if v == 1 {
+            for i in 0..<3 { fill(SwiftUI.Path(rect(0.1, 0.82 - 0.05 * CGFloat(i), 0.8, 0.04)), ink.opacity(0.6)) }
+        }
+        fill(SwiftUI.Path(rect(0.25, 0.3, 0.5, v == 1 ? 0.4 : 0.55)), plastic.opacity(0.8))
+    }
+
+    private func skirt(_ v: Int) {
+        fill(SwiftUI.Path(rect(0.32, 0.28, 0.36, 0.44)), ink.opacity(0.5))
+        if v == 1 { stroke(SwiftUI.Path(rect(0.18, 0.12, 0.64, 0.76)), plastic, width: 2.5) }
+    }
+
+    private func wipe(_ v: Int) {
+        let c = circle(0.5, 0.5, 0.34)
+        stroke(c, plastic, width: 4)
+        if v == 0 {
+            fill(SwiftUI.Path(ellipseIn: CGRect(x: w * 0.5 - 6, y: h * 0.84 - 6, width: 12, height: 12)), bad)
+        } else {
+            line([pt(0.5, 0.84), pt(0.5, 0.7)], good, width: 3)
+            line([pt(0.47, 0.73), pt(0.5, 0.69), pt(0.53, 0.73)], good, width: 3)
+        }
+    }
+
+    private func gapFill(_ v: Int) {
+        line([pt(0.1, 0.35), pt(0.9, 0.35)], plastic, width: 7)
+        line([pt(0.1, 0.65), pt(0.9, 0.65)], plastic, width: 7)
+        if v == 1 { line([pt(0.1, 0.5), pt(0.9, 0.5)], plastic, width: 5) }
+    }
+
+    private func bridgeDensity(_ v: Int) {
+        let step: CGFloat = v == 0 ? 0.16 : 0.06
+        var x: CGFloat = 0.12
+        while x < 0.9 { line([pt(x, 0.2), pt(x, 0.8)], plastic, width: v == 0 ? 3 : 4); x += step }
+    }
+
+    private func interlocking(_ v: Int) {
+        fill(SwiftUI.Path(rect(0.1, 0.15, 0.4, 0.7)), plastic.opacity(0.8))
+        fill(SwiftUI.Path(rect(0.5, 0.15, 0.4, 0.7)), Color.blue.opacity(0.6))
+        if v == 1 {
+            for i in 0..<5 {
+                let y = 0.2 + 0.14 * CGFloat(i)
+                fill(SwiftUI.Path(rect(i % 2 == 0 ? 0.42 : 0.5, y, 0.16, 0.08)), i % 2 == 0 ? Color.blue.opacity(0.6) : plastic.opacity(0.8))
+            }
+        }
+    }
+
+    private func flush(_ v: Int) {
+        fill(SwiftUI.Path(rect(0.1, 0.25, 0.4, 0.55)), plastic.opacity(0.5))
+        if v == 0 {
+            fill(SwiftUI.Path(rect(0.62, 0.25, 0.25, 0.55)), ink.opacity(0.5))
+            line([pt(0.5, 0.5), pt(0.62, 0.5)], good, width: 2)
+        } else {
+            for i in 0..<4 { line([pt(0.15, 0.32 + 0.12 * CGFloat(i)), pt(0.45, 0.32 + 0.12 * CGFloat(i))], good, width: 3) }
+        }
+    }
+
+    private func gcodeText(_ v: Int) {
+        let lines = v == 0 ? ["G1 X10 Y5", "G1 X12 Y5", "G1 X12 Y7"] : ["; Außenwand", "G1 X10 Y5 E.4", "; Naht", "G1 X12 Y5 E.4"]
+        for (i, t) in lines.enumerated() {
+            ctx.draw(Text(t).font(.system(size: 11, design: .monospaced)).foregroundStyle(t.hasPrefix(";") ? Color.green : Color.primary),
+                     at: pt(0.08, 0.2 + 0.18 * CGFloat(i)), anchor: .leading)
+        }
+    }
+
+    private func preheat(_ v: Int) {
+        var p = SwiftUI.Path()
+        p.move(to: pt(0.1, 0.3)); p.addLine(to: pt(0.4, 0.3)); p.addLine(to: pt(0.5, 0.7))
+        if v == 0 { p.addLine(to: pt(0.65, 0.7)); p.addQuadCurve(to: pt(0.9, 0.3), control: pt(0.82, 0.7)) }
+        else { p.addLine(to: pt(0.56, 0.7)); p.addLine(to: pt(0.62, 0.4)); p.addLine(to: pt(0.9, 0.3)) }
+        stroke(p, plastic, width: 3)
+        ctx.draw(Text("Zeit →").font(.caption2), at: pt(0.82, 0.9), anchor: .center)
+    }
+
+    private func spiralVase(_ v: Int) {
+        for i in 0..<6 {
+            let y = 0.8 - 0.12 * CGFloat(i)
+            if v == 0 { stroke(SwiftUI.Path(ellipseIn: rect(0.25, y - 0.07, 0.5, 0.14)), plastic, width: 2) }
+        }
+        if v == 1 {
+            var p = SwiftUI.Path()
+            for i in 0...60 {
+                let a = Double(i) / 60 * 6 * 2 * .pi, y = 0.8 - 0.7 * CGFloat(i) / 60
+                let pt = pt(0.5 + 0.25 * CGFloat(cos(a)), y + 0.07 * CGFloat(sin(a)))
+                i == 0 ? p.move(to: pt) : p.addLine(to: pt)
+            }
+            stroke(p, plastic, width: 2)
+        }
+    }
+
+    private func printSequence(_ v: Int) {
+        let heights: [CGFloat] = v == 0 ? [0.4, 0.4] : [0.7, 0.0]
+        for (i, hgt) in heights.enumerated() {
+            let x = 0.2 + 0.35 * CGFloat(i)
+            fill(SwiftUI.Path(rect(x, 0.85 - hgt, 0.22, hgt)), plastic.opacity(0.8))
+            stroke(SwiftUI.Path(rect(x, 0.15, 0.22, 0.7)), hint, width: 1, dash: [3, 3])
+        }
+    }
+
+    private func filamentAssign(_ v: Int) {
+        let box = rect(0.25, 0.15, 0.5, 0.7)
+        fill(SwiftUI.Path(box), plastic.opacity(0.7))
+        if v == 1 {
+            stroke(SwiftUI.Path(box.insetBy(dx: 2, dy: 2)), Color.blue, width: 5)
+            fill(SwiftUI.Path(box.insetBy(dx: 12, dy: 12)), Color.green.opacity(0.6))
+        }
+    }
+
+    private func minFeature(_ v: Int) {
+        fill(SwiftUI.Path(rect(0.15, 0.3, 0.7, 0.4)), plastic.opacity(0.7))
+        if v == 1 { fill(SwiftUI.Path(rect(0.47, 0.1, 0.06, 0.2)), plastic) }
+        else { stroke(SwiftUI.Path(rect(0.47, 0.1, 0.06, 0.2)), bad, width: 1.5, dash: [3, 3]) }
     }
 
     private func primeTower(_ v: Int) {

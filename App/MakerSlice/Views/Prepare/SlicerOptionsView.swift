@@ -50,7 +50,7 @@ struct SlicerOptionsView: View {
                 Text("Alle Einstellungen aus \(SlicerOptionAdvisor.slicerName(settings.printer)). Sie wirken beim Slicen in der Cloud (OrcaSlicer); der eingebaute Slicer ignoriert sie. Blau markierte Werte weichen vom Standard ab.")
             }
             ForEach(groups, id: \.name) { group in
-                Section(group.name) {
+                Section(search.isEmpty ? group.name : "\(group.items.first?.page ?? "") · \(group.name)") {
                     ForEach(group.items) { option in
                         SlicerOptionRow(option: option, settings: $settings)
                     }

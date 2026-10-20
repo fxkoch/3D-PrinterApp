@@ -16,7 +16,7 @@ struct HelpButton: View {
         .accessibilityLabel("Erklärung: \(key.help.title)")
         .accessibilityIdentifier("help-\(key.rawValue)")
         .popover(isPresented: $shown) {
-            SettingHelpCard(help: key.help)
+            SettingHelpCard(help: key.help, diagram: key.slicerOptionKey.flatMap { SlicerOptionDetails.detail(for: $0)?.diagram })
                 .presentationCompactAdaptation(.popover)
         }
     }
@@ -25,12 +25,14 @@ struct HelpButton: View {
 /// What a setting does, what more/less causes and a practical tip.
 struct SettingHelpCard: View {
     let help: SettingHelp
+    var diagram: SettingDiagram?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Text(help.title).font(.headline)
                 Text(help.summary).font(.subheadline)
+                if let diagram { SettingDiagramView(kind: diagram) }
                 if let increase = help.increase {
                     effect("arrow.up.circle", "Mehr / an", increase, .green)
                 }

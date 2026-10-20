@@ -80,7 +80,7 @@ final class MakerSliceUITests: XCTestCase {
         app.launch()
         let gallery = app.scrollViews["diagramGallery"]
         XCTAssertTrue(gallery.waitForExistence(timeout: 10))
-        for i in 0..<5 {
+        for i in 0..<10 {
             snapshot("5\(i)-Beispielbilder")
             gallery.swipeUp()
         }

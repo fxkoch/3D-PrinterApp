@@ -59,4 +59,13 @@ final class ProfileAdvisorTests: XCTestCase {
         let xml = try XCTUnwrap(zip.contents(of: "Metadata/custom_gcode_per_layer.xml"))
         XCTAssertEqual(LayerGCode.parse(xml).first?.lines, ["M104 S250"])
     }
+
+    func testEverySettingIsExplainedWithAPicture() {
+        for option in SlicerOptionCatalog.all {
+            let detail = SlicerOptionDetails.detail(for: option.key)
+            XCTAssertNotNil(detail, "\(option.key) has no detailed explanation")
+            XCTAssertNotNil(detail?.diagram, "\(option.key) has no picture")
+            XCTAssertFalse(option.summary.isEmpty, "\(option.key) has no summary")
+        }
+    }
 }
