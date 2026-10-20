@@ -1,0 +1,188 @@
+# Slices MakerSlice jobs with the real OrcaSlicer on a GitHub runner.
+#
+# The app uploads job.json + model.3mf to jobs/<id>/ on the "slice-jobs" branch and starts this
+# workflow with that id. The result (result.gcode, result.json, orca.log) is committed next to the
+# job and also attached as an artifact. On pushes that touch the cloud slicer, a self-test slices
+# sample jobs exported by the Swift tests and validates the G-code.
+name: Cloud slice
+run-name: "Cloud slice ${{ inputs.job_id || 'self-test' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Job id (folder jobs/<id> on the slice-jobs branch)"
+        required: true
+  push:
+    branches-ignore: [slice-jobs]
+    paths:
+      - "tools/cloudslice/**"
+      - ".github/workflows/cloud-slice.yml"
+      - "Packages/MakerSliceCore/Sources/SliceKit/Cloud/**"
+      - "Packages/MakerSliceCore/Sources/SliceKit/IO/ThreeMFWriter.swift"
+
+permissions:
+  contents: write
+
+jobs:
+  slice:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ORCA_REPO: SoftFever/OrcaSlicer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install runtime libraries
+        run: |
+          sudo apt-get update -qq
+          for p in xvfb libgl1 libegl1 libglu1-mesa libosmesa6 libgtk-3-0t64 libwebkit2gtk-4.1-0 \
+                   libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libsoup-3.0-0 libsecret-1-0 libfuse2t64; do
+            sudo apt-get install -y -qq --no-install-recommends "$p" >/dev/null 2>&1 || echo "skipped $p"
+          done
+
+      - name: Pick OrcaSlicer release
+        id: orca
+        run: |
+          tag=$(gh release view -R "$ORCA_REPO" --json tagName -q .tagName)
+          names=$(gh release view "$tag" -R "$ORCA_REPO" --json assets -q '.assets[].name' | grep -i linux | grep -i 'appimage$' || true)
+          asset=$(echo "$names" | grep -i 2404 | head -1)
+          [ -n "$asset" ] || asset=$(echo "$names" | head -1)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "Stable OrcaSlicer: $tag / $asset"
+
+      - name: Cache OrcaSlicer
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: orca
+          key: orca-${{ steps.orca.outputs.tag }}-${{ steps.orca.outputs.asset }}-v2
+
+      - name: Download and extract OrcaSlicer
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          fetch() {
+            rm -rf orca && mkdir -p orca
+            gh release download "$1" -R "$ORCA_REPO" -p "$2" -D orca
+            cd orca && chmod +x ./*.AppImage && ./*.AppImage --appimage-extract >/dev/null && rm ./*.AppImage && cd ..
+            echo "$1" > orca/VERSION
+          }
+          fetch "${{ steps.orca.outputs.tag }}" "${{ steps.orca.outputs.asset }}"
+          # The U1 and Kobra S1 profiles must be part of the release; otherwise use the nightly build.
+          if ! ls orca/squashfs-root/resources/profiles/Snapmaker/machine/ | grep -q "U1 (0.4 nozzle)" \
+             || ! ls orca/squashfs-root/resources/profiles/Anycubic/machine/ | grep -q "Kobra S1 0.4 nozzle"; then
+            echo "Release lacks U1/Kobra S1 profiles – using nightly build"
+            asset=$(gh release view nightly-builds -R "$ORCA_REPO" --json assets -q '.assets[].name' \
+                    | grep -i linux | grep -i 'appimage$' | grep -i 2404 | head -1)
+            fetch nightly-builds "$asset"
+          fi
+
+      - name: Locate OrcaSlicer
+        run: |
+          if [ -x orca/squashfs-root/AppRun ]; then bin=orca/squashfs-root/AppRun; else bin=orca/squashfs-root/bin/orca-slicer; fi
+          echo "ORCA_BIN=$PWD/$bin" >> "$GITHUB_ENV"
+          echo "OrcaSlicer $(cat orca/VERSION)"
+
+      # ---------- Job from the app ----------
+      - name: Fetch job
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          id='${{ inputs.job_id }}'
+          case "$id" in *[!A-Za-z0-9._-]*|"") echo "invalid job id"; exit 1;; esac
+          git clone -q --depth 1 --branch slice-jobs --single-branch \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" jobs-repo
+          test -f "jobs-repo/jobs/$id/job.json"
+          mkdir -p work && cp -r "jobs-repo/jobs/$id" "work/$id"
+          echo "JOB_ID=$id" >> "$GITHUB_ENV"
+
+      - name: Slice job
+        if: github.event_name == 'workflow_dispatch'
+        id: slice
+        continue-on-error: true
+        run: xvfb-run -a python3 tools/cloudslice/orca_slice.py "work/$JOB_ID" --orca "$ORCA_BIN"
+
+      - name: Check G-code
+        if: github.event_name == 'workflow_dispatch' && steps.slice.outcome == 'success'
+        continue-on-error: true
+        run: |
+          printer=$(python3 -c "import json;print(json.load(open('work/$JOB_ID/job.json'))['printer'])")
+          python3 tools/cloudslice/validate_gcode.py "work/$JOB_ID/result.gcode" --printer "$printer"
+
+      - name: Publish result
+        if: github.event_name == 'workflow_dispatch' && always() && env.JOB_ID != ''
+        run: |
+          cd jobs-repo
+          git config user.name "MakerSlice Cloud"
+          git config user.email "actions@users.noreply.github.com"
+          dir="jobs/$JOB_ID"
+          for f in result.gcode result.json orca.log; do
+            [ -f "../work/$JOB_ID/$f" ] && cp "../work/$JOB_ID/$f" "$dir/"
+          done
+          [ -f "$dir/result.json" ] || echo '{"ok": false, "error": "Der Cloud-Slicer ist vor dem Slicen abgebrochen."}' > "$dir/result.json"
+          git rm -q --ignore-unmatch "$dir/model.3mf"
+          # Clean up jobs older than three days (ids start with yyyyMMdd).
+          cutoff=$(date -u -d '3 days ago' +%Y%m%d)
+          for old in jobs/*/; do
+            name=$(basename "$old"); day=${name:0:8}
+            if [[ "$day" =~ ^[0-9]{8}$ ]] && [ "$day" -lt "$cutoff" ]; then git rm -rq "$old"; fi
+          done
+          git add -A jobs
+          git commit -qm "Result for $JOB_ID"
+          for i in 1 2 3 4 5; do
+            git push -q origin slice-jobs && break
+            sleep $((i * 2)); git pull -q --rebase origin slice-jobs
+          done
+          test "${{ steps.slice.outcome }}" = "success"
+
+      - name: Upload result
+        if: github.event_name == 'workflow_dispatch' && always() && env.JOB_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ env.JOB_ID }}
+          path: |
+            work/${{ env.JOB_ID }}/result.*
+            work/${{ env.JOB_ID }}/orca.log
+          if-no-files-found: ignore
+
+      # ---------- Self-test ----------
+      - uses: swift-actions/setup-swift@v2
+        if: github.event_name == 'push'
+        with:
+          swift-version: "6.0"
+
+      - name: Export sample jobs from the Swift app code
+        if: github.event_name == 'push'
+        working-directory: Packages/MakerSliceCore
+        run: |
+          mkdir -p "$RUNNER_TEMP/jobs"
+          CLOUD_EXPORT_DIR="$RUNNER_TEMP/jobs" swift test --filter CloudJobTests
+          ls -R "$RUNNER_TEMP/jobs"
+
+      - name: Slice sample jobs with OrcaSlicer and validate
+        if: github.event_name == 'push'
+        run: |
+          status=0
+          for dir in "$RUNNER_TEMP"/jobs/*/; do
+            name=$(basename "$dir")
+            printer=$(python3 -c "import json;print(json.load(open('$dir/job.json'))['printer'])")
+            tools=1; case "$name" in *multi*) tools=2;; esac
+            echo "::group::$name ($printer)"
+            if xvfb-run -a python3 tools/cloudslice/orca_slice.py "$dir" --orca "$ORCA_BIN"; then
+              python3 tools/cloudslice/validate_gcode.py "$dir/result.gcode" --printer "$printer" --tools $tools || status=1
+            else
+              status=1
+            fi
+            python3 tools/cloudslice/validate_gcode.py "$dir/makerslice.gcode" --printer "$printer" --tools $tools || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Upload self-test results
+        if: github.event_name == 'push' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-slice-selftest
+          path: ${{ runner.temp }}/jobs
