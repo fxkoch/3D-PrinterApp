@@ -1,0 +1,73 @@
+# Builds an installable (unsigned) MakerSlice.ipa and publishes it as a GitHub release.
+# Sideloadly, AltStore or Xcode sign it with your Apple ID during installation (see INSTALL.md).
+# Runs on demand (Actions → "App release" → Run workflow) or when a tag like v1.0 is pushed –
+# not on every push, because macOS minutes count ten-fold for private repositories.
+name: App release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 1.0)"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        run: |
+          v="${{ inputs.version }}"
+          [ -n "$v" ] || v="${GITHUB_REF_NAME#v}"
+          case "$v" in ""|*/*|claude*|main) v="1.0";; esac
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "BUILD=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - name: Generate project
+        run: brew install xcodegen && xcodegen
+      - name: Build release archive (unsigned)
+        run: |
+          set +e
+          xcodebuild archive \
+            -project MakerSlice.xcodeproj -scheme MakerSlice -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/MakerSlice.xcarchive \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" > archive.log 2>&1
+          status=$?
+          grep -E "error:" archive.log | sort -u | head -50
+          tail -5 archive.log
+          exit $status
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/MakerSlice.xcarchive/Products/Applications/MakerSlice.app Payload/
+          zip -qry "MakerSlice-$VERSION.ipa" Payload
+          ls -la *.ipa
+          shasum -a 256 "MakerSlice-$VERSION.ipa" | tee "MakerSlice-$VERSION.ipa.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MakerSlice-ipa
+          path: MakerSlice-*.ipa
+      - name: Publish release
+        run: |
+          tag="v$VERSION"
+          notes=$(printf '%s\n\n%s\n\n%s' \
+            "MakerSlice $VERSION (Build $BUILD) für iPhone mit iOS 17 oder neuer." \
+            "Installation: MakerSlice-$VERSION.ipa herunterladen und mit Sideloadly oder AltStore installieren – Anleitung in INSTALL.md." \
+            "Die Datei ist unsigniert; die Signatur erfolgt bei der Installation mit deiner Apple-ID.")
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" MakerSlice-$VERSION.ipa MakerSlice-$VERSION.ipa.sha256 --clobber
+            gh release edit "$tag" --notes "$notes"
+          else
+            gh release create "$tag" MakerSlice-$VERSION.ipa MakerSlice-$VERSION.ipa.sha256 \
+              --target "$GITHUB_SHA" --title "MakerSlice $VERSION" --notes "$notes"
+          fi

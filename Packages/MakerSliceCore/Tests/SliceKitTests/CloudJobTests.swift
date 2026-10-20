@@ -92,4 +92,16 @@ final class CloudJobTests: XCTestCase {
         XCTAssertEqual(parsed.estimate.totalGrams, out.estimate.totalGrams, accuracy: 0.05)
         XCTAssertEqual(parsed.layers[3].z, out.layers[3].z, accuracy: 0.001)
     }
+
+    /// With ORCA_GCODE pointing at a file from the cloud slicer: the preview understands real Orca output.
+    func testParsesRealOrcaGCode() throws {
+        guard let path = ProcessInfo.processInfo.environment["ORCA_GCODE"] else { throw XCTSkip("ORCA_GCODE not set") }
+        let parsed = GCodePreview.parse(try String(contentsOfFile: path, encoding: .utf8))
+        XCTAssertGreaterThan(parsed.layers.count, 1)
+        XCTAssertGreaterThan(parsed.estimate.seconds, 0)
+        XCTAssertGreaterThan(parsed.estimate.totalGrams, 0)
+        let roles = Set(parsed.layers.flatMap { $0.islands.flatMap { $0.extrusions.map(\.role) } })
+        XCTAssertTrue(roles.isSuperset(of: [.outerWall, .innerWall, .sparseInfill]), "\(roles)")
+        print("Orca preview:", parsed.layers.count, "layers", parsed.estimate.formattedTime, parsed.estimate.totalGrams, "g", roles.map(\.rawValue).sorted())
+    }
 }
