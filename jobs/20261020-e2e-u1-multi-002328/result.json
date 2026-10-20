@@ -1,0 +1,20 @@
+{
+ "ok": true,
+ "returncode": 0,
+ "presets": {
+  "machine": "Snapmaker U1 (0.4 nozzle)",
+  "process": "0.20 Standard @Snapmaker U1 (0.4 nozzle)",
+  "filaments": [
+   "Snapmaker PLA @U1",
+   "Snapmaker PLA @U1"
+  ]
+ },
+ "warnings": [],
+ "bytes": 287764,
+ "seconds": 576,
+ "filament_g": "1.54, 0.87",
+ "filament_mm": "516.15, 293.13",
+ "layers": "30",
+ "printer_model": "Snapmaker U1",
+ "filament_type": "PLA;PLA"
+}
