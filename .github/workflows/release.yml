@@ -1,7 +1,8 @@
 # Builds an installable (unsigned) MakerSlice.ipa and publishes it as a GitHub release.
 # Sideloadly, AltStore or Xcode sign it with your Apple ID during installation (see INSTALL.md).
-# Runs on demand (Actions → "App release" → Run workflow) or when a tag like v1.0 is pushed –
-# not on every push, because macOS minutes count ten-fold for private repositories.
+# Runs on demand (Actions → "App release" → Run workflow), when a tag like v1.0 is pushed, or when the
+# version in .github/release-version changes – not on every push, because macOS minutes count
+# ten-fold for private repositories.
 name: App release
 
 on:
@@ -12,7 +13,9 @@ on:
         required: false
         default: ""
   push:
+    branches: ["**"]
     tags: ["v*"]
+    paths: [".github/release-version"]   # ignored for tag pushes
 
 permissions:
   contents: write
@@ -28,7 +31,8 @@ jobs:
       - name: Version
         run: |
           v="${{ inputs.version }}"
-          [ -n "$v" ] || v="${GITHUB_REF_NAME#v}"
+          case "$GITHUB_REF" in refs/tags/v*) [ -n "$v" ] || v="${GITHUB_REF_NAME#v}";; esac
+          [ -n "$v" ] || v=$(tr -d ' \n' < .github/release-version)
           case "$v" in ""|*/*|claude*|main) v="1.0";; esac
           echo "VERSION=$v" >> "$GITHUB_ENV"
           echo "BUILD=${{ github.run_number }}" >> "$GITHUB_ENV"

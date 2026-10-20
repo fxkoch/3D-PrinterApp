@@ -41,7 +41,8 @@ Die fertige Datei baut GitHub für dich:
 
 1. Auf github.com im Repository → **Actions** → **App release** → **Run workflow** (Version z. B. `1.0`).
    Nach ca. 10 Minuten liegt unter **Releases** die Datei `MakerSlice-1.0.ipa`
-   (alternativ ein Tag `v1.0` pushen). Da das Repository privat ist, musst du dafür bei GitHub angemeldet sein.
+   (alternativ die Version in `.github/release-version` ändern oder einen Tag `v1.1` pushen).
+   **Version 1.0 ist bereits fertig gebaut** und liegt unter *Releases*. Da das Repository privat ist, musst du dafür bei GitHub angemeldet sein.
 2. **Sideloadly** (Mac oder Windows, sideloadly.io): iPhone per Kabel anschließen, die `.ipa` ins Fenster
    ziehen, Apple-ID eingeben, **Start**. Danach wie oben der Apple-ID vertrauen und den Entwicklermodus einschalten.
    Mit *Automatic refresh* verlängert Sideloadly die App selbst, solange Mac und iPhone im selben WLAN sind.
