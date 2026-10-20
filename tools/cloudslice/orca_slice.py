@@ -220,11 +220,14 @@ def main() -> int:
 
     work = job_dir / "profiles"
     work.mkdir(exist_ok=True)
+    # The flattened profiles keep their system identity, and process and filaments name the printer
+    # explicitly: the CLI refuses a process it cannot match to the printer (exit -17).
+    compat = {"compatible_printers": [printer["machine"]], "compatible_printers_condition": ""}
     machine = profiles.flat(printer["machine"])
-    machine.update({"type": "machine", "from": "User"})
+    machine.update({"type": "machine", "from": "system"})
     apply(machine, job.get("machine", {}))
     process = profiles.flat(printer["process"])
-    process.update({"type": "process", "from": "User"})
+    process.update({"type": "process", "from": "system", **compat})
     apply(process, job.get("process", {}))
     (work / "machine.json").write_text(json.dumps(machine, indent=1))
     (work / "process.json").write_text(json.dumps(process, indent=1))
@@ -235,7 +238,7 @@ def main() -> int:
         preset = find_filament(profiles, entry.get("preset"), entry.get("type", "PLA"),
                                printer["filament_tag"], printer["brand"])
         f = profiles.flat(preset)
-        f.update({"type": "filament", "from": "User"})
+        f.update({"type": "filament", "from": "system", **compat})
         propagate_plate_temps(f)
         apply(f, entry.get("overrides", {}))
         p = work / f"filament_{i + 1}.json"
@@ -249,7 +252,7 @@ def main() -> int:
     cmd = [str(args.orca),
            "--load-settings", f"{work / 'machine.json'};{work / 'process.json'}",
            "--load-filaments", ";".join(filament_paths),
-           "--allow-newer-file",
+           "--allow-newer-file", "--debug", "2",
            "--outputdir", str(out_dir),
            "--slice", str(job.get("plate", 0)),
            str(model)]

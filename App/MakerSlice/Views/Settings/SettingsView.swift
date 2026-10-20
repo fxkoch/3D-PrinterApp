@@ -14,6 +14,17 @@ struct SettingsView: View {
                 } footer: {
                     Text("Zeigt alle Slicer-Parameter und erlaubt, Filament-Werte im Detail anzupassen. Empfohlene Werte werden immer je Filament vorgeladen.")
                 }
+                Section {
+                    NavigationLink {
+                        CloudSetupView()
+                    } label: {
+                        LabeledContent("OrcaSlicer in der Cloud", value: app.cloud.isComplete ? "Eingerichtet" : "Aus")
+                    }
+                } header: {
+                    Text("Profi-Slicing")
+                } footer: {
+                    Text("Optional: slicet mit dem echten OrcaSlicer auf GitHub – gleiche Qualität wie am PC.")
+                }
                 Section("Standard-Einstellungen") {
                     ForEach(PrinterModel.allCases) { model in
                         NavigationLink(model.displayName) {

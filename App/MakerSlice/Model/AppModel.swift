@@ -32,6 +32,15 @@ final class AppModel {
     var sendState: SendState = .idle
 
     /// Shows advanced settings everywhere.
+    /// Cloud slicing with OrcaSlicer on GitHub Actions.
+    var cloud: CloudSliceConfig = CloudStore.load() {
+        didSet { if cloud != oldValue { CloudStore.save(cloud) } }
+    }
+    /// Slice with OrcaSlicer in the cloud instead of on the iPhone.
+    var useCloudSlicer: Bool = UserDefaults.standard.bool(forKey: "useCloudSlicer") {
+        didSet { UserDefaults.standard.set(useCloudSlicer, forKey: "useCloudSlicer") }
+    }
+
     var expertMode: Bool {
         didSet { UserDefaults.standard.set(expertMode, forKey: "expertMode") }
     }

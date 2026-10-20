@@ -65,12 +65,21 @@ public struct SliceJob: Sendable {
         public var layers: [SlicedLayer]
         public var gcode: String
         public var estimate: PrintEstimate
+        /// Which slicer produced the G-code.
+        public var engine: String
+
+        public init(layers: [SlicedLayer], gcode: String, estimate: PrintEstimate, engine: String = "MakerSlice (iPhone)") {
+            self.layers = layers
+            self.gcode = gcode
+            self.estimate = estimate
+            self.engine = engine
+        }
     }
 
     public func run(isCancelled: @escaping () -> Bool = { false },
                     progress: @escaping (SliceProgress) -> Void = { _ in }) throws -> Output {
         let layers = try Slicer(settings: settings, isCancelled: isCancelled).slice(objects, progress: progress)
-        let result = GCodeWriter(settings: settings.effective).write(layers: layers, jobName: name)
+        let result = GCodeWriter(settings: settings.effective).write(layers: layers, jobName: name, objects: objects)
         return Output(layers: layers, gcode: result.gcode, estimate: result.estimate)
     }
 }

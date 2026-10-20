@@ -30,6 +30,8 @@ let package = Package(
         .testTarget(name: "SliceKitTests", dependencies: ["SliceKit"]),
         .testTarget(name: "PrinterKitTests", dependencies: ["PrinterKit"]),
         .testTarget(name: "MakerWorldKitTests", dependencies: ["MakerWorldKit"]),
+        // Virtual prints against simulated printers (skipped unless the simulators run, see tools/virtualprinters).
+        .testTarget(name: "VirtualPrinterTests", dependencies: ["SliceKit", "PrinterKit"]),
     ],
     cxxLanguageStandard: .cxx17
 )

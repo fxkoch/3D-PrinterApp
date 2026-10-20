@@ -5,6 +5,8 @@ struct U1Dialect: MachineDialect {
     var toolChangeSeconds: Double { 12 }
     var preparationSeconds: Double { 300 }
 
+    var thumbnailSizes: [(width: Int, height: Int)] { [(48, 48), (300, 300)] }
+
     func header(_ ctx: PrintContext) -> [String] {
         ["; curr_bed_type = \(ctx.settings.plateType.rawValue)"]
     }
@@ -178,7 +180,8 @@ struct U1Dialect: MachineDialect {
         var lines = ["M107", "PRINT_END"]
         if ctx.settings.enableTimelapse { lines.append("TIMELAPSE_STOP") }
         lines.append("; U1 nozzle flow metadata, in logical filament order")
-        lines.append("; filament_volume_type = " + ctx.usedTools.map { _ in "standard" }.joined(separator: ","))
+        let slots = max(ctx.settings.machine.toolCount, (ctx.usedTools.max() ?? 0) + 1)
+        lines.append("; filament_volume_type = " + Array(repeating: "standard", count: slots).joined(separator: ","))
         return lines
     }
 }
@@ -189,6 +192,8 @@ struct U1Dialect: MachineDialect {
 struct KobraS1Dialect: MachineDialect {
     var toolChangeSeconds: Double { 60 }
     var preparationSeconds: Double { 240 }
+
+    var thumbnailSizes: [(width: Int, height: Int)] { [(230, 110)] }
 
     func header(_ ctx: PrintContext) -> [String] {
         ["; nozzle_type = brass", "; single_extruder_multi_material = 1"]

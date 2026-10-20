@@ -295,8 +295,16 @@ struct PrepareView: View {
         VStack(spacing: 10) {
             switch project.state {
             case .idle:
+                if app.cloud.isComplete {
+                    Picker("Slicer", selection: Binding(get: { app.useCloudSlicer }, set: { app.useCloudSlicer = $0 })) {
+                        Text("iPhone").tag(false)
+                        Text("OrcaSlicer (Cloud)").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("enginePicker")
+                }
                 Button {
-                    project.slice()
+                    project.slice(cloud: app.useCloudSlicer ? app.cloud : nil)
                 } label: {
                     Label("Slicen", systemImage: "square.stack.3d.down.forward").frame(maxWidth: .infinity)
                 }
@@ -311,10 +319,11 @@ struct PrepareView: View {
                 }
             case .failed(let message):
                 Label(message, systemImage: "xmark.octagon.fill").foregroundStyle(.red).font(.callout)
-                Button("Erneut versuchen") { project.slice() }.buttonStyle(.bordered)
+                Button("Erneut versuchen") { project.slice(cloud: app.useCloudSlicer ? app.cloud : nil) }.buttonStyle(.bordered)
             case .done(let output):
                 SummaryRow(estimate: output.estimate)
                     .accessibilityIdentifier("sliceSummary")
+                Text("Gesliced mit \(output.engine)").font(.caption2).foregroundStyle(.secondary)
                 printButtons
             }
         }

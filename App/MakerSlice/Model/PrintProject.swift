@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PrinterKit
 import SliceKit
 
 /// One model being prepared for printing: arrangement, settings, slice result.
@@ -203,7 +204,12 @@ final class PrintProject: Identifiable {
         state = .idle
     }
 
-    func slice() {
+    /// Slices on the iPhone, or with OrcaSlicer on GitHub when `cloud` is given.
+    func slice(cloud: CloudSliceConfig? = nil) {
+        if let cloud, cloud.isComplete {
+            sliceInCloud(cloud)
+            return
+        }
         sliceTask?.cancel()
         let job = SliceJob(name: name, objects: objects, settings: settings)
         state = .slicing(phase: "Vorbereiten", fraction: 0)
@@ -231,6 +237,42 @@ final class PrintProject: Identifiable {
             case .success(let output): self.state = .done(output)
             case .failure(let error as SliceError) where error == .cancelled: self.state = .idle
             case .failure(let error): self.state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func sliceInCloud(_ config: CloudSliceConfig) {
+        sliceTask?.cancel()
+        let objects = self.objects, settings = self.settings, name = self.name
+        state = .slicing(phase: "Cloud-Auftrag vorbereiten …", fraction: 0.02)
+        sliceTask = Task { [weak self] in
+            do {
+                let job = try await Task.detached { try OrcaJob(objects: objects, settings: settings, name: name) }.value
+                let client = CloudSliceClient(config: config)
+                let started = Date()
+                let result = try await client.slice(
+                    jobID: job.id,
+                    files: [("job.json", job.manifest), (OrcaJob.modelFileName, job.model)]
+                ) { phase in
+                    Task { @MainActor in
+                        guard let self, case .slicing = self.state else { return }
+                        // GitHub reports no percentage; show elapsed time on a slowly filling bar.
+                        let elapsed = Date().timeIntervalSince(started)
+                        self.state = .slicing(phase: "\(phase.description) \(Int(elapsed)) s", fraction: min(0.95, 0.05 + elapsed / 300))
+                    }
+                }
+                let gcode = String(decoding: result.gcode, as: UTF8.self)
+                let parsed = await Task.detached { GCodePreview.parse(gcode) }.value
+                var estimate = parsed.estimate
+                if let seconds = result.seconds, estimate.seconds == 0 { estimate.seconds = seconds }
+                guard let self, !Task.isCancelled else { return }
+                self.state = .done(SliceJob.Output(layers: parsed.layers, gcode: gcode, estimate: estimate,
+                                                   engine: "OrcaSlicer (Cloud)"))
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.state = .failed(error.localizedDescription)
             }
         }
     }
