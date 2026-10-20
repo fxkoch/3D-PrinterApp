@@ -57,6 +57,12 @@ final class AppModel {
             }
         }
         printers.log = log
+        // UI tests: talk to the virtual Kobra S1 (tools/virtualprinters/kobra_s1_sim.py) on this Mac.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestVirtualKobra"),
+           !printers.printers.contains(where: { $0.host == "127.0.0.1" }) {
+            printers.add(PrinterConnection(name: "Virtueller Kobra S1", host: "127.0.0.1",
+                                           model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        }
         if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") {
             loadSample()
         }

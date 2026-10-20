@@ -139,4 +139,32 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 60))
         snapshot("32-Geteilt-geslicet")
     }
+
+    /// Full virtual print: slice the sample for the virtual Kobra S1 running on the CI Mac, send it,
+    /// then watch it print in the printer tab (live data incl. the ACE Pro).
+    func testVirtualKobraPrint() throws {
+        app.launchArguments = ["-uiTestVirtualKobra", "-uiTestSampleModel"]
+        app.launch()
+        let slice = app.buttons["sliceButton"]
+        XCTAssertTrue(slice.waitForExistence(timeout: 20))
+        slice.tap()
+        let print = app.buttons["printButton"]
+        XCTAssertTrue(print.waitForExistence(timeout: 60))
+        print.tap()
+        if app.buttons["Ohne Änderungen drucken"].waitForExistence(timeout: 3) {
+            snapshot("30-Kobra-Empfehlungen")
+            app.buttons["Ohne Änderungen drucken"].tap()
+        }
+        XCTAssertTrue(app.staticTexts["An den Drucker gesendet"].waitForExistence(timeout: 40), "upload + start on the virtual printer")
+        snapshot("31-Kobra-gesendet")
+        app.buttons["Zum Drucker"].tap()
+        XCTAssertTrue(app.staticTexts["Druckt"].firstMatch.waitForExistence(timeout: 30), "printer tab shows the running print")
+        snapshot("32-Kobra-druckt")
+        app.staticTexts["Virtueller Kobra S1"].firstMatch.tap()
+        sleep(3)
+        snapshot("33-Kobra-Live")
+        app.swipeUp()
+        sleep(1)
+        snapshot("34-Kobra-ACE")
+    }
 }
