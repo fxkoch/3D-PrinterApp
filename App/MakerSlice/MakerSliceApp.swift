@@ -7,7 +7,13 @@ struct MakerSliceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Group {
+                if ProcessInfo.processInfo.arguments.contains("-uiTestDiagrams") {
+                    SettingDiagramGallery()
+                } else {
+                    RootView()
+                }
+            }
                 .environment(model)
                 .onOpenURL { url in
                     if url.isFileURL { model.handleIncoming(url) }

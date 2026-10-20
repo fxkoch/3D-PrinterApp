@@ -74,6 +74,18 @@ final class MakerSliceUITests: XCTestCase {
         }
     }
 
+    /// The drawn example pictures of the setting explanations.
+    func testDiagramGallery() {
+        app.launchArguments = ["-uiTestDiagrams"]
+        app.launch()
+        let gallery = app.scrollViews["diagramGallery"]
+        XCTAssertTrue(gallery.waitForExistence(timeout: 10))
+        for i in 0..<5 {
+            snapshot("5\(i)-Beispielbilder")
+            gallery.swipeUp()
+        }
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

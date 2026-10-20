@@ -135,7 +135,16 @@ private struct SlicerOptionHelp: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 Text(option.title).font(.headline)
-                Text(option.summary).font(.subheadline)
+                if let detail = SlicerOptionDetails.detail(for: option.key) {
+                    Text(detail.meaning).font(.subheadline)
+                    if let diagram = detail.diagram { SettingDiagramView(kind: diagram) }
+                    if let more = detail.more { effect("arrow.up.circle", "Mehr / an", more, .green) }
+                    if let less = detail.less { effect("arrow.down.circle", "Weniger / aus", less, .orange) }
+                    if let example = detail.example { effect("book", "Beispiel", example, .blue) }
+                    Text("Aus dem Slicer: \(option.summary)").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(option.summary).font(.subheadline)
+                }
                 if !option.unit.isEmpty || option.min != nil || option.max != nil {
                     Text(range).font(.caption).foregroundStyle(.secondary)
                 }
@@ -160,6 +169,16 @@ private struct SlicerOptionHelp: View {
         }
         .frame(idealWidth: 340, maxHeight: 460)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func effect(_ icon: String, _ title: String, _ text: String, _ tint: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: icon).foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(text).font(.subheadline)
+            }
+        }
     }
 
     private var range: String {
