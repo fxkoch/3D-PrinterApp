@@ -35,7 +35,7 @@ command -v xcodegen >/dev/null || brew install xcodegen
 xcodegen >/dev/null
 
 device=$(xcrun simctl list devices available | grep -E "iPhone 1[5-9]( Pro)? \(" | head -1 | sed -E 's/^ *(iPhone[^(]*) \(.*/\1/' | xargs)
-echo "▶︎ UI-Tests im Simulator „$device“ (ca. 8 Minuten) …"
+echo "▶︎ UI-Tests im Simulator „${device}“ (ca. 8 Minuten) …"
 rm -rf build/UITests.xcresult build/screenshots
 mkdir -p build
 set +e

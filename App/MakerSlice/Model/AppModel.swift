@@ -57,6 +57,10 @@ final class AppModel {
             }
         }
         printers.log = log
+        // UI tests start without printers saved by an earlier test run.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
+            for printer in printers.printers { printers.remove(printer) }
+        }
         // UI tests: talk to the virtual Kobra S1 (tools/virtualprinters/kobra_s1_sim.py) on this Mac.
         if ProcessInfo.processInfo.arguments.contains("-uiTestVirtualKobra"),
            !printers.printers.contains(where: { $0.host == "127.0.0.1" }) {

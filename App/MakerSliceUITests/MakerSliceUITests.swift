@@ -9,6 +9,7 @@ final class MakerSliceUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
+        app.launchArguments = ["-uiTestReset"]
     }
 
     private func snapshot(_ name: String) {
@@ -42,7 +43,7 @@ final class MakerSliceUITests: XCTestCase {
     }
 
     func testSliceSampleForBothPrinters() {
-        app.launchArguments = ["-uiTestSampleModel"]
+        app.launchArguments += ["-uiTestSampleModel"]
         app.launch()
 
         let slice = app.buttons["sliceButton"]
@@ -117,7 +118,7 @@ final class MakerSliceUITests: XCTestCase {
 
     /// Cut the sample cube with the cut tool and check that two parts result.
     func testCutTool() {
-        app.launchArguments = ["-uiTestSampleModel"]
+        app.launchArguments += ["-uiTestSampleModel"]
         app.launch()
         XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20))
         // The objects panel must be visible above the bottom bar before its menu can open; the
@@ -152,7 +153,7 @@ final class MakerSliceUITests: XCTestCase {
     /// Full virtual print: slice the sample for the virtual Kobra S1 running on the CI Mac, send it,
     /// then watch it print in the printer tab (live data incl. the ACE Pro).
     func testVirtualKobraPrint() throws {
-        app.launchArguments = ["-uiTestVirtualKobra", "-uiTestSampleModel"]
+        app.launchArguments += ["-uiTestVirtualKobra", "-uiTestSampleModel"]
         app.launch()
         let slice = app.buttons["sliceButton"]
         XCTAssertTrue(slice.waitForExistence(timeout: 20))
