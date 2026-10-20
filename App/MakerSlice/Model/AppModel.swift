@@ -49,6 +49,10 @@ final class AppModel {
     @ObservationIgnored private var savedSettings: [PrinterModel: PrintSettings] = [:]
 
     init() {
+        // UI tests start without settings remembered by an earlier test run.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
+            for model in PrinterModel.allCases { UserDefaults.standard.removeObject(forKey: "settings-\(model.rawValue)") }
+        }
         expertMode = UserDefaults.standard.bool(forKey: "expertMode")
         for model in PrinterModel.allCases {
             if let data = UserDefaults.standard.data(forKey: "settings-\(model.rawValue)"),
