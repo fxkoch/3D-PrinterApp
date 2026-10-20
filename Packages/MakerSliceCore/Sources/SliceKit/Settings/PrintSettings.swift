@@ -173,6 +173,10 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var enableTimelapse: Bool = true
     public var enableBedLeveling: Bool = true
 
+    /// Further slicer settings (OrcaSlicer keys, see `SlicerOptionCatalog`) the user changed in expert mode.
+    /// They only take effect when slicing in the cloud with OrcaSlicer.
+    public var extraOptions: [String: String] = [:]
+
     public init() {}
 
     /// Settings with the machine's defaults and its default material.
@@ -310,6 +314,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.fuzzySkinThickness, &fuzzySkinThickness); d(.fuzzySkinPointDistance, &fuzzySkinPointDistance)
         d(.plateType, &plateType); d(.filaments, &filaments)
         d(.enableTimelapse, &enableTimelapse); d(.enableBedLeveling, &enableBedLeveling)
+        d(.extraOptions, &extraOptions)
         while filaments.count < machine.toolCount { filaments.append(filaments.last ?? .pla) }
     }
 }

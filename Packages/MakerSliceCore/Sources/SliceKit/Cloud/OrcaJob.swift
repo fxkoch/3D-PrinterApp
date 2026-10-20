@@ -123,6 +123,9 @@ public struct OrcaJob: Sendable {
         ]
         if s.support != .off { o["support_type"] = "normal(auto)" }
         if !s.detectBridges { o["bridge_speed"] = num(s.solidInfillSpeed) }
+        for (key, value) in s.extraOptions where SlicerOptionCatalog.option(key)?.availableFor.contains(s.printer) == true {
+            o[key] = value
+        }
         return o
     }
 

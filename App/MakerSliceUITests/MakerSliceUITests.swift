@@ -42,6 +42,38 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("04-Einstellungen")
     }
 
+    /// Expert mode: the complete settings list of the vendor slicer, for both printers.
+    func testAllSlicerSettings() {
+        app.launch()
+        app.tabBars.buttons["Einstellungen"].tap()
+        let expert = app.switches["expertToggle"]
+        XCTAssertTrue(expert.waitForExistence(timeout: 5))
+        if expert.value as? String != "1" { expert.tap() }
+        for (i, model) in ["Snapmaker U1", "Anycubic Kobra S1"].enumerated() {
+            let row = app.staticTexts[model].firstMatch
+            for _ in 0..<4 { app.swipeDown() }
+            for _ in 0..<6 where !row.exists || !row.isHittable { app.swipeUp() }
+            row.tap()
+            let all = app.staticTexts["Alle Slicer-Einstellungen"].firstMatch
+            for _ in 0..<12 where !all.exists { app.swipeUp() }
+            XCTAssertTrue(all.waitForExistence(timeout: 5), "list of all slicer settings should be offered for \(model)")
+            all.tap()
+            XCTAssertTrue(app.navigationBars["Slicer-Einstellungen"].waitForExistence(timeout: 5))
+            snapshot("4\(i)-Alle-Einstellungen-\(model)")
+            app.swipeDown()
+            let search = app.searchFields.firstMatch
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            search.tap()
+            search.typeText("Naht")
+            sleep(1)
+            snapshot("4\(i)-Suche-Naht-\(model)")
+            for _ in 0..<4 where !app.navigationBars["Einstellungen"].exists {
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+                sleep(1)
+            }
+        }
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

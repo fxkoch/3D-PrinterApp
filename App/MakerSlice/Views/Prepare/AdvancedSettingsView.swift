@@ -122,6 +122,15 @@ struct AdvancedSettingsView: View {
                 LabeledContent("Bauraum", value: "\(Int(settings.bedSize)) × \(Int(settings.bedSize)) × \(Int(settings.maxHeight)) mm")
             }
             Section {
+                NavigationLink {
+                    SlicerOptionsView(settings: $settings)
+                } label: {
+                    LabeledContent("Alle Slicer-Einstellungen", value: settings.extraOptions.isEmpty ? "" : "\(settings.extraOptions.count) geändert")
+                }
+            } footer: {
+                Text("Die komplette Einstellungsliste von \(SlicerOptionAdvisor.slicerName(settings.printer)) – mit Erklärung und Empfehlung für \(settings.printer.displayName) und dein Material.")
+            }
+            Section {
                 Button("Auf Standard zurücksetzen", role: .destructive) {
                     let filaments = settings.filaments
                     settings = PrintSettings(printer: settings.printer)
