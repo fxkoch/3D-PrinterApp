@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   ipa:
-    runs-on: macos-15
+    runs-on: ${{ vars.MAC_RUNNER || 'macos-15' }}
     timeout-minutes: 40
     env:
       GH_TOKEN: ${{ github.token }}
@@ -37,7 +37,7 @@ jobs:
           echo "VERSION=$v" >> "$GITHUB_ENV"
           echo "BUILD=${{ github.run_number }}" >> "$GITHUB_ENV"
       - name: Generate project
-        run: brew install xcodegen && xcodegen
+        run: (command -v xcodegen >/dev/null || brew install xcodegen) && xcodegen
       - name: Build release archive (unsigned)
         run: |
           set +e

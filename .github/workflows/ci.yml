@@ -1,9 +1,15 @@
 name: CI
 
+# Linux jobs (core tests, virtual printers) run on every push – they count 1:1 against the minutes.
+# The iOS job needs macOS, which counts ten-fold on GitHub's runners. It only runs
+#   - when started by hand (Actions → CI → Run workflow), on pull requests,
+#   - or when the commit message contains [ios].
+# With the repository variable MAC_RUNNER=self-hosted it runs on your own Mac instead (free, see TESTING.md).
 on:
   push:
     branches-ignore: [slice-jobs]
   pull_request:
+  workflow_dispatch:
 
 # A newer push cancels the run of the previous one (saves macOS minutes).
 concurrency:
@@ -52,11 +58,14 @@ jobs:
 
   ios-build:
     name: iOS app build
-    runs-on: macos-15
+    if: >-
+      github.event_name != 'push' || vars.MAC_RUNNER != '' ||
+      contains(github.event.head_commit.message, '[ios]')
+    runs-on: ${{ vars.MAC_RUNNER || 'macos-15' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
       - name: Generate project
         run: xcodegen
       - name: Build for simulator
@@ -75,6 +84,7 @@ jobs:
           exit $status
       - name: Start virtual Kobra S1
         run: |
+          pkill -f "[k]obra_s1_sim.py" || true   # a self-hosted Mac may still run one from an earlier job
           nohup python3 tools/virtualprinters/kobra_s1_sim.py --speed 30 --duration 1800 > kobra.log 2>&1 &
           for i in $(seq 1 20); do curl -sf http://127.0.0.1:18910/info >/dev/null && break; sleep 1; done
       - name: UI tests on simulator

@@ -48,7 +48,8 @@ Ohne Zugriff auf die echten Geräte wird alles gegen möglichst echte Gegenstüc
   Druck auf dem virtuellen Kobra.
 - **72 automatische Tests im Swift-Paket** (davon 5 mit virtuellen Druckern; Import, Slicer-Funktionen, G-Code, Empfehlungen, Protokolle, Cloud-Client gegen nachgebaute GitHub-API).
 
-Lokal: `cd Packages/MakerSliceCore && swift test`; virtuelle Drucker siehe `tools/virtualprinters/`.
+Lokal auf dem Mac (ohne GitHub-Minuten): `tools/test-local.sh` – siehe [TESTING.md](TESTING.md), dort auch, wie dein Mac
+die GitHub-Läufe kostenlos übernimmt.
 
 ## Aufbau
 
@@ -73,8 +74,8 @@ tools/profiles/             Erzeugt die Filamentbibliothek aus den OrcaSlicer-Pr
   mit OrcaSlicer (Farbbemalung aus MakerWorld-Projekten wird aber auch dort nicht übernommen, jedes Objekt hat einen Slot).
 - Die Druckzeit-Schätzung des iPhone-Slicers enthält Aufheizen/Leveln und Werkzeugwechsel und liegt daher meist über der von OrcaSlicer.
 - Kamera des Kobra S1 (FLV-Stream) wird nicht angezeigt; das Bett-Mesh liefert der Kobra nur mit Rinkhals.
-- GitHub Actions: Bei privaten Repositories zählen macOS-Minuten zehnfach (2000 Freiminuten/Monat). Cloud-Slicing läuft auf
-  Linux (ca. 1–3 Minuten je Auftrag); der App-Build nur bei Bedarf.
+- GitHub Actions: Bei privaten Repositories zählen macOS-Minuten zehnfach. Deshalb laufen bei jedem Push nur die Linux-Tests;
+  iOS-Tests und App-Build nur auf Wunsch oder auf deinem eigenen Mac (siehe [TESTING.md](TESTING.md)).
 
 ## Lizenzen und Quellen
 

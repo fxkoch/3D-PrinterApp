@@ -5,3 +5,5 @@ DerivedData/
 xcuserdata/
 .DS_Store
 .virtualprinters/
+build/
+build-kobra-sim.log
