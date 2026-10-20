@@ -1,3 +1,4 @@
+import PrinterKit
 import SliceKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -44,6 +45,8 @@ struct PrepareView: View {
                     .padding()
                 }
                 .background(Color(.systemGroupedBackground))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("prepareScroll")
             }
             .navigationTitle(project.name)
             .navigationBarTitleDisplayMode(.inline)
@@ -201,9 +204,41 @@ struct PrepareView: View {
                     .accessibilityIdentifier("slot-\(slot)")
                 }
             }
+            if let printer = loadedPrinter, let suggestion = loadedSuggestion(printer) {
+                Button {
+                    project.settings.filaments = suggestion
+                    project.loadedTypes = app.printers.loadedTypes(printer)
+                    project.dryerHumidity = app.printers.status(of: printer)?.filamentBox?.humidity
+                    project.refreshRecommendations()
+                } label: {
+                    Label("Eingelegtes Material übernehmen: " + loadedSummary(printer), systemImage: "arrow.down.circle")
+                        .font(.caption)
+                }
+                .accessibilityIdentifier("useLoadedFilaments")
+            }
             Text("Tippe auf einen Slot, um Material und empfohlene Einstellungen zu wählen.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// The selected printer, if it is the model being prepared and reports its spools.
+    private var loadedPrinter: PrinterConnection? {
+        guard let printer = app.printers.selected, app.printers.model(of: printer) == project.settings.printer,
+              let status = app.printers.status(of: printer), !status.filaments.isEmpty else { return nil }
+        return printer
+    }
+
+    /// Profiles for what is loaded, when they differ from the current choice.
+    private func loadedSuggestion(_ printer: PrinterConnection) -> [Filament]? {
+        let suggested = app.printers.suggestedFilaments(for: printer, current: project.settings.filaments,
+                                                        model: project.settings.printer)
+        let differs = zip(suggested, project.settings.filaments).contains { $0.name != $1.name || $0.color != $1.color }
+        return differs ? suggested : nil
+    }
+
+    private func loadedSummary(_ printer: PrinterConnection) -> String {
+        (app.printers.status(of: printer)?.filaments ?? []).map { $0.present ? ($0.type ?? "?") : "leer" }
+            .joined(separator: " · ")
     }
 
     private var objectsPanel: some View {

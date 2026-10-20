@@ -58,12 +58,12 @@ final class MakerSliceUITests: XCTestCase {
 
         // Switch to the Kobra S1 and slice again.
         let picker = app.segmentedControls["printerPicker"]
-        if picker.waitForExistence(timeout: 5) {
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        for _ in 0..<3 where !slice.exists {
             picker.buttons["Anycubic Kobra S1"].tap()
-        } else {
-            app.buttons["Anycubic Kobra S1"].firstMatch.tap()
+            _ = slice.waitForExistence(timeout: 5)
         }
-        XCTAssertTrue(slice.waitForExistence(timeout: 10))
+        XCTAssertTrue(slice.exists, "switching to the Kobra S1 should reset the slice")
         snapshot("12-Vorbereiten-Kobra")
         slice.tap()
         XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 60), "Kobra slicing should finish")
@@ -124,20 +124,17 @@ final class MakerSliceUITests: XCTestCase {
         // layout height varies, so scroll in small steps and retry.
         let menu = app.buttons["objectMenu"].firstMatch
         let cut = app.buttons["Teilen …"].firstMatch
-        let panel = app.staticTexts["Objekte"].firstMatch
-        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        let scroll = app.scrollViews["prepareScroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
         var opened = false
-        for _ in 0..<4 {
-            // Swipe on the panel itself so the prepare screen's scroll view moves it up.
-            if menu.exists, menu.frame.maxY > app.windows.firstMatch.frame.height * 0.7 {
-                panel.swipeUp(velocity: .slow)
-                sleep(1)
-                continue
-            }
-            if menu.waitForExistence(timeout: 3) {
+        for _ in 0..<5 {
+            // The bottom bar covers the lower part of the panels; scroll the menu into the free area.
+            if menu.waitForExistence(timeout: 3), menu.frame.maxY < scroll.frame.minY + scroll.frame.height * 0.6 {
                 menu.tap()
                 if cut.waitForExistence(timeout: 3) { opened = true; break }
             }
+            scroll.swipeUp(velocity: .slow)
+            sleep(1)
         }
         XCTAssertTrue(opened, "object menu should offer the cut tool")
         cut.tap()
@@ -159,6 +156,13 @@ final class MakerSliceUITests: XCTestCase {
         app.launch()
         let slice = app.buttons["sliceButton"]
         XCTAssertTrue(slice.waitForExistence(timeout: 20))
+        // Once the printer reports its ACE slots, the app offers to use them.
+        let useLoaded = app.buttons["useLoadedFilaments"]
+        XCTAssertTrue(useLoaded.waitForExistence(timeout: 30), "ACE Pro spools should be offered")
+        useLoaded.tap()
+        sleep(1)
+        snapshot("29-Kobra-Material-uebernommen")
+        XCTAssertTrue(app.buttons["slot-2"].label.contains("PETG"), app.buttons["slot-2"].label)
         slice.tap()
         let print = app.buttons["printButton"]
         XCTAssertTrue(print.waitForExistence(timeout: 60))
