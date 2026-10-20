@@ -1,83 +1,83 @@
-# MakerSlice – kostenlose 3D-Modelle finden, auf dem iPhone slicen, direkt drucken
+# MakerSlice – kostenlose 3D-Modelle finden, slicen, direkt drucken
 
 iPhone-App (SwiftUI, iOS 17+) für den **Snapmaker U1** und den **Anycubic Kobra S1 mit ACE Pro**.
-Modelle aus **MakerWorld** und **Printables** suchen, auf dem Gerät slicen (an den jeweiligen Drucker
-angepasst), Empfehlungen für den perfekten Druck übernehmen und per WLAN an den Drucker schicken.
-Gestaltung: ruhig und reduziert im macOS-Stil, mit Expertenmodus für alle Parameter.
+Modelle aus **MakerWorld** und **Printables** suchen, auf dem iPhone **oder mit dem echten OrcaSlicer in der
+Cloud** slicen, Empfehlungen für den perfekten Druck übernehmen und per WLAN an den Drucker schicken.
+Gestaltung: ruhig und reduziert im macOS-Stil, mit Expertenmodus – jede Einstellung ist mit ⓘ erklärt.
+
+**Installation aufs iPhone:** siehe [INSTALL.md](INSTALL.md) (Xcode, Sideloadly/AltStore oder TestFlight).
 
 ## Funktionen
 
 | Bereich | Was geht |
 |---|---|
-| **Entdecken** | Native Suche über **Printables** (offene API) und **MakerWorld** (über deinen Login im eingebauten Browser), nur kostenlose Modelle, Sortierung nach Relevanz, Beliebtheit, Neu oder Bewertung. Detailansicht mit Dateien (Printables) bzw. Druckprofilen (MakerWorld) → „Drucken“ lädt herunter und öffnet das Projekt. |
-| **Bibliothek** | Alle Modelle; Import aus Dateien/AirDrop/„Öffnen in …“ (3MF, STL, OBJ); eingebauter Testwürfel. |
-| **Vorbereiten** | 3D-Vorschau, Druckerwahl (U1 / Kobra S1), 4 Material-Slots, Objekte je Slot zuweisen, drehen, flach legen, skalieren, duplizieren, anordnen. MakerWorld-3MF (Bambu-Projekte inkl. Platten) werden automatisch auf Bauraum, Material und Profil deines Druckers umgerechnet. |
-| **Teilen** | Zu große Objekte per Schnittebene (X/Y/Z) mit Live-Vorschau teilen – mit **Zapfen** (angeformt) oder **Dübeln** (separat gedruckt, 0,2 mm Spiel). „Automatisch passend teilen“ zerlegt so oft wie nötig. |
-| **Empfehlungen** | Vor jedem Druck: Stützen ja/nein (nur Bett / überall), Brim bei kleiner Auflagefläche oder verzugsanfälligem Material, Glätten (Ironing) bei flachen Oberseiten, Füllmuster (Gyroid für TPU, Kubisch für hohe Teile), Schichthöhe, PETG-Plattenwarnung, Reinigungsturm bei ACE-Mehrfarbdruck, Abgleich mit dem eingelegten Filament, automatisches Teilen. Mit einem Tipp übernehmen. |
-| **Slicer** | Läuft komplett auf dem iPhone: Wände, Ober-/Unterseiten, Füllung (Gitter, Linien, Dreiecke, Kubisch, Gyroid), **Brückenerkennung** (beste Richtung, eigene Geschwindigkeit/Kühlung), **Ironing**, Stützen, Brim/Skirt, Z-Hop, Rückzug, Pressure Advance je Filament, Flussbegrenzung, Abkühl-Verlangsamung, Werkzeugwechsel, **Reinigungsturm** für die ACE Pro. Schicht-für-Schicht-Vorschau. |
-| **Filamente** | **325 Profile** aus den offiziellen OrcaSlicer-Daten: 25 für den Kobra S1, 59 für den U1, 241 Markenfilamente (Bambu, Polymaker, eSUN, Elegoo, SUNLU, JAYO, Overture …). Auswahl lädt die empfohlenen Werte; im Expertenmodus feinjustierbar mit „Auf Empfehlung zurücksetzen“. Eingelegtes Material (RFID am U1, ACE Pro am Kobra) wird erkannt und vorgeschlagen. |
-| **Drucker** | Live-Daten: Fortschritt, Restzeit, Schicht, Temperaturen (Düsen, Bett, Kammer), Lüfter, Tempo-Modus, Licht, Filament je Slot, ACE-Feuchte/-Temperatur und Trocknen (Kobra), Kamerabild (Moonraker). Pause/Fortsetzen/Abbrechen, Vorheizen. |
-| **Kalibrierung** | Bett-Mesh als Farbkarte mit Unebenheit, Z-Offset, Pressure Advance je Kopf, Input Shaper (Moonraker); Gerätefunktionen/Firmware (Kobra LAN-Modus). |
-| **Protokoll** | Fehler- und Ereignislog (Verbindungsabbrüche, Druckfehler, Uploads, Drucker-Konsole), filterbar, exportierbar. |
+| **Entdecken** | Suche über **Printables** und **MakerWorld** (über deinen Login im eingebauten Browser), nur kostenlose Modelle, Sortierung nach Relevanz, Beliebtheit, Neu oder Bewertung. „Drucken“ lädt herunter und öffnet das Projekt. |
+| **Vorbereiten** | 3D-Vorschau, Drucker (U1 / Kobra S1), 4 Material-Slots, Objekte je Slot, drehen, flach legen, skalieren, duplizieren, anordnen. MakerWorld-3MF (Bambu-Projekte inkl. Platten) werden auf Bauraum, Material und Profil deines Druckers umgerechnet. |
+| **Teilen** | Zu große Objekte per Schnittebene (X/Y/Z) mit Live-Vorschau teilen – mit **Zapfen** oder **Dübeln** (0,2 mm Spiel). „Automatisch passend teilen“ zerlegt so oft wie nötig. |
+| **Empfehlungen** | Vor jedem Druck, mit einem Tipp übernehmen: Stützen, Brim, Glätten, Füllmuster, Schichthöhe, Platte, Reinigungsturm, eingelegtes Filament – plus druckerspezifische Hinweise aus Hersteller- und Community-Erfahrung: TPU nicht über die ACE Pro, kurzer Rückzug bei TPU (Werkzeugwechsel-Staus am U1), Trocknen bei feuchtem Filament (Feuchte aus der ACE Pro), PETG-Fäden und Elefantenfuß, passgenaue Steckverbinder, Düsenspitze am Kobra, Vasenmodus-Prüfung. |
+| **Slicer (iPhone)** | Wände (Reihenfolge innen/außen), Naht (hinten / in Ecken / zufällig), Ober-/Unterseiten (monoton, Linien, konzentrisch), Füllung (Gitter, Linien, Dreiecke, Kubisch, Gyroid), Brückenerkennung, Ironing, Stützen, Brim/Skirt, Elefantenfuß-Ausgleich, **Vasenmodus** (durchgehende Spirale), **Fuzzy Skin**, Z-Hop, Rückzug, Pressure Advance, Flussbegrenzung, Abkühl-Verlangsamung, Werkzeugwechsel, Reinigungsturm für die ACE Pro. Schicht-Vorschau. |
+| **Profi-Slicing (Cloud)** | Optional: Der **echte OrcaSlicer** (2.4) rechnet auf GitHub Actions mit den offiziellen Profilen von Snapmaker/Anycubic und deinen Einstellungen; der G-Code kommt nach 1–3 Minuten zurück – inklusive Schicht-Vorschau. Einrichtung in der App unter *Einstellungen → Profi-Slicing*. |
+| **Erklärungen** | Jede Einstellung (Slicer und Filament) hat ein ⓘ: was sie bewirkt, was mehr/weniger bedeutet, Praxistipp mit Werten für U1/Kobra. Auf Wunsch direkt unter jeder Einstellung eingeblendet. |
+| **Filamente** | **325 Profile** aus den offiziellen OrcaSlicer-Daten (25 Kobra S1, 59 U1, 241 Markenfilamente). Auswahl lädt die empfohlenen Werte; im Expertenmodus feinjustierbar mit „Auf Empfehlung zurücksetzen“. Eingelegtes Material (RFID am U1, ACE Pro am Kobra) wird erkannt. |
+| **Drucker-Display** | Der G-Code enthält Vorschaubilder (U1: 48 und 300 px, Kobra: 230×110 px) sowie Druckzeit, Filament je Slot und Temperaturen im OrcaSlicer-Format, damit Drucker und Moonraker sie anzeigen. |
+| **Drucker** | Live-Daten: Fortschritt, Restzeit, Schicht, Temperaturen, Lüfter, Licht, Filament je Slot, ACE-Feuchte und Trocknen, Kamerabild (U1). Pause/Fortsetzen/Abbrechen, Vorheizen. |
+| **Kalibrierung & Protokoll** | Bett-Mesh als Farbkarte, Z-Offset, Pressure Advance, Input Shaper (U1); Fehler- und Ereignislog, exportierbar. |
 
 ## Drucker verbinden
 
-| Drucker | Verbindung | Vorbereitung am Drucker |
+| Drucker | Verbindung | Am Drucker |
 |---|---|---|
-| Snapmaker U1 | Moonraker (Port 7125), wird per Bonjour gefunden | im WLAN, IP unter Einstellungen → WLAN |
-| Anycubic Kobra S1 | **LAN-Modus** (Original-Firmware): lokales MQTT/TLS + HTTP-Upload | Einstellungen → Netzwerk → **LAN-Modus an** (die Anycubic-Cloud ist dann getrennt) |
-| Kobra S1 mit Rinkhals | Moonraker | Community-Firmware Rinkhals installiert |
+| Snapmaker U1 | Moonraker (Port 7125), wird per Bonjour gefunden | im WLAN; die Snapmaker-Cloud-Anbindung darf aktiv bleiben |
+| Anycubic Kobra S1 | **LAN-Modus**: lokales MQTT/TLS + HTTP-Upload | *Einstellungen → Netzwerk → LAN-Modus an*. Achtung: Im LAN-Modus ist der Drucker **nicht** mit Anycubic-Cloud/App verbunden |
+| Kobra S1 mit Rinkhals | Moonraker | Community-Firmware Rinkhals |
 
-Beim Kobra S1 wird beim Start die Zuordnung „Slot im Modell → Slot der ACE Pro“ mitgeschickt.
+Beim Kobra S1 gilt: Slot im Modell = Slot der ACE Pro; die Zuordnung wird beim Start mitgeschickt.
 
-## Installation (Mac mit Xcode 16)
+## Getestet – mit virtuellen Druckern
 
-```bash
-brew install xcodegen          # einmalig
-git clone https://github.com/fxkoch/3D-PrinterApp.git && cd 3D-PrinterApp
-git checkout claude/makerslice-ios-app
-xcodegen                       # erzeugt MakerSlice.xcodeproj
-open MakerSlice.xcodeproj
-```
+Ohne Zugriff auf die echten Geräte wird alles gegen möglichst echte Gegenstücke geprüft (automatisch in GitHub Actions):
 
-1. Projekt **MakerSlice** → Target **MakerSlice** → *Signing & Capabilities* → dein **Team** wählen
-   (kostenloser Apple-Account reicht; die App läuft dann 7 Tage). Bei Bedarf Bundle-ID `de.makerslice.app` ändern.
-2. iPhone verbinden, als Ziel wählen, **▶︎ Run**. Für schnelles Slicen: *Product → Scheme → Edit Scheme → Run → Release*.
-3. Auf dem iPhone: *Einstellungen → Allgemein → VPN & Geräteverwaltung* → Entwickler vertrauen;
-   beim ersten Start **Lokales Netzwerk** erlauben.
+- **Virtueller Snapmaker U1**: der *unveränderte* Moonraker von Snapmaker auf `u1sim` (simulierter Klipper mit vier Köpfen,
+  RFID-Filamenten und Druckablauf). Test: Live-Daten, Slicen passend zu den eingelegten Spulen, Upload mit Start,
+  Metadaten/Vorschaubild wie vom Drucker gelesen, Pause/Fortsetzen/Abbruch, Temperaturen, Druck bis „Fertig“.
+- **Virtueller Kobra S1 mit ACE Pro** (`tools/virtualprinters/kobra_s1_sim.py`): LAN-Handshake mit Signatur und AES,
+  MQTT über TLS, Upload, ACE-Slots/Feuchte/Trocknen, Druckablauf, G-Code-Prüfung. Test aus Swift und als UI-Test der App.
+- **OrcaSlicer in der Cloud**: Selbsttest bei jeder Änderung – vom Swift-Code exportierte Aufträge (U1 ein-/zweifarbig,
+  Kobra zweifarbig mit Steckverbindern) werden mit OrcaSlicer gesliced und geprüft.
+- **UI-Tests im iPhone-Simulator** mit Screenshots: Tabs, Suche + Download + Slicen, beide Drucker, Teilen-Werkzeug,
+  Druck auf dem virtuellen Kobra.
+- **72 automatische Tests im Swift-Paket** (davon 5 mit virtuellen Druckern; Import, Slicer-Funktionen, G-Code, Empfehlungen, Protokolle, Cloud-Client gegen nachgebaute GitHub-API).
 
-## Tests
-
-- `cd Packages/MakerSliceCore && swift test` – 51 Tests: Import (STL/3MF/OBJ, Bambu-Projekte), Slicer, G-Code für beide
-  Drucker, Reinigungsturm, Brücken, Ironing, Gyroid, Teilen mit Verbindern, Empfehlungen, Filament-Bibliothek,
-  Kobra-LAN-Handshake (MD5/AES), MQTT-Kodierung, Statusauswertung, Moonraker-Kalibrierdaten, Suche.
-  Mit `LIVE_NETWORK=1` zusätzlich ein echter Such- und Download-Test gegen Printables.
-- GitHub Actions baut die iOS-App, führt UI-Tests im iPhone-Simulator aus (Tabs, Testwürfel für U1 und Kobra S1
-  slicen, Materialwahl, Empfehlungen, Drucken ohne Drucker) und legt Screenshots als Artefakt ab.
+Lokal: `cd Packages/MakerSliceCore && swift test`; virtuelle Drucker siehe `tools/virtualprinters/`.
 
 ## Aufbau
 
 ```
-App/MakerSlice/             SwiftUI-App
-  Model/                    AppModel, Bibliothek, Druckerverwaltung, Projekt, Protokoll
-  Views/                    Entdecken, Bibliothek, Vorbereiten (+Teilen, Material, Empfehlungen, Experte), Drucker, Einstellungen
+App/MakerSlice/             SwiftUI-App (Entdecken, Bibliothek, Vorbereiten, Drucker, Einstellungen)
 App/MakerSliceUITests/      UI-Tests (Simulator)
-Packages/MakerSliceCore/    Plattformunabhängiges Swift-Paket
-  SliceKit/                 Import, Slicer, Teilen, Empfehlungen, G-Code (U1- und Kobra-Dialekt), Filament-Bibliothek
-  PrinterKit/               Moonraker-Client, Kobra-S1-LAN-Client (MQTT/TLS), Status, Kalibrierung, Bonjour
-  MakerWorldKit/            MakerWorld- und Printables-Suche/Downloads
-  CClipper/, CZip/          Clipper2 (Boost-Lizenz) und zlib-Anbindung
+Packages/MakerSliceCore/    Swift-Paket: SliceKit (Slicer, G-Code, 3MF, Empfehlungen, Erklärungen),
+                            PrinterKit (U1/Moonraker, Kobra-LAN, Cloud-Slicing), MakerWorldKit (Suche)
+tools/cloudslice/           OrcaSlicer-Aufruf und G-Code-Prüfung für den Cloud-Workflow
+tools/virtualprinters/      Virtueller U1 (u1sim + Snapmaker Moonraker) und virtueller Kobra S1
+tools/profiles/             Erzeugt die Filamentbibliothek aus den OrcaSlicer-Profilen
+.github/workflows/          CI, Cloud slice, App release (IPA)
 ```
 
 ## Ehrliche Grenzen
 
-- **Nicht an echten Druckern getestet** (ich habe keinen Zugriff darauf). Alles Protokoll- und G-Code-seitige ist
-  gegen die offiziellen Profile und dokumentierte Community-Protokolle gebaut und durch Tests abgesichert. Erster Druck
-  bitte mit einem kleinen Teil und dabeistehen. Der Kobra-S1-LAN-Modus ist inoffiziell (reverse-engineered) und kann
-  durch Firmware-Updates brechen; Druckstart mit ACE-Zuordnung ist in der Community nur teilweise bestätigt.
-- **MakerWorld** hat keine offizielle API; Suche und Downloads laufen über deinen Login im eingebauten Browser. Ändert
-  MakerWorld etwas, funktionieren die Download-Knöpfe der Website weiterhin (die App übernimmt die Datei).
-- Slicer: kein Niveau von OrcaSlicer bei Baumstützen, variabler Schichthöhe, Arachne-Wänden und Farbbemalung
-  (gemalte Mehrfarb-Modelle werden je Objekt einfarbig gedruckt).
-- Die Kamera des Kobra S1 (FLV-Stream) wird nicht angezeigt; das Bett-Mesh liefert der Kobra nur mit Rinkhals.
-- Eine fertig signierte App (.ipa) kann ich nicht ausliefern – das Signieren erfordert deinen Apple-Account (siehe Installation).
+- **Nicht an echten Druckern getestet.** Die virtuellen Drucker bilden die Protokolle nach (beim U1 mit dem originalen
+  Moonraker), führen aber keinen G-Code physisch aus. Ersten Druck bitte mit einem kleinen Teil und dabeistehen.
+  Der Kobra-S1-LAN-Modus ist inoffiziell (reverse-engineered) und kann durch Firmware-Updates brechen.
+- **MakerWorld** hat keine offizielle API; Suche und Downloads laufen über deinen Login im eingebauten Browser.
+- iPhone-Slicer: keine Baumstützen, variable Schichthöhe, Arachne-Wände und Farbbemalung – dafür gibt es das Cloud-Slicing
+  mit OrcaSlicer (Farbbemalung aus MakerWorld-Projekten wird aber auch dort nicht übernommen, jedes Objekt hat einen Slot).
+- Die Druckzeit-Schätzung des iPhone-Slicers enthält Aufheizen/Leveln und Werkzeugwechsel und liegt daher meist über der von OrcaSlicer.
+- Kamera des Kobra S1 (FLV-Stream) wird nicht angezeigt; das Bett-Mesh liefert der Kobra nur mit Rinkhals.
+- GitHub Actions: Bei privaten Repositories zählen macOS-Minuten zehnfach (2000 Freiminuten/Monat). Cloud-Slicing läuft auf
+  Linux (ca. 1–3 Minuten je Auftrag); der App-Build nur bei Bedarf.
+
+## Lizenzen und Quellen
+
+Druckprofile aus OrcaSlicer (AGPL-3.0, nur als Daten übernommen), Clipper2 (Boost), u1sim aus u1-companion (MIT, nur im
+Test), Snapmaker Moonraker (GPL-3.0, nur im Test geladen). Kobra-LAN-Protokoll nach anycubic-lan, anycubic_ha_local,
+kobra-lan-cli und Rinkhals.

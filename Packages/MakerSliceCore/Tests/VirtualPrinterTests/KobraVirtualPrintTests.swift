@@ -123,8 +123,8 @@ final class KobraVirtualPrintTests: XCTestCase {
         _ = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
         try await client.upload(gcode: Data(job.gcode.utf8), fileName: "makerslice_short.gcode", startPrint: true,
                                 mapping: [SlotMapping(tool: 0, slot: 0, materialType: "PLA", color: [255, 255, 255])])
-        // The CI starts the simulator with a 600 s job at ×30 speed → ~20 s.
-        let done = try await waitFor(client, "finished", timeout: 90) { $0.state == .complete }
+        // The CI simulates prints of 10–30 min at ×30 speed → 20–60 s.
+        let done = try await waitFor(client, "finished", timeout: 120) { $0.state == .complete }
         XCTAssertEqual(done.fileName, "makerslice_short.gcode")
     }
     #endif

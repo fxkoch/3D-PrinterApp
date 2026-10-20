@@ -5,6 +5,11 @@ on:
     branches-ignore: [slice-jobs]
   pull_request:
 
+# A newer push cancels the run of the previous one (saves macOS minutes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   core-tests:
     name: Core tests (Linux)
@@ -70,7 +75,7 @@ jobs:
           exit $status
       - name: Start virtual Kobra S1
         run: |
-          nohup python3 tools/virtualprinters/kobra_s1_sim.py --speed 30 > kobra.log 2>&1 &
+          nohup python3 tools/virtualprinters/kobra_s1_sim.py --speed 30 --duration 1800 > kobra.log 2>&1 &
           for i in $(seq 1 20); do curl -sf http://127.0.0.1:18910/info >/dev/null && break; sleep 1; done
       - name: UI tests on simulator
         run: |

@@ -45,7 +45,7 @@ struct CloudSetupView: View {
                 }
             }
             Section("So richtest du es ein (einmalig)") {
-                step(1, "Das Repository mit MakerSlice liegt in deinem GitHub-Konto (z. B. „fxkoch/3D-PrinterApp“). Der Workflow „Cloud slice“ ist schon enthalten.")
+                step(1, "Das Repository mit MakerSlice liegt in deinem GitHub-Konto (z. B. „fxkoch/3D-PrinterApp“). Der Workflow „Cloud slice“ ist schon enthalten. Solange er noch nicht im Haupt-Branch ist, oben als Branch „claude/makerslice-ios-app“ eintragen.")
                 step(2, "Auf github.com: Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token.")
                 step(3, "Nur dieses Repository auswählen. Berechtigungen: „Contents“ und „Actions“ jeweils Read and write. Ablaufdatum nach Wunsch.")
                 step(4, "Token kopieren, oben einfügen, „Verbindung prüfen“ tippen.")

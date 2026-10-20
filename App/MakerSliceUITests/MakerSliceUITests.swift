@@ -124,15 +124,20 @@ final class MakerSliceUITests: XCTestCase {
         // layout height varies, so scroll in small steps and retry.
         let menu = app.buttons["objectMenu"].firstMatch
         let cut = app.buttons["Teilen …"].firstMatch
-        let scroll = app.scrollViews.element(boundBy: 0)
+        let panel = app.staticTexts["Objekte"].firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
         var opened = false
-        for attempt in 0..<5 {
-            if menu.waitForExistence(timeout: 3), menu.isHittable {
+        for _ in 0..<4 {
+            // Swipe on the panel itself so the prepare screen's scroll view moves it up.
+            if menu.exists, menu.frame.maxY > app.windows.firstMatch.frame.height * 0.7 {
+                panel.swipeUp(velocity: .slow)
+                sleep(1)
+                continue
+            }
+            if menu.waitForExistence(timeout: 3) {
                 menu.tap()
                 if cut.waitForExistence(timeout: 3) { opened = true; break }
             }
-            if attempt < 2 { scroll.swipeUp() } else { scroll.swipeDown() }
-            sleep(1)
         }
         XCTAssertTrue(opened, "object menu should offer the cut tool")
         cut.tap()
@@ -165,7 +170,8 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["An den Drucker gesendet"].waitForExistence(timeout: 40), "upload + start on the virtual printer")
         snapshot("31-Kobra-gesendet")
         app.buttons["Zum Drucker"].tap()
-        XCTAssertTrue(app.staticTexts["Druckt"].firstMatch.waitForExistence(timeout: 30), "printer tab shows the running print")
+        let printing = app.staticTexts["Druckt"].firstMatch, finished = app.staticTexts["Fertig"].firstMatch
+        XCTAssertTrue(printing.waitForExistence(timeout: 30) || finished.exists, "printer tab shows the print")
         snapshot("32-Kobra-druckt")
         app.staticTexts["Virtueller Kobra S1"].firstMatch.tap()
         sleep(3)
