@@ -46,7 +46,7 @@ jobs:
         id: orca
         run: |
           tag=$(gh release view -R "$ORCA_REPO" --json tagName -q .tagName)
-          names=$(gh release view "$tag" -R "$ORCA_REPO" --json assets -q '.assets[].name' | grep -i linux | grep -i 'appimage$' || true)
+          names=$(gh release view "$tag" -R "$ORCA_REPO" --json assets -q '.assets[].name' | grep -i linux | grep -i 'appimage$' | grep -viE 'aarch64|arm64' || true)
           asset=$(echo "$names" | grep -i 2404 | head -1)
           [ -n "$asset" ] || asset=$(echo "$names" | head -1)
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -58,7 +58,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: orca
-          key: orca-${{ steps.orca.outputs.tag }}-${{ steps.orca.outputs.asset }}-v2
+          key: orca-${{ steps.orca.outputs.tag }}-${{ steps.orca.outputs.asset }}-v3
 
       - name: Download and extract OrcaSlicer
         if: steps.cache.outputs.cache-hit != 'true'
@@ -76,7 +76,7 @@ jobs:
              || ! ls orca/squashfs-root/resources/profiles/Anycubic/machine/ | grep -q "Kobra S1 0.4 nozzle"; then
             echo "Release lacks U1/Kobra S1 profiles – using nightly build"
             asset=$(gh release view nightly-builds -R "$ORCA_REPO" --json assets -q '.assets[].name' \
-                    | grep -i linux | grep -i 'appimage$' | grep -i 2404 | head -1)
+                    | grep -i linux | grep -i 'appimage$' | grep -viE 'aarch64|arm64' | grep -i 2404 | head -1)
             fetch nightly-builds "$asset"
           fi
 

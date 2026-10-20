@@ -78,4 +78,18 @@ final class CloudJobTests: XCTestCase {
             try Data(own.gcode.utf8).write(to: url.appendingPathComponent("makerslice.gcode"))
         }
     }
+
+    func testGCodePreviewReadsOwnOutput() throws {
+        let (_, objects, settings) = try sampleJobs()[1]
+        let out = try SliceJob(name: "multi", objects: objects, settings: settings).run()
+        let parsed = GCodePreview.parse(out.gcode)
+        XCTAssertEqual(parsed.layers.count, out.layers.count)
+        XCTAssertEqual(Set(parsed.layers.flatMap { $0.islands.map(\.tool) }), [0, 1])
+        let roles = Set(parsed.layers.flatMap { $0.islands.flatMap { $0.extrusions.map(\.role) } })
+        XCTAssertTrue(roles.isSuperset(of: [.outerWall, .innerWall, .topSurface, .sparseInfill, .ironing]), "\(roles)")
+        XCTAssertEqual(parsed.estimate.seconds, out.estimate.seconds, accuracy: 1)
+        XCTAssertEqual(parsed.estimate.toolChanges, out.estimate.toolChanges)
+        XCTAssertEqual(parsed.estimate.totalGrams, out.estimate.totalGrams, accuracy: 0.05)
+        XCTAssertEqual(parsed.layers[3].z, out.layers[3].z, accuracy: 0.001)
+    }
 }
