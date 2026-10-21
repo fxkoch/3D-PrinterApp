@@ -17,6 +17,7 @@ struct PrepareView: View {
     @State private var showPrePrint = false
     @State private var printAfterSlice = false
     @State private var showFileImporter = false
+    @State private var showCalibrationResult = false
 
     struct SlotSelection: Identifiable {
         let id: Int
@@ -39,12 +40,16 @@ struct PrepareView: View {
                                     .font(.callout).foregroundStyle(.orange)
                             }
                         }
-                        if !project.openRecommendations.isEmpty { advicePanel }
-                        printerPanel
-                        materialPanel
-                        objectsPanel
-                        if project.isMultiColor { multiColorPanel }
-                        qualityPanel
+                        if let plan = project.calibration {
+                            calibrationPanel(plan)
+                        } else {
+                            if !project.openRecommendations.isEmpty { advicePanel }
+                            printerPanel
+                            materialPanel
+                            objectsPanel
+                            if project.isMultiColor { multiColorPanel }
+                            qualityPanel
+                        }
                     }
                     .padding()
                 }
@@ -72,6 +77,9 @@ struct PrepareView: View {
             .sheet(item: $filamentSlot) { slot in
                 FilamentPickerView(settings: $project.settings, slot: slot.id,
                                    loaded: app.printers.status(of: app.printers.selected)?.filaments)
+            }
+            .sheet(isPresented: $showCalibrationResult) {
+                if let plan = project.calibration { CalibrationResultSheet(plan: plan) }
             }
             .sheet(item: $colorObject) { object in
                 ColorChangeView(project: project, objectID: object.id)
@@ -116,6 +124,20 @@ struct PrepareView: View {
                     Task { await app.send(project) }
                 }
             }
+        }
+    }
+
+    // MARK: - Calibration
+
+    private func calibrationPanel(_ plan: CalibrationPlan) -> some View {
+        Panel(title: "Kalibrierdruck: \(plan.kind.displayName)", systemImage: plan.kind.symbol) {
+            Text(plan.note).font(.subheadline)
+            Text("Filament: \(plan.settings.filament(for: 0).name) · \(plan.settings.printer.displayName)").font(.caption).foregroundStyle(.secondary)
+            Text("Die Einstellungen dieses Tests sind fest, damit das Ergebnis aussagekräftig ist. Tippe auf „Slicen“, dann auf „Drucken“. Nach dem Druck trägst du hier ein, welche Stufe am besten aussieht.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button { showCalibrationResult = true } label: { Label("Ergebnis eintragen", systemImage: "checkmark.circle") }
+                .font(.subheadline)
+                .accessibilityIdentifier("enterCalibrationResult")
         }
     }
 

@@ -42,6 +42,10 @@ struct FilamentPickerView: View {
                             Text(current.name).font(.headline)
                             Text("\(current.nozzleTemp) °C Düse · \(current.bedTemp) °C Bett · max \(Int(current.maxVolumetricSpeed)) mm³/s")
                                 .font(.caption).foregroundStyle(.secondary)
+                            if let kinds = current.calibratedKinds, !kinds.isEmpty {
+                                Label("Kalibriert: " + kinds.compactMap { CalibrationKind(rawValue: $0)?.displayName }.joined(separator: ", "),
+                                      systemImage: "checkmark.seal").font(.caption2).foregroundStyle(.green)
+                            }
                         }
                         Spacer()
                         ColorPicker("Farbe", selection: Binding(

@@ -54,6 +54,9 @@ final class PrintProject: Identifiable {
     /// True until the user has chosen filaments for a multi-colour model.
     var needsColorSetup = false
 
+    /// Set when this project is a calibration print (fixed settings, built-in slicer only).
+    var calibration: CalibrationPlan?
+
     /// What is special in the profile the downloaded model brings along; shown to the user before anything is taken over.
     private(set) var profileReport: ProfileReport?
 
@@ -351,6 +354,8 @@ final class PrintProject: Identifiable {
 
     func refreshRecommendations() {
         adviceTask?.cancel()
+        // Calibration prints must not be changed by recommendations (supports, ironing, …).
+        if calibration != nil { recommendations = []; analyzing = false; return }
         let objects = self.objects, settings = self.settings, loaded = loadedTypes, humidity = dryerHumidity
         analyzing = true
         adviceTask = Task { [weak self] in
@@ -405,7 +410,7 @@ final class PrintProject: Identifiable {
 
     private func slice(plate: Int, cloud: CloudSliceConfig?) {
         // Colour changes at a height and painted surfaces are only known to the built-in slicer.
-        let needsLocal = plates[plate - 1].contains { !$0.colorChanges.isEmpty || !$0.paint.isEmpty }
+        let needsLocal = calibration != nil || plates[plate - 1].contains { !$0.colorChanges.isEmpty || !$0.paint.isEmpty }
         if needsLocal, cloud?.isComplete == true {
             warning = "Farbwechsel bei Höhe und bemalte Flächen kennt nur der Slicer auf dem iPhone – dieser Druck wird deshalb nicht in der Cloud geslict."
         }

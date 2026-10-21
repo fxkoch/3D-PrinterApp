@@ -216,6 +216,42 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("76-Einfach-Einstellungen")
     }
 
+    /// Calibration: pick a test, prepare and slice the print, enter the best step and see the value saved.
+    func testCalibrationFlow() throws {
+        app.launchArguments += ["-uiTestVirtualKobra"]
+        app.launch()
+        app.tabBars.buttons["Drucker"].tap()
+        let link = app.buttons["calibrateLink"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 20), "the printer page offers calibration")
+        link.tap()
+        let temperature = app.buttons["calibration-temperature"]
+        XCTAssertTrue(temperature.waitForExistence(timeout: 10))
+        snapshot("A0-Kalibrieren")
+        temperature.tap()
+        let prepare = app.buttons["prepareCalibration"]
+        for _ in 0..<6 where !prepare.exists { app.swipeUp() }
+        XCTAssertTrue(prepare.waitForExistence(timeout: 5))
+        snapshot("A1-Temperaturturm")
+        prepare.tap()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20), "the calibration print opens in the prepare screen")
+        XCTAssertTrue(app.buttons["enterCalibrationResult"].exists)
+        snapshot("A2-Kalibrierdruck")
+        app.buttons["sliceButton"].tap()
+        XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 90), "the tower slices")
+        app.buttons["enterCalibrationResult"].tap()
+        let picker = app.buttons["bestStep"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS '°C'")).element(boundBy: 3).tap()
+        let save = app.buttons["saveCalibration"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        snapshot("A3-Ergebnis")
+        save.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'automatisch'")).firstMatch.waitForExistence(timeout: 5))
+        snapshot("A4-Gespeichert")
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

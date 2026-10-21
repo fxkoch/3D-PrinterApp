@@ -19,6 +19,8 @@ final class AppModel {
     let browser = MakerWorldBrowser()
 
     var tab: AppTab = .discover
+    /// Set when the user wants to enter the result of a calibration print.
+    var pendingCalibrationResult: CalibrationPlan?
     /// Project shown in the "prepare & slice" screen.
     var project: PrintProject?
     var isLoadingModel = false
@@ -52,6 +54,7 @@ final class AppModel {
         // UI tests start without settings remembered by an earlier test run.
         if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
             for model in PrinterModel.allCases { UserDefaults.standard.removeObject(forKey: "settings-\(model.rawValue)") }
+            UserDefaults.standard.removeObject(forKey: "expertMode")
         }
         expertMode = UserDefaults.standard.bool(forKey: "expertMode")
         for model in PrinterModel.allCases {
@@ -62,6 +65,7 @@ final class AppModel {
         }
         printers.log = log
         browser.log = log
+        setUpCalibration()
         // UI tests start without printers saved by an earlier test run.
         if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
             for printer in printers.printers { printers.remove(printer) }
@@ -74,6 +78,53 @@ final class AppModel {
         }
         if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") || ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") || ProcessInfo.processInfo.arguments.contains("-uiTestPlates") || ProcessInfo.processInfo.arguments.contains("-uiTestMultiColorModel") {
             loadSample()
+        }
+    }
+
+    // MARK: - Calibration
+
+    private static var calibrationFile: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("calibration.json")
+    }
+
+    /// Loads saved calibration results and keeps saving them. Library filaments carry the results from then on.
+    private func setUpCalibration() {
+        if ProcessInfo.processInfo.arguments.contains("-uiTestReset") { try? FileManager.default.removeItem(at: Self.calibrationFile) }
+        if let data = try? Data(contentsOf: Self.calibrationFile) {
+            CalibrationBook.shared.load(CalibrationBook.decode(data))
+        }
+        CalibrationBook.shared.onChange = { results in
+            if let data = CalibrationBook.encode(results) { try? data.write(to: Self.calibrationFile, options: .atomic) }
+        }
+    }
+
+    /// Opens a calibration print in the prepare screen.
+    func openCalibration(_ plan: CalibrationPlan) {
+        let p = PrintProject(name: plan.name, imported: ImportedModel(objects: [plan.object]), settings: plan.settings)
+        p.calibration = plan
+        sendState = .idle
+        project = p
+    }
+
+    /// Saves a calibration result for the printer model and puts it into the printers' own database where possible.
+    func saveCalibration(_ result: CalibrationResult) {
+        CalibrationBook.shared.set(result)
+        log.add(.info, "Kalibrierung gespeichert: \(result.kind.displayName) \(result.kind.format(result.value)) für \(result.filament)", source: "Kalibrierung")
+        Task { await syncCalibrations() }
+    }
+
+    /// Exchanges calibration results with Moonraker printers (U1): newer entries win in both directions.
+    func syncCalibrations() async {
+        for printer in printers.printers where printer.kind == .moonraker {
+            guard let client = printers.driver(for: printer) as? MoonrakerClient else { continue }
+            do {
+                if let data = try await client.storedValue(key: "calibration") {
+                    CalibrationBook.shared.merge(CalibrationBook.decode(data))
+                }
+                if let data = CalibrationBook.encode(CalibrationBook.shared.all) { try await client.store(value: data, key: "calibration") }
+            } catch {
+                log.add(.warning, "Kalibrierwerte konnten nicht mit „\(printer.name)“ abgeglichen werden: \(error.localizedDescription)", source: "Kalibrierung")
+            }
         }
     }
 

@@ -229,6 +229,11 @@ struct PrinterDetailView: View {
 
     private var links: some View {
         VStack(spacing: 0) {
+            NavigationLink { CalibrationHomeView(printer: printer, model: model) } label: {
+                LinkRow(title: "Kalibrieren", icon: "slider.horizontal.below.rectangle")
+            }
+            .accessibilityIdentifier("calibrateLink")
+            Divider().padding(.leading, 44)
             if app.expertMode {
                 NavigationLink { CalibrationView(printer: printer) } label: {
                     LinkRow(title: "Kalibrierdaten", icon: "level")
