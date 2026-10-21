@@ -70,10 +70,12 @@ tools/profiles/             Erzeugt die Filamentbibliothek aus den OrcaSlicer-Pr
   Moonraker), führen aber keinen G-Code physisch aus. Ersten Druck bitte mit einem kleinen Teil und dabeistehen.
   Der Kobra-S1-LAN-Modus ist inoffiziell (reverse-engineered) und kann durch Firmware-Updates brechen.
 - **MakerWorld** hat keine offizielle API; Suche und Downloads laufen über deinen Login im eingebauten Browser.
-- iPhone-Slicer: keine Baumstützen, variable Schichthöhe, Arachne-Wände und Farbbemalung – dafür gibt es das Cloud-Slicing
-  mit OrcaSlicer (Farbbemalung aus MakerWorld-Projekten wird aber auch dort nicht übernommen, jedes Objekt hat einen Slot).
+- iPhone-Slicer: keine Baumstützen, variable Schichthöhe und Arachne-Wände – dafür gibt es das Cloud-Slicing mit OrcaSlicer.
+  **Bemalte Mehrfarb-Modelle** (MakerWorld/Bambu Studio) und Farbwechsel bei Höhe slict nur der iPhone-Slicer: Die Bemalung färbt
+  die Wandstärke (ca. 1,2 mm) und die Deck-/Bodenschichten; das Innere druckt in der Grundfarbe (das ist die übliche Näherung,
+  OrcaSlicers exakte Segmentierung ist feiner). Solche Aufträge laufen deshalb nie über die Cloud.
 - Die Druckzeit-Schätzung des iPhone-Slicers enthält Aufheizen/Leveln und Werkzeugwechsel und liegt daher meist über der von OrcaSlicer.
-- Kamera des Kobra S1 (FLV-Stream) wird nicht angezeigt; das Bett-Mesh liefert der Kobra nur mit Rinkhals.
+- Das Bett-Mesh liefert der Kobra nur mit Rinkhals. Die Kamera des Kobra S1 (FLV/H.264) zeigt die App in der Live-Ansicht.
 - GitHub Actions: Bei privaten Repositories zählen macOS-Minuten zehnfach. Deshalb laufen bei jedem Push nur die Linux-Tests;
   iOS-Tests und App-Build nur auf Wunsch oder auf deinem eigenen Mac (siehe [TESTING.md](TESTING.md)).
 

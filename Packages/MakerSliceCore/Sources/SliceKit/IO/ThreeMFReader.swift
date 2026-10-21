@@ -55,11 +55,13 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     public var sourceTool: Int?
     /// Further bodies with their own slot (multi-colour parts). The main `mesh` uses `tool`.
     public var parts: [ObjectPart] = []
+    /// Surface painted with other colours (MakerWorld / Bambu Studio multi-colour painting), as small triangles.
+    public var paint: [PaintedFacet] = []
     /// Height-based slot changes of the main body, sorted by height.
     public var colorChanges: [ColorChange] = []
 
     /// True when the object is printed in more than one colour.
-    public var isMultiColor: Bool { !parts.isEmpty || !colorChanges.isEmpty }
+    public var isMultiColor: Bool { !parts.isEmpty || !colorChanges.isEmpty || !paint.isEmpty }
 
     /// Slot used by the main body at height `z` (mm).
     public func tool(atHeight z: Double) -> Int {
@@ -69,7 +71,7 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     }
 
     /// Every slot this object can use.
-    public var allTools: Set<Int> { Set([tool] + parts.map(\.tool) + colorChanges.map(\.tool)) }
+    public var allTools: Set<Int> { Set([tool] + parts.map(\.tool) + colorChanges.map(\.tool) + paint.map(\.tool)) }
 
     public init(name: String, mesh: TriangleMesh, tool: Int = 0, plate: Int? = nil, volumes: [ObjectVolume] = []) {
         self.name = name
@@ -89,6 +91,11 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
             p.tool = map[part.sourceTool ?? part.tool] ?? part.tool
             return p
         }
+        copy.paint = paint.map { facet in
+            var f = facet
+            f.tool = map[facet.sourceTool] ?? facet.tool
+            return f
+        }
         return copy
     }
 
@@ -105,6 +112,7 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
         copy.mesh = mesh.transformed(t)
         copy.volumes = volumes.map { ObjectVolume(kind: $0.kind, mesh: $0.mesh.transformed(t)) }
         copy.parts = parts.map { ObjectPart(name: $0.name, mesh: $0.mesh.transformed(t), tool: $0.tool, sourceTool: $0.sourceTool) }
+        copy.paint = paint.map { $0.transformed(t) }
         return copy
     }
 
@@ -141,6 +149,7 @@ public struct ImportedModel: Sendable {
         for object in objects {
             users[object.sourceTool ?? object.tool, default: []].append(object.name)
             for part in object.parts { users[part.sourceTool ?? part.tool, default: []].append(part.name) }
+            for tool in Set(object.paint.map(\.sourceTool)) { users[tool, default: []].append("\(object.name) (bemalt)") }
         }
         func at(_ list: [String]?, _ i: Int) -> String? { list.flatMap { $0.indices.contains(i) ? $0[i] : nil } }
         return users.keys.sorted().map { tool in
@@ -314,6 +323,8 @@ public enum ThreeMFReader {
         var components: [(path: String?, objectID: String, transform: Transform3D)] = []
         var name: String?
         var type: String?
+        /// Triangle index → `paint_color` text (multi-colour painting).
+        var paint: [Int: String] = [:]
     }
 
     private struct ObjectSettings {
@@ -356,10 +367,12 @@ public enum ThreeMFReader {
         }
 
         var result: [ModelObject] = []
+        var paintFailed = false
         for (index, item) in buildItems.enumerated() where item.printable {
             guard let object = rootObjects[item.objectID] else { continue }
             let objectSettings = settings.objects[item.objectID]
             // Meshes per extruder (1-based): parts of a multi-colour project keep their own slot.
+            var paintFacets: [PaintedFacet] = []
             var byExtruder: [Int: TriangleMesh] = [:]
             var partNames: [Int: String] = [:]
             let objectExtruder = objectSettings?.extruder ?? objectSettings?.parts.values.compactMap({ $0.extruder }).first ?? 1
@@ -376,6 +389,12 @@ public enum ThreeMFReader {
                     let slot = extruder ?? objectExtruder
                     byExtruder[slot, default: TriangleMesh()].append(obj.mesh.transformed(transform))
                     if partNames[slot] == nil { partNames[slot] = obj.name }
+                    for (triangle, text) in obj.paint {
+                        let m = obj.mesh
+                        guard triangle * 3 + 2 < m.indices.count else { continue }
+                        let v = (0..<3).map { transform.apply(m.vertices[Int(m.indices[triangle * 3 + $0])]) }
+                        if let facets = PaintDecoder.decode(text, a: v[0], b: v[1], c: v[2]) { paintFacets += facets } else { paintFailed = true }
+                    }
                 }
                 for component in obj.components {
                     let compFile = component.path.map(normalize) ?? file
@@ -397,10 +416,12 @@ public enum ThreeMFReader {
                 guard let partMesh = byExtruder[slot], !partMesh.isEmpty else { continue }
                 imported.parts.append(ObjectPart(name: partNames[slot] ?? "Teil \(slot)", mesh: partMesh, tool: max(0, slot - 1)))
             }
+            imported.paint = paintFacets
             result.append(imported)
         }
         guard !result.isEmpty else { throw ModelImportError.empty }
-        return ImportedModel(objects: result, projectSettings: project, hasPaintedColors: painted)
+        // Painted colours are taken over; the warning stays only for paint data that could not be read.
+        return ImportedModel(objects: result, projectSettings: project, hasPaintedColors: painted && paintFailed)
     }
 
     private static func normalize(_ path: String) -> String {
@@ -456,8 +477,9 @@ public enum ThreeMFReader {
                    let c = tag.attributes["v3"].flatMap(UInt32.init),
                    a < vertices.count, b < vertices.count, c < vertices.count {
                     indices.append(a); indices.append(b); indices.append(c)
-                    if !painted, tag.attributes["paint_color"] != nil || tag.attributes["slic3rpe:mmu_segmentation"] != nil {
+                    if let text = tag.attributes["paint_color"] ?? tag.attributes["slic3rpe:mmu_segmentation"], !text.isEmpty {
                         painted = true
+                        current?.paint[indices.count / 3 - 1] = text
                     }
                 }
             case "component":

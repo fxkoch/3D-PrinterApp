@@ -84,7 +84,28 @@ public final class Slicer: @unchecked Sendable {
                     }
                 }
             }
-            add(slices) { object.tool(atHeight: mids[$0]) }
+            if object.paint.isEmpty {
+                add(slices) { object.tool(atHeight: mids[$0]) }
+            } else {
+                // Painted surfaces: each colour takes the painted area of every layer (cut to the outline);
+                // what is left prints in the object's own slot.
+                let painted = PaintedRegions.regions(facets: object.paint, mids: mids, layerHeight: s.layerHeight)
+                var claimed = [Polygons](repeating: Polygons(), count: tops.count)
+                for tool in painted.keys.sorted() {
+                    var region = [Polygons](repeating: Polygons(), count: tops.count)
+                    for i in 0..<tops.count where !slices[i].isEmpty {
+                        var r = painted[tool]![i].intersection(slices[i])
+                        if !claimed[i].isEmpty { r = r.difference(claimed[i]) }
+                        guard !r.isEmpty else { continue }
+                        region[i] = r
+                        claimed[i] = claimed[i].isEmpty ? r : (claimed[i] + r).union()
+                    }
+                    add(region) { _ in tool }
+                }
+                var rest = slices
+                for i in 0..<tops.count where !claimed[i].isEmpty && !slices[i].isEmpty { rest[i] = slices[i].difference(claimed[i]) }
+                add(rest) { object.tool(atHeight: mids[$0]) }
+            }
             for part in object.parts {
                 add(MeshSlicer.slice(part.mesh, at: mids)) { _ in part.tool }
             }

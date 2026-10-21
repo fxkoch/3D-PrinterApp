@@ -404,10 +404,10 @@ final class PrintProject: Identifiable {
     }
 
     private func slice(plate: Int, cloud: CloudSliceConfig?) {
-        // Colour changes at a height are only known to the built-in slicer.
-        let needsLocal = plates[plate - 1].contains { !$0.colorChanges.isEmpty }
+        // Colour changes at a height and painted surfaces are only known to the built-in slicer.
+        let needsLocal = plates[plate - 1].contains { !$0.colorChanges.isEmpty || !$0.paint.isEmpty }
         if needsLocal, cloud?.isComplete == true {
-            warning = "Farbwechsel bei Höhe werden nur vom Slicer auf dem iPhone berücksichtigt – dieser Druck wird deshalb nicht in der Cloud geslict."
+            warning = "Farbwechsel bei Höhe und bemalte Flächen kennt nur der Slicer auf dem iPhone – dieser Druck wird deshalb nicht in der Cloud geslict."
         }
         if let cloud, cloud.isComplete, !needsLocal {
             sliceInCloud(plate: plate, cloud)
