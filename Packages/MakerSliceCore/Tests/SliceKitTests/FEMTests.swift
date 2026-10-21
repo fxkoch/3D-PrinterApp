@@ -143,4 +143,20 @@ final class FEMTests: XCTestCase {
             XCTAssertLessThan(abs(eps[1]) + abs(eps[2]) + abs(eps[3]), 1e-9)
         }
     }
+
+    func testAdvisorFindsStrongerAndLighterVariants() throws {
+        let mesh = Fixtures.box(80, 14, 14)
+        let pla = try XCTUnwrap(FEMMaterial.matching(filamentType: "PLA"))
+        var settings = PrintSettings()
+        settings.wallLoops = 2; settings.infillDensity = 0.5
+        let lc = FEMLoadCase(fixed: [face(of: mesh, axis: 0, value: 0, name: "Wand")],
+                             loads: [.init(region: face(of: mesh, axis: 0, value: 80, name: "Last"), force: Vec3(0, 0, -20))])
+        let tips = try FEMAdvisor.suggest(mesh: mesh, material: pla, settings: settings, loadCase: lc, options: FEMOptions(targetElements: 3000))
+        let stronger = tips.filter { $0.goal == .stronger }
+        XCTAssertFalse(stronger.isEmpty)
+        XCTAssertTrue(stronger.allSatisfy { $0.safetyRatio > 1.05 })
+        let lighter = try XCTUnwrap(tips.first { $0.goal == .lighter }, "50 % infill can be reduced")
+        XCTAssertLessThan(lighter.massRatio, 0.97)
+        XCTAssertGreaterThanOrEqual(lighter.safetyRatio, 0.95)
+    }
 }
