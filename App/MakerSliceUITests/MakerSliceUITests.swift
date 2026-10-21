@@ -149,6 +149,23 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("91-Drucker-uebernommen")
     }
 
+    /// The printer makers' own model libraries (built into Slicer Next / Snapmaker Orca) open in the app.
+    func testPrinterMakerPortalsOpen() {
+        app.launch()
+        app.tabBars.buttons["Entdecken"].tap()
+        for (i, name) in ["Anycubic Maker Online", "Snapmaker Modelle"].enumerated() {
+            app.buttons["portals"].firstMatch.tap()
+            if i == 0 { snapshot("85-Portal-Menue") }
+            let item = app.buttons[name].firstMatch
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "\(name) should be in the portal menu")
+            item.tap()
+            sleep(12)
+            snapshot("86-Portal-\(i)")
+            app.buttons["Fertig"].tap()
+            sleep(1)
+        }
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

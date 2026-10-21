@@ -1,4 +1,5 @@
 import MakerWorldKit
+import SliceKit
 import SwiftUI
 import WebKit
 
@@ -80,9 +81,7 @@ struct DiscoverView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        ForEach(Portal.all) { portal in
-                            Button { self.portal = portal } label: { Label(portal.name, systemImage: portal.symbol) }
-                        }
+                        PortalMenuItems(preferring: app.printers.selected.map { app.printers.model(of: $0) }) { self.portal = $0 }
                     } label: { Label("Portale", systemImage: "safari") }
                         .accessibilityIdentifier("portals")
                 }
@@ -201,6 +200,22 @@ private struct ResultCard: View {
     }
 }
 
+/// The portal list grouped as "printer makers / popular / more"; the selected printer's own portal comes first.
+struct PortalMenuItems: View {
+    let preferring: PrinterModel?
+    let open: (Portal) -> Void
+
+    var body: some View {
+        ForEach(Portal.Group.allCases, id: \.rawValue) { group in
+            Section(group.title) {
+                ForEach(Portal.portals(in: group, preferring: preferring)) { portal in
+                    Button { open(portal) } label: { Label(portal.name, systemImage: portal.symbol) }
+                }
+            }
+        }
+    }
+}
+
 /// A model portal in the app's browser (the login stays saved). On MakerWorld model pages a "print" bar appears;
 /// downloads of STL/3MF/OBJ/ZIP files from any portal go into the library.
 struct BrowserView: View {
@@ -246,10 +261,9 @@ struct BrowserView: View {
                         if browser.isLoading { ProgressView() }
                         Button { browser.goBack() } label: { Image(systemName: "chevron.backward") }.disabled(!browser.canGoBack)
                         Menu {
-                            Section("Portal wechseln") {
-                                ForEach(Portal.all) { p in
-                                    Button { portal = p; browser.open(p.url) } label: { Label(p.name, systemImage: p.symbol) }
-                                }
+                            PortalMenuItems(preferring: app.printers.selected.map { app.printers.model(of: $0) }) { p in
+                                portal = p
+                                browser.open(p.url)
                             }
                             Section("Konto") {
                                 if browser.signedIn.isEmpty {
