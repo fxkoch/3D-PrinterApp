@@ -18,10 +18,19 @@ struct StrengthView: View {
         var id: String { rawValue }
     }
 
-    @State private var material = FEMMaterial.catalog[0]
+    private enum LoadMode: String, CaseIterable, Identifiable {
+        case face = "Ganze Fläche", spot = "Eine Stelle"
+        var id: String { rawValue }
+    }
+    @State private var loadMode: LoadMode = .face
+    @State private var spotRadius = 4.0
+    @State private var scanReport: WeakSpotReport?
+    @State private var reinforcement: FEMReinforcement?
+    @State private var reinforceNote: String?
     @State private var pick: Pick = .fixed
     @State private var fixed: SurfaceRegion?
     @State private var load: SurfaceRegion?
+    @State private var loadPoint: Vec3?
     @State private var kilograms = 1.0
     @State private var direction: Direction = .into
     @State private var accurate = false
@@ -34,9 +43,17 @@ struct StrengthView: View {
     @State private var error: String?
     @State private var suggestions: [FEMSuggestion] = []
     @State private var searching = false
+    @State private var scanning = false
     @State private var applied: String?
     @State private var task: Task<Void, Never>?
     @State private var savedMessage: String?
+
+    /// The strength is always calculated for the filament of the object's slot – nothing else is offered.
+    private var filament: Filament? {
+        let slot = object?.tool ?? 0
+        return project.settings.filaments.indices.contains(slot) ? project.settings.filaments[slot] : project.settings.filaments.first
+    }
+    private var material: FEMMaterial { FEMMaterial.matching(filamentType: filament?.type ?? "PLA") }
 
     private var object: ModelObject? { project.allObjects.first { $0.id == objectID } }
 
@@ -47,10 +64,12 @@ struct StrengthView: View {
                     VStack(spacing: Theme.spacing) {
                         scene(object)
                         setupPanel(object)
-                        if running || searching { progressPanel }
+                        weakSpotPanel(object)
+                        if running || searching || scanning { progressPanel }
                         if let error { Panel(title: "Hinweis", systemImage: "exclamationmark.triangle") { Text(error).foregroundStyle(.red) } }
                         if let result { resultPanel(result) }
                         if !suggestions.isEmpty || searching { suggestionsPanel(object) }
+                        if result != nil || scanReport != nil { reinforcePanel(object) }
                         if let applied { Text(applied).font(.footnote).foregroundStyle(.green).padding(.horizontal) }
                     }
                     .padding()
@@ -62,10 +81,6 @@ struct StrengthView: View {
             .navigationTitle("Festigkeit prüfen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { task?.cancel(); dismiss() } } }
-            .onAppear {
-                let type = project.settings.filaments.indices.contains(object?.tool ?? 0) ? project.settings.filaments[object?.tool ?? 0].type : "PLA"
-                material = FEMMaterial.matching(filamentType: type)
-            }
         }
     }
 
@@ -73,16 +88,24 @@ struct StrengthView: View {
 
     private func scene(_ object: ModelObject) -> some View {
         Panel(title: "Modell", systemImage: "cube") {
-            StrengthSceneView(mesh: object.mesh, fixed: fixed, load: load, result: showHeat ? result : nil) { triangle in
-                let region = SurfaceRegion.grow(from: triangle, in: object.mesh, name: pick.rawValue, maxAngleDegrees: 20)
-                if pick == .fixed { fixed = region } else { load = region }
-                result = nil; suggestions = []; error = nil
+            StrengthSceneView(mesh: object.mesh, fixed: fixed, load: load, result: showHeat ? (result ?? scanReport?.result) : nil) { triangle, point in
+                let normal = object.mesh.faceNormal(triangle)
+                if pick == .fixed {
+                    fixed = SurfaceRegion.grow(from: triangle, in: object.mesh, name: "Befestigung", maxAngleDegrees: 20)
+                } else if loadMode == .spot {
+                    load = SurfaceRegion.disc(center: point, normal: normal, radius: spotRadius, name: "Last")
+                    loadPoint = point
+                } else {
+                    load = SurfaceRegion.grow(from: triangle, in: object.mesh, name: "Last", maxAngleDegrees: 20)
+                    loadPoint = nil
+                }
+                result = nil; suggestions = []; error = nil; reinforcement = nil
                 if pick == .fixed, load == nil { pick = .load }
             }
             .frame(height: 280)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .accessibilityIdentifier("strengthScene")
-            Text(result != nil && showHeat ? "Farbe = Beanspruchung: grün entspannt, rot an der Grenze." : "Tippe eine Fläche an: erst die Befestigung (blau), dann die Fläche, auf die die Kraft wirkt (rot).")
+            Text((result != nil || scanReport != nil) && showHeat ? "Farbe = Beanspruchung: grün entspannt, rot an der Grenze." : "Tippe eine Fläche an: erst die Befestigung (blau), dann die Fläche, auf die die Kraft wirkt (rot).")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -93,10 +116,21 @@ struct StrengthView: View {
                 ForEach(Pick.allCases) { Text($0.rawValue + ((($0 == .fixed ? fixed : load) != nil) ? " ✓" : "")).tag($0) }
             }
             .pickerStyle(.segmented)
-            Picker("Material", selection: $material) {
-                ForEach(FEMMaterial.catalog) { Text($0.name).tag($0) }
+            Label("Filament: \(filament?.name ?? "–") → gerechnet als \(material.name)", systemImage: "circle.hexagongrid")
+                .font(.footnote).foregroundStyle(.secondary)
+            if pick == .load {
+                Picker("Last wirkt auf", selection: $loadMode) {
+                    ForEach(LoadMode.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                if loadMode == .spot {
+                    VStack(alignment: .leading) {
+                        Text("Größe der Stelle: \(Int(spotRadius * 2)) mm Durchmesser")
+                        Slider(value: $spotRadius, in: 1...15, step: 0.5)
+                        Text("Tippe auf das Modell, um die Last an eine andere Stelle zu setzen.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
-            .onChange(of: material) { _, _ in result = nil; suggestions = [] }
             VStack(alignment: .leading) {
                 Text("Last: \(kilograms.formatted(.number.precision(.fractionLength(1)))) kg (\(Int((kilograms * 9.81).rounded())) N)")
                 Slider(value: $kilograms, in: 0.1...50, step: 0.1) { _ in result = nil; suggestions = [] }
@@ -114,8 +148,52 @@ struct StrengthView: View {
                 Label("Berechnen", systemImage: "function").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(fixed == nil || load == nil || running || searching)
+            .disabled(fixed == nil || load == nil || running || searching || scanning)
             .accessibilityIdentifier("strengthRun")
+        }
+    }
+
+    private func weakSpotPanel(_ object: ModelObject) -> some View {
+        Panel(title: "Schwachstellen ohne Last", systemImage: "scope") {
+            Text("Zeigt ohne Vorgaben, wo das Teil zuerst nachgibt: Es steht auf seiner Unterseite und wird oben von der Seite und von oben gedrückt.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button { scan(object) } label: { Label("Schwachstellen suchen", systemImage: "scope").frame(maxWidth: .infinity) }
+                .buttonStyle(.bordered)
+                .disabled(running || searching || scanning)
+                .accessibilityIdentifier("weakSpotScan")
+            if let report = scanReport {
+                if report.spots.isEmpty { Text("Keine auffällige Stelle gefunden.").font(.footnote) }
+                ForEach(report.spots) { spot in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Stelle in \(Int(spot.location.z.rounded())) mm Höhe – Beanspruchung \(Int((spot.relativeStress * 100).rounded())) %").font(.subheadline.weight(.semibold))
+                        Text(spot.reason).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func reinforcePanel(_ object: ModelObject) -> some View {
+        Panel(title: "Struktur verbessern", systemImage: "square.stack.3d.up") {
+            Text("Verdickt die höchstbelasteten Stellen sanft um höchstens 1,5 mm. Die Form bleibt sonst unverändert und wird nachgerechnet.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button { reinforce(object) } label: { Label("Verstärkung berechnen", systemImage: "hammer").frame(maxWidth: .infinity) }
+                .buttonStyle(.bordered)
+                .disabled(running || searching || scanning)
+                .accessibilityIdentifier("reinforceRun")
+            if let note = reinforceNote { Text(note).font(.footnote) }
+            if let r = reinforcement {
+                Text(String(format: "%.1f× so fest · %.0f %% mehr Material · Oberfläche höchstens %.1f mm verschoben", r.safetyRatio, (r.massRatio - 1) * 100, r.maxShift))
+                    .font(.footnote.weight(.semibold))
+                if object.isMultiColor {
+                    Text("Bei mehrfarbigen Objekten nur als neue Datei sichern.").font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    if !object.isMultiColor { Button("Übernehmen") { applyReinforcement(r, object: object) }.buttonStyle(.borderedProminent) }
+                    Button("Als 3MF sichern") { saveReinforcement(r, object: object) }.buttonStyle(.bordered)
+                }
+                .font(.footnote)
+            }
         }
     }
 
@@ -182,13 +260,9 @@ struct StrengthView: View {
                     Text(s.detail).font(.footnote)
                     Text(effect(s)).font(.footnote.weight(.semibold))
                     HStack {
-                        if s.material == nil {
-                            Button("Übernehmen") { apply(s, object: object) }.buttonStyle(.borderedProminent)
-                            if s.rotation != nil {
-                                Button("Gedreht in Bibliothek sichern") { save(s, object: object) }.buttonStyle(.bordered)
-                            }
-                        } else {
-                            Text("Filament im Slot wechseln, dann erneut berechnen.").font(.caption).foregroundStyle(.secondary)
+                        Button("Übernehmen") { apply(s, object: object) }.buttonStyle(.borderedProminent)
+                        if s.rotation != nil {
+                            Button("Gedreht in Bibliothek sichern") { save(s, object: object) }.buttonStyle(.bordered)
                         }
                     }
                     .font(.footnote)
@@ -229,7 +303,7 @@ struct StrengthView: View {
 
     private func run(_ object: ModelObject) {
         guard let lc = loadCase() else { return }
-        running = true; error = nil; result = nil; suggestions = []; applied = nil; fraction = 0; phase = "Starte …"
+        running = true; error = nil; result = nil; scanReport = nil; reinforcement = nil; suggestions = []; applied = nil; fraction = 0; phase = "Starte …"
         let mesh = object.mesh, material = material, setup = FEMPrintSetup(project.settings)
         let options: FEMOptions = accurate ? .accurate : .fast
         task = Task {
@@ -262,6 +336,58 @@ struct StrengthView: View {
             case .failure(let e): if (e as? FEMError) != .cancelled { error = Self.message(e) }
             }
         }
+    }
+
+    private func scan(_ object: ModelObject) {
+        scanning = true; error = nil; result = nil; suggestions = []; reinforcement = nil; reinforceNote = nil; fraction = 0; phase = "Schwachstellen suchen …"
+        let mesh = object.mesh, material = material, setup = FEMPrintSetup(project.settings)
+        task = Task {
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<WeakSpotReport, Error> in
+                Result { try FEMWeakSpots.scan(mesh: mesh, material: material, setup: setup, options: .fast,
+                                               progress: { text, f in Task { @MainActor in phase = text; fraction = f } },
+                                               isCancelled: { Task.isCancelled }) }
+            }.value
+            scanning = false
+            switch outcome {
+            case .success(let report): scanReport = report
+            case .failure(let e): if (e as? FEMError) != .cancelled { error = Self.message(e) }
+            }
+        }
+    }
+
+    private func reinforce(_ object: ModelObject) {
+        scanning = true; error = nil; reinforcement = nil; reinforceNote = nil; fraction = 0; phase = "Verstärkung berechnen …"
+        let mesh = object.mesh, material = material, setup = FEMPrintSetup(project.settings), lc = loadCase()
+        task = Task {
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<FEMReinforcement?, Error> in
+                Result { try FEMWeakSpots.reinforce(mesh: mesh, material: material, setup: setup, loadCase: lc, options: .fast,
+                                                    progress: { text, f in Task { @MainActor in phase = text; fraction = f } },
+                                                    isCancelled: { Task.isCancelled }) }
+            }.value
+            scanning = false
+            switch outcome {
+            case .success(let r):
+                reinforcement = r
+                if r == nil { reinforceNote = "Eine kleine Verdickung bringt hier nicht genug (mindestens 5 %). Mehr Wände oder dichtere Füllung helfen eher." }
+            case .failure(let e): if (e as? FEMError) != .cancelled { error = Self.message(e) }
+            }
+        }
+    }
+
+    private func applyReinforcement(_ r: FEMReinforcement, object: ModelObject) {
+        project.replaceMesh(object.id, with: r.mesh)
+        fixed = nil; load = nil; result = nil; scanReport = nil; reinforcement = nil; suggestions = []; pick = .fixed
+        applied = "Die verstärkte Form ist übernommen. Für eine neue Rechnung die Flächen erneut antippen."
+    }
+
+    private func saveReinforcement(_ r: FEMReinforcement, object: ModelObject) {
+        var copy = object
+        copy.mesh = r.mesh; copy.volumes = []
+        copy.name = object.name + " (verstärkt)"
+        do {
+            try app.library.add(data: ThreeMFWriter.write([copy.placedOnBed(center: (0, 0))]), fileName: copy.name + ".3mf", name: copy.name)
+            savedMessage = "In der Bibliothek gesichert: „\(copy.name)“."
+        } catch { savedMessage = "Sichern nicht möglich: \(error.localizedDescription)" }
     }
 
     private func apply(_ s: FEMSuggestion, object: ModelObject) {

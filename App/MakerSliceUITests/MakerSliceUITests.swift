@@ -436,6 +436,34 @@ final class MakerSliceUITests: XCTestCase {
         }
     }
 
+    /// Weak-spot scan without any load.
+    func testWeakSpotScan() {
+        app.launchArguments += ["-uiTestSampleModel"]
+        app.launch()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20))
+        let menu = app.buttons["objectMenu"].firstMatch
+        let entry = app.buttons["strengthMenu"].firstMatch
+        let scroll = app.scrollViews["prepareScroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        var opened = false
+        for _ in 0..<5 {
+            if menu.waitForExistence(timeout: 3), menu.frame.maxY < scroll.frame.minY + scroll.frame.height * 0.6 {
+                menu.tap()
+                if entry.waitForExistence(timeout: 3) { opened = true; break }
+            }
+            scroll.swipeUp(velocity: .slow)
+            sleep(1)
+        }
+        XCTAssertTrue(opened)
+        entry.tap()
+        let scan = app.buttons["weakSpotScan"]
+        for _ in 0..<4 where !scan.isHittable { app.swipeUp() }
+        XCTAssertTrue(scan.waitForExistence(timeout: 10))
+        scan.tap()
+        XCTAssertTrue(app.buttons["reinforceRun"].waitForExistence(timeout: 600), "scan should finish and offer the reinforcement")
+        snapshot("99c-Schwachstellen")
+    }
+
     /// Live view of the virtual Kobra S1: its camera is started over MQTT and the FLV video arrives.
     func testLiveViewWithCamera() throws {
         app.launchArguments += ["-uiTestVirtualKobra"]

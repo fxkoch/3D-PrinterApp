@@ -201,6 +201,15 @@ final class PrintProject: Identifiable {
         transform(objectID, .scale(Vec3(factor, factor, factor)))
     }
 
+    /// Replaces the shape of a simple (one-colour) object, e.g. with a reinforced variant.
+    func replaceMesh(_ objectID: ModelObject.ID, with mesh: TriangleMesh) {
+        guard let loc = locate(objectID) else { return }
+        var list = plates[loc.plate]
+        list[loc.index].mesh = mesh
+        list[loc.index].volumes = []
+        rearrangePlate(loc.plate, list)
+    }
+
     func layFlat(_ objectID: ModelObject.ID) {
         guard let loc = locate(objectID) else { return }
         var list = plates[loc.plate]

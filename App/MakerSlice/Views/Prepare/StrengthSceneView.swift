@@ -8,7 +8,7 @@ struct StrengthSceneView: UIViewRepresentable {
     var fixed: SurfaceRegion?
     var load: SurfaceRegion?
     var result: FEMResult?
-    var onTap: (Int) -> Void
+    var onTap: (Int, Vec3) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -34,7 +34,8 @@ struct StrengthSceneView: UIViewRepresentable {
         let cameraNode = SCNNode()
         private let modelNode = SCNNode()
         weak var view: SCNView?
-        var onTap: (Int) -> Void = { _ in }
+        var onTap: (Int, Vec3) -> Void = { _, _ in }
+        private var center = Vec3.zero
         private var meshKey = 0
         private var colorKey = ""
 
@@ -75,6 +76,7 @@ struct StrengthSceneView: UIViewRepresentable {
             meshKey = key
             colorKey = colors
             let center = box.center
+            self.center = center
             if rebuild {
                 let extent = max(box.size.x, box.size.y, box.size.z, 10)
                 let distance = Float(extent * 2.4)
@@ -132,7 +134,10 @@ struct StrengthSceneView: UIViewRepresentable {
         @objc func tapped(_ gesture: UITapGestureRecognizer) {
             guard let view else { return }
             let hits = view.hitTest(gesture.location(in: view), options: [.searchMode: SCNHitTestSearchMode.closest.rawValue])
-            if let hit = hits.first(where: { $0.node === modelNode.childNodes.first }) { onTap(hit.faceIndex) }
+            if let hit = hits.first(where: { $0.node === modelNode.childNodes.first }) {
+                let l = hit.localCoordinates
+                onTap(hit.faceIndex, Vec3(Double(l.x) + center.x, Double(-l.z) + center.y, Double(l.y) + center.z))
+            }
         }
     }
 }

@@ -218,4 +218,14 @@ final class FEMTests: XCTestCase {
         XCTAssertGreaterThan(r.massRatio, 1, "material is added")
         XCTAssertLessThan(r.massRatio, 1.5)
     }
+
+    func testPlatesChangeBedTemperatureAndAreOfferedOnBothPrinters() {
+        let pla = Filament.pla
+        XCTAssertLessThan(pla.bedTemp(for: .coolPlate, firstLayer: false), pla.bedTemp(for: .texturedPEI, firstLayer: false))
+        XCTAssertEqual(pla.bedTemp(for: .engineering, firstLayer: false), pla.smoothPlateBedTemp)
+        for machine in [MachineProfile.snapmakerU1, .kobraS1] {
+            XCTAssertEqual(Set(machine.supportsPlateTypes), Set(PlateType.allCases))
+        }
+        XCTAssertEqual(PlateType.coolPlate.rawValue, "Cool Plate", "Orca's name, used in the G-code and cloud jobs")
+    }
 }
