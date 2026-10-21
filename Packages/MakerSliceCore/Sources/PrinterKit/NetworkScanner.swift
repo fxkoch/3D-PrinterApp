@@ -5,6 +5,9 @@ import FoundationNetworking
 #if canImport(Darwin)
 import Darwin
 #endif
+#if canImport(Network)
+import Network
+#endif
 
 /// A printer found on the local network.
 public struct DiscoveredPrinter: Identifiable, Hashable, Sendable {
@@ -26,6 +29,7 @@ public struct DiscoveredPrinter: Identifiable, Hashable, Sendable {
     }
 
     /// Best guess which of the app's printer models this is.
+    public var looksLikeBambu: Bool { modelText.lowercased().contains("bambu") }
     public var looksLikeKobraS1: Bool { modelText.lowercased().contains("kobra s1") || modelText.lowercased().contains("kobra-s1") }
     public var looksLikeSnapmaker: Bool {
         let t = modelText.lowercased()
@@ -119,7 +123,43 @@ public enum NetworkScanner {
             }
             return DiscoveredPrinter(name: hostname, host: host, kind: .moonraker, modelText: hostname)
         }
+        // Bambu Lab in LAN mode: MQTT (8883) and FTPS (990) both answer.
+        async let mqtt = tcpOpen(host: host, port: 8883, timeout: timeout)
+        async let ftps = tcpOpen(host: host, port: 990, timeout: timeout)
+        if await mqtt, await ftps {
+            return DiscoveredPrinter(name: "Bambu Lab (\(host))", host: host, kind: .bambuLAN, modelText: "Bambu Lab",
+                                     note: "Seriennummer (Typenschild) und Zugangscode (Drucker-Display) eintragen.")
+        }
         return nil
+    }
+
+    /// True when something accepts a TCP connection on the port (no data is sent).
+    static func tcpOpen(host: String, port: UInt16, timeout: TimeInterval) async -> Bool {
+        #if canImport(Network)
+        return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            let conn = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+            let lock = NSLock()
+            var finished = false
+            func finish(_ ok: Bool) {
+                lock.lock(); defer { lock.unlock() }
+                guard !finished else { return }
+                finished = true
+                conn.cancel()
+                cont.resume(returning: ok)
+            }
+            conn.stateUpdateHandler = { state in
+                switch state {
+                case .ready: finish(true)
+                case .failed, .cancelled: finish(false)
+                default: break
+                }
+            }
+            conn.start(queue: .global())
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { finish(false) }
+        }
+        #else
+        return false
+        #endif
     }
 
     /// Scans the local subnet; each found printer is delivered as soon as it answers.

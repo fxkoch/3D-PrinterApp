@@ -52,6 +52,15 @@ protocol MachineDialect {
     /// Preview images the printer's screen shows (sizes from the official profile).
     var thumbnailSizes: [(width: Int, height: Int)] { get }
     func end(_ ctx: PrintContext) -> [String]
+    /// Command that sets the pressure advance (Klipper: SET_PRESSURE_ADVANCE, Bambu: M900).
+    func pressureAdvance(_ k: Double) -> String
+    /// Command that sets the acceleration in mm/s².
+    func acceleration(_ a: Int) -> String
+}
+
+extension MachineDialect {
+    func pressureAdvance(_ k: Double) -> String { "SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(k))" }
+    func acceleration(_ a: Int) -> String { "SET_VELOCITY_LIMIT ACCEL=\(a)" }
 }
 
 /// Emits Klipper G-code for the selected printer. The machine-specific parts
@@ -71,6 +80,7 @@ public struct GCodeWriter {
         switch settings.printer {
         case .snapmakerU1: return U1Dialect()
         case .kobraS1: return KobraS1Dialect()
+        case .bambuP1S: return BambuP1SDialect()
         }
     }
 
@@ -94,7 +104,7 @@ public struct GCodeWriter {
         var state = MachineState(tool: initialTool)
         var toolChanges = 0
         if let pa = s.filament(for: initialTool).pressureAdvance {
-            body.line("SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(pa))")
+            body.line(dialect.pressureAdvance(pa))
         }
 
         var pendingLayerGCodes = s.layerGCodes.map { ($0.z, $0.lines.filter(LayerGCode.isAllowed)) }.filter { !$0.1.isEmpty }
@@ -128,7 +138,7 @@ public struct GCodeWriter {
                     dialect.toolChange(from: state.tool, to: island.tool, layer: layer, ctx).forEach { body.line($0) }
                     body.line("M83")
                     body.line("G92 E0")
-                    if let pa = filament.pressureAdvance { body.line("SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(pa))") }
+                    if let pa = filament.pressureAdvance { body.line(dialect.pressureAdvance(pa)) }
                     toolChanges += 1
                     stats.add(dialect.toolChangeSeconds)
                     state.tool = island.tool
@@ -158,9 +168,9 @@ public struct GCodeWriter {
                     if state.lastRole != extrusion.role {
                         body.line(";TYPE:\(extrusion.role.gcodeLabel)")
                         if extrusion.role == .outerWall {
-                            body.line("SET_VELOCITY_LIMIT ACCEL=\(Int(s.outerWallAcceleration))")
+                            body.line(dialect.acceleration(Int(s.outerWallAcceleration)))
                         } else if state.lastRole == .outerWall {
-                            body.line("SET_VELOCITY_LIMIT ACCEL=\(Int(s.acceleration))")
+                            body.line(dialect.acceleration(Int(s.acceleration)))
                         }
                         setFan(&body, &state, filament: filament, layerIndex: layer.index, role: extrusion.role)
                         state.lastRole = extrusion.role

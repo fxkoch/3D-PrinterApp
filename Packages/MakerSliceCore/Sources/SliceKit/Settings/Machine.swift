@@ -4,6 +4,7 @@ import Foundation
 public enum PrinterModel: String, Codable, CaseIterable, Sendable, Identifiable {
     case snapmakerU1
     case kobraS1
+    case bambuP1S
 
     public var id: String { rawValue }
 
@@ -11,6 +12,7 @@ public enum PrinterModel: String, Codable, CaseIterable, Sendable, Identifiable 
         switch self {
         case .snapmakerU1: return "Snapmaker U1"
         case .kobraS1: return "Anycubic Kobra S1"
+        case .bambuP1S: return "Bambu Lab P1S"
         }
     }
 
@@ -18,6 +20,7 @@ public enum PrinterModel: String, Codable, CaseIterable, Sendable, Identifiable 
         switch self {
         case .snapmakerU1: return .snapmakerU1
         case .kobraS1: return .kobraS1
+        case .bambuP1S: return .bambuP1S
         }
     }
 }
@@ -52,6 +55,11 @@ public struct MachineProfile: Equatable, Sendable {
         filamentScope: "kobraS1", supportsPlateTypes: PlateType.allCases, slotLabel: "Slot "
     )
 
+    public static let bambuP1S = MachineProfile(
+        model: .bambuP1S, bedSize: 256, maxHeight: 250, toolCount: 4, multiMaterial: .filamentSwitcher,
+        filamentScope: "p1s", supportsPlateTypes: PlateType.allCases, slotLabel: "AMS "
+    )
+
     /// Process defaults from "0.20mm Standard" of the respective Orca profile.
     func applyDefaults(to s: inout PrintSettings) {
         switch model {
@@ -73,6 +81,17 @@ public struct MachineProfile: Equatable, Sendable {
             s.skirtLoops = 0
             s.elephantFootCompensation = 0.075
             s.wallOrder = .outerInner
+            s.plateType = .texturedPEI
+            s.enableTimelapse = false
+        case .bambuP1S:
+            s.firstLayerHeight = 0.2
+            s.travelSpeed = 500
+            s.firstLayerInfillSpeed = 105
+            s.retractSpeed = 30
+            s.primeTower = true
+            s.skirtLoops = 0
+            s.elephantFootCompensation = 0.15
+            s.wallOrder = .innerOuter
             s.plateType = .texturedPEI
             s.enableTimelapse = false
         }

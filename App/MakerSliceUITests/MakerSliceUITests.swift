@@ -157,6 +157,30 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("91-Drucker-uebernommen")
     }
 
+    /// Bambu Lab P1S: choosing it asks for serial number and access code instead of just an address.
+    func testAddBambuP1S() {
+        app.launch()
+        app.tabBars.buttons["Drucker"].tap()
+        let add = app.buttons["Drucker hinzufügen"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        add.tap()
+        let model = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Modell'")).firstMatch
+        XCTAssertTrue(model.waitForExistence(timeout: 10))
+        model.tap()
+        let p1s = app.buttons["Bambu Lab P1S"].firstMatch
+        XCTAssertTrue(p1s.waitForExistence(timeout: 5))
+        p1s.tap()
+        XCTAssertTrue(app.textFields["printerSerial"].waitForExistence(timeout: 5), "serial number field")
+        XCTAssertTrue(app.secureTextFields["printerAccessCode"].exists, "access code field")
+        app.textFields["printerSerial"].tap()
+        app.textFields["printerSerial"].typeText("01P00A000000001")
+        app.textFields["printerHost"].tap()
+        app.textFields["printerHost"].typeText("192.168.1.77")
+        snapshot("92-Drucker-Bambu")
+        app.buttons["savePrinter"].tap()
+        XCTAssertTrue(app.staticTexts["Bambu Lab P1S"].waitForExistence(timeout: 10) || app.buttons["Bambu Lab P1S"].waitForExistence(timeout: 2))
+    }
+
     /// The printer makers' own model libraries (built into Slicer Next / Snapmaker Orca) open in the app.
     func testPrinterMakerPortalsOpen() {
         app.launch()

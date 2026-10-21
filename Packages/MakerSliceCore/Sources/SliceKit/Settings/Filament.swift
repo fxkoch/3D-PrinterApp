@@ -233,7 +233,7 @@ public enum FilamentLibrary {
     /// Default material for a printer.
     public static func defaultFilament(for printer: PrinterModel) -> Filament {
         let own = entries(for: printer).filter { $0.scope != "any" }.map(\.filament)
-        return own.first { $0.name == "Generic PLA" } ?? own.first { $0.name == "Anycubic PLA" } ?? .pla
+        return own.first { $0.name == "Generic PLA" } ?? own.first { $0.name == "Bambu PLA Basic" } ?? own.first { $0.name == "Anycubic PLA" } ?? .pla
     }
 
     private static func load() -> [Entry] {

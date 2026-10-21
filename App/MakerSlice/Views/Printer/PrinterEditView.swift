@@ -13,6 +13,7 @@ struct PrinterEditView: View {
     @State private var name = ""
     @State private var host = ""
     @State private var apiKey = ""
+    @State private var serial = ""
     @State private var testing = false
     @State private var testResult: String?
     @State private var scan = PrinterScan()
@@ -25,7 +26,7 @@ struct PrinterEditView: View {
                         ForEach(PrinterModel.allCases) { Text($0.displayName).tag($0) }
                     }
                     .onChange(of: model) { _, new in
-                        kind = new == .kobraS1 ? .anycubicLAN : .moonraker
+                        kind = new == .kobraS1 ? .anycubicLAN : (new == .bambuP1S ? .bambuLAN : .moonraker)
                         if name.isEmpty || PrinterModel.allCases.map(\.displayName).contains(name) { name = new.displayName }
                     }
                     if model == .kobraS1 {
@@ -82,6 +83,14 @@ struct PrinterEditView: View {
                     if kind == .moonraker {
                         SecureField("API-Schlüssel (optional)", text: $apiKey)
                     }
+                    if kind == .bambuLAN {
+                        TextField("Seriennummer (Typenschild)", text: $serial)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("printerSerial")
+                        SecureField("Zugangscode (Drucker-Display)", text: $apiKey)
+                            .accessibilityIdentifier("printerAccessCode")
+                    }
                 } header: {
                     Text("Adresse")
                 } footer: {
@@ -128,6 +137,7 @@ struct PrinterEditView: View {
                     name = existing.name
                     host = existing.host
                     apiKey = existing.apiKey ?? ""
+                    serial = existing.serial ?? ""
                 } else {
                     scan.start()
                     name = model.displayName
@@ -143,6 +153,8 @@ struct PrinterEditView: View {
             return "Am Kobra S1 unter Einstellungen → Netzwerk den LAN-Modus einschalten. Die IP steht im selben Menü. Hinweis: Im LAN-Modus ist die Anycubic-Cloud-App getrennt."
         case (.kobraS1, .moonraker):
             return "Für Kobra S1 mit der Community-Firmware Rinkhals (Moonraker auf Port 7125)."
+        case (.bambuP1S, _):
+            return "Am P1S unter Einstellungen → WLAN den LAN-Modus einschalten. Dort stehen IP-Adresse und Zugangscode; die Seriennummer steht auf dem Typenschild. Für den Druck muss eine microSD-Karte im Drucker stecken."
         default:
             return "Die IP findest du am U1 unter Einstellungen → WLAN. Port 7125 wird automatisch verwendet."
         }
@@ -151,7 +163,7 @@ struct PrinterEditView: View {
     private var connection: PrinterConnection {
         PrinterConnection(id: existing?.id ?? UUID(), name: name.isEmpty ? model.displayName : name,
                           host: host.trimmingCharacters(in: .whitespaces), apiKey: apiKey.isEmpty ? nil : apiKey,
-                          model: model.rawValue, kind: kind)
+                          model: model.rawValue, kind: kind, serial: serial.trimmingCharacters(in: .whitespaces).isEmpty ? nil : serial.trimmingCharacters(in: .whitespaces))
     }
 
     private func test() async {
@@ -171,7 +183,7 @@ struct PrinterEditView: View {
 
     /// Takes over a printer found on the network: model, connection type, address and name.
     private func choose(_ printer: DiscoveredPrinter) {
-        let newModel: PrinterModel = printer.looksLikeKobraS1 || printer.modelText.lowercased().contains("kobra") ? .kobraS1 : .snapmakerU1
+        let newModel: PrinterModel = printer.looksLikeBambu ? .bambuP1S : (printer.looksLikeKobraS1 || printer.modelText.lowercased().contains("kobra") ? .kobraS1 : .snapmakerU1)
         model = newModel
         host = printer.host
         if name.isEmpty || PrinterModel.allCases.map(\.displayName).contains(name) { name = printer.name }

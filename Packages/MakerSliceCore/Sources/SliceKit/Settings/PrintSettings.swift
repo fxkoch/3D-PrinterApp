@@ -320,7 +320,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
 
     public mutating func apply(_ quality: Quality) {
         layerHeight = quality.layerHeight
-        firstLayerHeight = printer == .kobraS1 ? 0.2 : (quality == .fine ? 0.2 : 0.25)
+        firstLayerHeight = printer != .snapmakerU1 ? 0.2 : (quality == .fine ? 0.2 : 0.25)
         topLayers = Int((1.0 / quality.layerHeight).rounded(.up))
         bottomLayers = Int((0.6 / quality.layerHeight).rounded(.up))
     }

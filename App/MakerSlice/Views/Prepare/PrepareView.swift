@@ -578,7 +578,7 @@ struct PrepareView: View {
         VStack(spacing: 10) {
             switch project.state {
             case .idle:
-                if app.cloud.isComplete {
+                if app.cloud.isComplete, project.settings.printer != .bambuP1S {
                     Picker("Slicer", selection: Binding(get: { app.useCloudSlicer }, set: { app.useCloudSlicer = $0 })) {
                         Text("iPhone").tag(false)
                         Text("OrcaSlicer (Cloud)").tag(true)

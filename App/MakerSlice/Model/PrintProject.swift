@@ -417,7 +417,9 @@ final class PrintProject: Identifiable {
         slice(plate: next, cloud: queueCloud)
     }
 
-    private func slice(plate: Int, cloud: CloudSliceConfig?) {
+    private func slice(plate: Int, cloud requestedCloud: CloudSliceConfig?) {
+        // The cloud OrcaSlicer has no profile for the P1S yet: always the iPhone's own slicer.
+        let cloud = settings.printer == .bambuP1S ? nil : requestedCloud
         // Colour changes at a height and painted surfaces are only known to the built-in slicer.
         let needsLocal = calibration != nil || plates[plate - 1].contains { !$0.colorChanges.isEmpty || !$0.paint.isEmpty }
         if needsLocal, cloud?.isComplete == true {

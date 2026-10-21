@@ -231,7 +231,7 @@ public enum PrintAdvisor {
         // Compare with what is loaded in the printer.
         for tool in usedTools.sorted() where tool < loadedTypes.count {
             let configured = s.filament(for: tool)
-            let label = s.printer == .kobraS1 ? "Slot \(tool + 1)" : "T\(tool + 1)"
+            let label = "\(s.machine.slotLabel)\(tool + 1)"
             guard let loaded = loadedTypes[tool], !loaded.isEmpty, loaded.uppercased() != "NONE" else {
                 result.append(Recommendation(
                     id: "empty-\(tool)", title: "\(label) ist leer",
@@ -288,7 +288,7 @@ public enum PrintAdvisor {
                                dryerHumidity: Double?) -> [Recommendation] {
         var result: [Recommendation] = []
         let tools = usedTools.sorted()
-        let label = { (tool: Int) in s.printer == .kobraS1 ? "Slot \(tool + 1)" : "T\(tool + 1)" }
+        let label = { (tool: Int) in "\(s.machine.slotLabel)\(tool + 1)" }
         let flexTools = tools.filter { s.filament(for: $0).isFlexible }
         let types = Set(tools.map { s.filament(for: $0).type.uppercased() })
 
@@ -299,6 +299,11 @@ public enum PrintAdvisor {
                 result.append(Recommendation(
                     id: "kobra-tpu", title: "TPU nicht über die ACE Pro",
                     detail: "Die ACE Pro kann weiches TPU nicht zuverlässig fördern und es kann sich im Schlauch verklemmen. TPU über den externen Spulenhalter direkt in den Druckkopf führen" + (tools.count > 1 ? " – und nicht mit Farbwechseln kombinieren." : "."),
+                    icon: "exclamationmark.triangle", severity: .warning))
+            case .bambuP1S:
+                result.append(Recommendation(
+                    id: "p1s-tpu", title: "TPU am P1S",
+                    detail: "Weiches TPU nicht über das AMS führen, sondern vom externen Spulenhalter direkt zum Druckkopf. Langsam drucken (max. ca. 3,5 mm³/s), Trockenbox empfohlen." + (tools.count > 1 ? " Nicht mit Farbwechseln kombinieren." : ""),
                     icon: "exclamationmark.triangle", severity: .warning))
             case .snapmakerU1:
                 result.append(Recommendation(
@@ -357,6 +362,34 @@ public enum PrintAdvisor {
                 id: "kobra-wiper", title: "Düsenspitze prüfen",
                 detail: "Der Abstreifer des Kobra S1 hinterlässt manchmal Filamentreste an der Düse, die beim Start über die erste Schicht schleifen. Spitze vor dem Druck kurz kontrollieren.",
                 icon: "eye", severity: .info))
+        }
+
+        // Community experience (forums and user profiles). Shown as hints only – nothing is changed without asking.
+        if s.printer == .kobraS1 {
+            if types.contains(where: { $0.hasPrefix("ABS") }) {
+                result.append(Recommendation(
+                    id: "community-kobra-abs", title: "ABS am Kobra S1: Bett wärmer",
+                    detail: "Im Drucktipps3D-Forum haftete ABS mit dem mitgelieferten Anycubic-Profil schlecht; mit 85 °C Betttemperatur (und einem Rand/Brim) funktionierte es. Die Temperaturen im Profil sind dort als zu niedrig aufgefallen.",
+                    icon: "person.2", severity: .info))
+            }
+            if types.contains(where: { $0.hasPrefix("PETG") }) {
+                result.append(Recommendation(
+                    id: "community-kobra-petg", title: "PETG am Kobra S1: langsamer",
+                    detail: "Nutzer berichten schlechte Schichthaftung über etwa 120 mm/s und raten zu weniger Lüfter und höherem Fluss (um 1,1). Die Werksprofile sind für PETG oft zu schnell.",
+                    icon: "person.2", severity: .info))
+            }
+            if tools.count > 1 {
+                result.append(Recommendation(
+                    id: "community-kobra-purge", title: "Spülmenge am Kobra prüfen",
+                    detail: "Beim Farbwechsel stellt der Drucker die Spülmenge am Display ein, nicht der Slicer – zu hohe Werte verschwenden viel Filament. Der Spül-Multiplikator sollte bei 1 stehen. Der Drucker nimmt außerdem die am Display eingestellten Farben.",
+                    icon: "person.2", severity: .info))
+            }
+        }
+        if s.printer == .bambuP1S {
+            result.append(Recommendation(
+                id: "community-p1s-start", title: "P1S: Startsequenz",
+                detail: "MakerSlice nutzt die Original-Startsequenz von Bambu Lab. In der Community gibt es verkürzte Varianten (z. B. weniger Wischen an der Düsenbürste, Leveling nur bei Bedarf), die den Start von etwa 5 auf 2–4 Minuten kürzen. Sie ändern Bewegungen und Motorströme – deshalb nicht ungeprüft übernehmen.",
+                icon: "person.2", severity: .info))
         }
 
         // Spiral vase sanity checks.

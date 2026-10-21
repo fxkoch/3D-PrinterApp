@@ -6,12 +6,15 @@ public enum ConnectionKind: String, Codable, CaseIterable, Sendable, Identifiabl
     case moonraker
     /// Anycubic stock firmware in LAN mode (local MQTT + HTTP upload).
     case anycubicLAN
+    /// Bambu Lab printers in LAN mode (local MQTT over TLS + FTPS upload), e.g. the P1S.
+    case bambuLAN
 
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
         case .moonraker: return "Moonraker (Klipper)"
         case .anycubicLAN: return "Anycubic LAN-Modus"
+        case .bambuLAN: return "Bambu LAN-Modus"
         }
     }
 }
@@ -116,6 +119,12 @@ public enum PrinterDrivers {
         case .anycubicLAN:
             #if canImport(Network)
             return AnycubicLANClient(connection: connection)
+            #else
+            return MoonrakerClient(connection: connection)
+            #endif
+        case .bambuLAN:
+            #if canImport(Network)
+            return BambuLANClient(connection: connection)
             #else
             return MoonrakerClient(connection: connection)
             #endif

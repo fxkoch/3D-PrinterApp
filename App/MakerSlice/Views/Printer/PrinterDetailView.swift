@@ -180,7 +180,7 @@ struct PrinterDetailView: View {
     }
 
     private func materialPanel(_ s: PrinterStatus) -> some View {
-        Panel(title: model == .kobraS1 ? "ACE Pro" : "Filament", systemImage: "circle.hexagongrid") {
+        Panel(title: model == .kobraS1 ? "ACE Pro" : (model == .bambuP1S ? "AMS" : "Filament"), systemImage: "circle.hexagongrid") {
             if s.filaments.isEmpty {
                 Text("Der Drucker meldet kein Filament.").font(.caption).foregroundStyle(.secondary)
             } else {
@@ -242,6 +242,8 @@ struct PrinterDetailView: View {
             Text(error).font(.callout).foregroundStyle(.secondary)
             Text(printer.kind == .anycubicLAN
                  ? "Am Kobra S1: Einstellungen → Netzwerk → LAN-Modus einschalten. iPhone und Drucker müssen im selben WLAN sein."
+                 : printer.kind == .bambuLAN
+                 ? "Am P1S: Einstellungen → WLAN → LAN-Modus einschalten und prüfen, dass Seriennummer und Zugangscode (steht dort auch) stimmen. iPhone und Drucker müssen im selben WLAN sein."
                  : "Prüfe, ob der Drucker eingeschaltet und im selben WLAN ist.")
                 .font(.caption).foregroundStyle(.secondary)
             Button("Erneut versuchen") { Task { await app.printers.refresh(printer) } }.buttonStyle(.bordered)

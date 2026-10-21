@@ -26,11 +26,19 @@ public enum SlicerOptionAdvisor {
     }
 
     public static func vendorName(_ model: PrinterModel) -> String {
-        model == .snapmakerU1 ? "Snapmaker" : "Anycubic"
+        switch model {
+        case .snapmakerU1: return "Snapmaker"
+        case .kobraS1: return "Anycubic"
+        case .bambuP1S: return "Bambu Lab"
+        }
     }
 
     /// The slicer whose settings list the app mirrors for this printer.
     public static func slicerName(_ model: PrinterModel) -> String {
-        model == .snapmakerU1 ? "Snapmaker Orca" : "Anycubic Slicer Next"
+        switch model {
+        case .snapmakerU1: return "Snapmaker Orca"
+        case .kobraS1: return "Anycubic Slicer Next"
+        case .bambuP1S: return "Bambu Studio"
+        }
     }
 }

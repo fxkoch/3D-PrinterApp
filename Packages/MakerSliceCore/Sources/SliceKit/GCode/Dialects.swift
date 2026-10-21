@@ -258,3 +258,330 @@ struct KobraS1Dialect: MachineDialect {
         return lines
     }
 }
+
+/// Bambu Lab P1S (Marlin-based firmware, optional AMS), from the official Bambu Studio / OrcaSlicer machine profile
+/// "Bambu Lab P1S 0.4 nozzle". The printer starts the file itself (`project_file` over MQTT), reports progress from
+/// M73 and takes the AMS slot from `T<n>`.
+struct BambuP1SDialect: MachineDialect {
+    var toolChangeSeconds: Double { 45 }
+    var preparationSeconds: Double { 360 }
+    var thumbnailSizes: [(width: Int, height: Int)] { [] }
+
+    func pressureAdvance(_ k: Double) -> String { "M900 K\(fmt5(k)) ; pressure advance" }
+    func acceleration(_ a: Int) -> String { "M204 S\(a)" }
+
+    func header(_ ctx: PrintContext) -> [String] {
+        ["; curr_bed_type = \(ctx.settings.plateType.rawValue)", "; nozzle_type = hardened_steel", "; single_extruder_multi_material = 1"]
+    }
+
+    func start(_ ctx: PrintContext) -> [String] {
+        let f = ctx.initialFilament
+        let s = ctx.settings
+        let bed = f.bedTemp(for: s.plateType, firstLayer: true)
+        let nozzle = f.firstLayerNozzleTemp
+        let slot = ctx.initialTool
+        var box = (x: 0.0, y: 0.0, w: s.bedSize, h: s.bedSize)
+        if let b = ctx.firstLayerBox {
+            box = (max(0, b.min.mmX), max(0, b.min.mmY), min(s.bedSize, b.max.mmX) - max(0, b.min.mmX), min(s.bedSize, b.max.mmY) - max(0, b.min.mmY))
+        }
+        let pla = f.type.uppercased().hasPrefix("PLA") && bed > 45
+        var lines: [String] = [
+            ";===== machine: P1S-0.4 ========================",
+            ";===== turn on the HB fan & MC board fan =================",
+            "M104 S75 ;set extruder temp to turn on the HB fan and prevent filament oozing from nozzle",
+            "M710 A1 S255 ;turn on MC fan by default(P1S)",
+            ";===== reset machine status =================",
+            "M290 X40 Y40 Z2.6666666",
+            "G91",
+            "M17 Z0.4 ; lower the z-motor current",
+            "G380 S2 Z30 F300 ; lower the hotbed , to prevent the nozzle is below the hotbed",
+            "G380 S2 Z-25 F300 ;",
+            "G1 Z5 F300;",
+            "G90",
+            "M17 X1.2 Y1.2 Z0.75 ; reset motor current to default",
+            "M960 S5 P1 ; turn on logo lamp",
+            "G90",
+            "M220 S100 ;Reset Feedrate",
+            "M221 S100 ;Reset Flowrate",
+            "M73.2   R1.0 ;Reset left time magnitude",
+            "M1002 set_gcode_claim_speed_level : 5",
+            "M221 X0 Y0 Z0 ; turn off soft endstop to prevent protential logic problem",
+            "G29.1 Z{+0.0} ; clear z-trim value first",
+            "M204 S10000 ; init ACC set to 10m/s^2",
+            ";===== heatbed preheat ====================",
+            "M1002 gcode_claim_action : 2",
+            "M140 S\(bed) ;set bed temp",
+            "M190 S\(bed) ;wait for bed temp",
+        ]
+        if pla { lines.append("M106 P3 S180 ;Prevent PLA from jamming") }
+        lines += [
+            "M106 P2 S100 ; turn on big fan ,to cool down toolhead",
+            ";===== prepare print temperature and material ==========",
+            "M104 S\(nozzle) ;set extruder temp",
+            "G91",
+            "G0 Z10 F1200",
+            "G90",
+            "G28 X",
+            "M975 S1 ; turn on",
+            "G1 X60 F12000",
+            "G1 Y245",
+            "G1 Y265 F3000",
+            "M620 M",
+            "M620 S\(slot)A   ; switch material if AMS exist",
+            "    M109 S\(nozzle)",
+            "    G1 X120 F12000",
+            "    G1 X20 Y50 F12000",
+            "    G1 Y-3",
+            "    T\(slot)",
+            "    G1 X54 F12000",
+            "    G1 Y265",
+            "    M400",
+            "M621 S\(slot)A",
+            "M620.1 E F\(Int(f.maxVolumetricSpeed / 2.4053 * 60)) T\(nozzle)",
+            "M412 S1 ; ===turn on filament runout detection===",
+            "M109 S250 ;set nozzle to common flush temp",
+            "M106 P1 S0",
+            "G92 E0",
+            "G1 E50 F200",
+            "M400",
+            "M104 S\(nozzle)",
+            "G92 E0",
+            "G1 E50 F200",
+            "M400",
+            "M106 P1 S255",
+            "G92 E0",
+            "G1 E5 F300",
+            "M109 S\(nozzle - 20) ; drop nozzle temp, make filament shink a bit",
+            "G92 E0",
+            "G1 E-0.5 F300",
+            "G1 X70 F9000",
+            "G1 X76 F15000",
+            "G1 X65 F15000",
+            "G1 X76 F15000",
+            "G1 X65 F15000; shake to put down garbage",
+            "G1 X80 F6000",
+            "G1 X95 F15000",
+            "G1 X80 F15000",
+            "G1 X165 F15000; wipe and shake",
+            "M400",
+            "M106 P1 S0",
+            ";===== prepare print temperature and material end =====",
+            ";===== wipe nozzle ===============================",
+            "M1002 gcode_claim_action : 14",
+            "M975 S1",
+            "M106 S255",
+            "G1 X65 Y230 F18000",
+            "G1 Y264 F6000",
+            "M109 S\(nozzle - 20)",
+            "G1 X100 F18000 ; first wipe mouth",
+            "G0 X135 Y253 F20000  ; move to exposed steel surface edge",
+            "G28 Z P0 T300; home z with low precision,permit 300deg temperature",
+            "G29.2 S0 ; turn off ABL",
+            "G0 Z5 F20000",
+            "G1 X60 Y265",
+            "G92 E0",
+            "G1 E-0.5 F300 ; retrack more",
+            "G1 X100 F5000; second wipe mouth",
+            "G1 X70 F15000",
+            "G1 X100 F5000",
+            "G1 X70 F15000",
+            "G1 X100 F5000",
+            "G1 X70 F15000",
+            "G1 X90 F5000",
+            "G0 X128 Y261 Z-1.5 F20000  ; move to exposed steel surface and stop the nozzle",
+            "M104 S140 ; set temp down to heatbed acceptable",
+            "M106 S255 ; turn on fan (G28 has turn off fan)",
+            "M221 S; push soft endstop status",
+            "M221 Z0 ;turn off Z axis endstop",
+            "G0 Z0.5 F20000",
+            "G0 X125 Y259.5 Z-1.01",
+            "G0 X131 F211",
+            "G0 X124",
+            "G0 Z0.5 F20000",
+            "G0 X125 Y262.5",
+            "G0 Z-1.01",
+            "G0 X131 F211",
+            "G0 X124",
+            "G0 Z0.5 F20000",
+            "G0 X125 Y260.0",
+            "G0 Z-1.01",
+            "G0 X131 F211",
+            "G0 X124",
+            "G0 X128",
+            "G2 I0.5 J0 F300",
+            "G2 I0.5 J0 F300",
+            "M109 S140 ; wait nozzle temp down to heatbed acceptable",
+            "G2 I0.5 J0 F3000",
+            "G2 I0.5 J0 F3000",
+            "M221 R; pop softend status",
+            "G1 Z10 F1200",
+            "M400",
+            "G1 Z10",
+            "G1 F30000",
+            "G1 X230 Y15",
+            "G29.2 S1 ; turn on ABL",
+            "M106 S0 ; turn off fan , too noisy",
+            ";===== wipe nozzle end ================================",
+        ]
+        if s.enableBedLeveling {
+            lines += [
+                ";===== bed leveling ==================================",
+                "M1002 gcode_claim_action : 1",
+                "G29 A X\(fmt(box.x)) Y\(fmt(box.y)) I\(fmt(box.w)) J\(fmt(box.h))",
+                "M400",
+                "M500 ; save cali data",
+            ]
+        }
+        lines += [
+            "M975 S1 ; turn on vibration supression",
+            "M104 S\(nozzle) ; set extrude temp earlier, to reduce wait time",
+            ";===== nozzle load line ===============================",
+            "M975 S1",
+            "G90",
+            "M83",
+            "T1000",
+            "G1 X18.0 Y1.0 Z0.8 F18000;Move to start position",
+            "M109 S\(nozzle)",
+            "G1 Z0.2",
+            "G0 E2 F300",
+            "G0 X240 E15 F6000",
+            "G0 Y11 E0.700 F1500",
+            "G0 X239.5",
+            "G0 E0.2",
+            "G0 Y1.5 E0.700",
+            "G0 X18 E15 F6000",
+            "M400",
+        ]
+        if s.plateType == .texturedPEI { lines.append("G29.1 Z-0.04 ; for Textured PEI Plate") }
+        lines += [
+            "M1002 gcode_claim_action : 0",
+            "M106 S0 ; turn off fan",
+            "M106 P2 S0 ; turn off big fan",
+            "M106 P3 S0 ; turn off chamber fan",
+            "M975 S1 ; turn on mech mode supression",
+        ]
+        return lines
+    }
+
+    func beforeLayer(_ layer: SlicedLayer, _ ctx: PrintContext) -> [String] {
+        let total = max(ctx.layers.count, 1)
+        let percent = min(99, Int(Double(layer.index) / Double(total) * 100))
+        return ["; layer num/total_layer_count: \(layer.index + 1)/\(total)", "; update layer progress",
+                "M73 P\(percent)", "M73 L\(layer.index + 1)", "M991 S0 P\(layer.index) ;notify layer change", "G92 E0"]
+    }
+
+    func afterLayer(_ layer: SlicedLayer, _ ctx: PrintContext) -> [String] {
+        var lines = [";AFTER_LAYER_CHANGE"]
+        if layer.index == 1 {
+            let f = ctx.settings.filament(for: layer.islands.first?.tool ?? ctx.initialTool)
+            lines.append("M104 S\(f.nozzleTemp)")
+            lines.append("M140 S\(f.bedTemp(for: ctx.settings.plateType, firstLayer: false))")
+        }
+        return lines
+    }
+
+    func toolChange(from: Int, to: Int, layer: SlicedLayer, _ ctx: PrintContext) -> [String] {
+        let next = ctx.settings.filament(for: to)
+        let previous = ctx.settings.filament(for: from)
+        let temp = layer.index == 0 ? next.firstLayerNozzleTemp : next.nozzleTemp
+        let flushSpeed = Int(next.maxVolumetricSpeed / 2.4053 * 60)
+        let flushTemp = next.type.uppercased().hasPrefix("PETG") ? 260 : max(temp, 250)
+        return [
+            "M620 S\(to)A",
+            "M204 S9000",
+            "G1 Z\(fmt(layer.z + 3)) F1200",
+            "G1 X70 F21000",
+            "G1 Y245",
+            "G1 Y265 F3000",
+            "M400",
+            "M106 P1 S0",
+            "M106 P2 S0",
+            "M104 S\(max(previous.nozzleTemp, 143))",
+            "M620.11 S0",
+            "M400",
+            "G1 X90 F3000",
+            "G1 Y255 F4000",
+            "G1 X100 F5000",
+            "G1 X120 F15000",
+            "G1 X20 Y50 F21000",
+            "G1 Y-3",
+            "T\(to)",
+            "M620.1 E F\(flushSpeed) T\(flushTemp)",
+            "G92 E0",
+            "M83",
+            "; FLUSH_START",
+            "M400",
+            "M109 S\(flushTemp)",
+            "G1 E2 F\(flushSpeed) ;Compensate for filament spillage during waiting temperature",
+            "; FLUSH_END",
+            "M400",
+            "M109 S\(temp)",
+            "G92 E0",
+            "M106 P1 S255",
+            "M400 S3",
+            "G1 X70 F5000",
+            "G1 X90 F3000",
+            "G1 Y255 F4000",
+            "G1 X105 F5000",
+            "G1 Y265 F5000",
+            "G1 X70 F10000",
+            "G1 X100 F5000",
+            "G1 X70 F10000",
+            "G1 X80 F15000",
+            "G1 X60",
+            "G1 X80",
+            "G1 X100 F5000",
+            "G1 X165 F15000; wipe and shake",
+            "G1 Y256 ; move Y to aside, prevent collision",
+            "M400",
+            "G1 Z\(fmt(layer.z + 3)) F3000",
+            "M621 S\(to)A",
+        ]
+    }
+
+    func end(_ ctx: PrintContext) -> [String] {
+        let maxZ = ctx.layers.last?.z ?? 0
+        let top = ctx.settings.maxHeight
+        var lines = [
+            "M400 ; wait for buffer to clear",
+            "G92 E0 ; zero the extruder",
+            "G1 E-0.8 F1800 ; retract",
+            "G1 Z\(fmt(min(maxZ + 0.5, top))) F900 ; lower z a little",
+            "G1 X65 Y245 F12000 ; move to safe pos",
+            "G1 Y265 F3000",
+            "M140 S0 ; turn off bed",
+            "M106 S0 ; turn off fan",
+            "M106 P2 S0 ; turn off remote part cooling fan",
+            "M106 P3 S0 ; turn off chamber cooling fan",
+            "G1 X100 F12000 ; wipe",
+            "; pull back filament to AMS",
+            "M620 S255",
+            "G1 X20 Y50 F12000",
+            "G1 Y-3",
+            "T255",
+            "G1 X65 F12000",
+            "G1 Y265",
+            "G1 X100 F12000 ; wipe",
+            "M621 S255",
+            "M104 S0 ; turn off hotend",
+            "M400 ; wait all motion done",
+            "M17 S",
+            "M17 Z0.4 ; lower z motor current to reduce impact if there is something in the bottom",
+        ]
+        if maxZ + 100 < top {
+            lines += ["G1 Z\(fmt(maxZ + 100)) F600", "G1 Z\(fmt(maxZ + 98))"]
+        } else {
+            lines += ["G1 Z\(fmt(top)) F600", "G1 Z\(fmt(top - 2))"]
+        }
+        lines += [
+            "M400 P100",
+            "M17 R ; restore z current",
+            "M220 S100  ; Reset feedrate magnitude",
+            "M201.2 K1.0 ; Reset acc magnitude",
+            "M73.2   R1.0 ;Reset left time magnitude",
+            "M1002 set_gcode_claim_speed_level : 0",
+            "M17 X0.8 Y0.8 Z0.5 ; lower motor current to 45% power",
+        ]
+        return lines
+    }
+}

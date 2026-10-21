@@ -199,6 +199,7 @@ public enum ProfileAdvisor {
         switch model {
         case .snapmakerU1: return name.contains("snapmaker") && name.contains("u1")
         case .kobraS1: return name.contains("kobra s1")
+        case .bambuP1S: return name.contains("p1s")
         }
     }
 }

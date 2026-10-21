@@ -29,9 +29,12 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
     /// "snapmakerU1" or "kobraS1" (matches SliceKit's PrinterModel).
     public var model: String
     public var kind: ConnectionKind
+    /// Serial number (Bambu Lab LAN mode: the MQTT topics contain it; the access code is stored in `apiKey`).
+    public var serial: String?
 
     public init(id: UUID = UUID(), name: String, host: String, apiKey: String? = nil,
-                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker) {
+                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker, serial: String? = nil) {
+        self.serial = serial
         self.id = id
         self.name = name
         self.host = host
@@ -40,7 +43,7 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
         self.kind = kind
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind }
+    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind, serial }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,6 +53,7 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
         apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey)
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? "snapmakerU1"
         kind = try c.decodeIfPresent(ConnectionKind.self, forKey: .kind) ?? .moonraker
+        serial = try c.decodeIfPresent(String.self, forKey: .serial)
     }
 
     /// Bare host name or IP without scheme/port.

@@ -1,6 +1,6 @@
 # MakerSlice – kostenlose 3D-Modelle finden, slicen, direkt drucken
 
-iPhone-App (SwiftUI, iOS 17+) für den **Snapmaker U1** und den **Anycubic Kobra S1 mit ACE Pro**.
+iPhone-App (SwiftUI, iOS 17+) für den **Snapmaker U1**, den **Anycubic Kobra S1 mit ACE Pro** und den **Bambu Lab P1S (mit AMS)**.
 Modelle aus **18 Portalen** (u. a. MakerWorld, Printables, Thingiverse, Anycubic Maker Online, Snapmaker-Bibliothek) holen,
 auf dem iPhone **oder mit dem echten OrcaSlicer in der Cloud** slicen, Empfehlungen für den perfekten Druck übernehmen und per
 WLAN an den Drucker schicken. Der einfache Modus fragt nur das Nötigste (Qualität, Stabilität, Stützen, Material); der
@@ -27,6 +27,9 @@ WLAN an den Drucker schicken. Der einfache Modus fragt nur das Nötigste (Qualit
 | **Festigkeit prüfen** | Objektmenü → „Festigkeit prüfen“. Gerechnet wird immer mit dem **Filament des Objekt-Slots** (12 Materialtypen hinterlegt). Befestigung antippen, Last auf eine ganze Fläche oder **an eine beliebige Stelle** setzen (Größe einstellbar, durch erneutes Tippen verschiebbar), Kilogramm und Richtung wählen. Ergebnis: Ampel, Sicherheitsfaktor (kurz/Dauerlast), Verformung, Beanspruchung als Farbe. **Schwachstellen ohne Last**: das Teil wird auf der Unterseite gehalten und oben von drei Seiten gedrückt; die am stärksten beanspruchten Stellen werden gezeigt und erklärt (dünner Steg, Schichtrichtung). **Verbesserungen**: mehr Wände, dichtere Füllung, anders gedreht – oder weniger Material bei gleicher Sicherheit; **Struktur verbessern** verdickt die höchstbelasteten Stellen sanft (höchstens 1,5 mm), prüft das nachgerechnet und übernimmt die Form oder sichert sie als 3MF. Abschätzung (±20 %), kein Bauteilnachweis. |
 | **Druckplatten** | Strukturiertes PEI, glattes PEI, Cool Plate und Engineering Plate je Drucker wählbar; die Betttemperatur folgt dem Filament. Der Z-Offset bleibt bei den Einstellungen des Druckers. |
 | **Pause / Fehler** | Abbrechen und Fortsetzen in der App. Bei Pause oder Fehler sagt die App, ob Fortsetzen sinnvoll ist (z. B. Filament leer), erst geprüft werden sollte (z. B. Teil kalt) oder besser verworfen wird (z. B. Heizungsfehler, Teil gelöst), mit den Schritten dazwischen. |
+| **Werkstatt (ohne Slicer)** | Bibliothek → Modell nach rechts wischen („Prüfen“) oder lange drücken: Festigkeit prüfen, Material und Lage vergleichen, Schwachstellen suchen, Form verstärken – ohne Projekt, Drucker oder Slicer. „Zum Druck vorbereiten“ legt das Ergebnis mit Wänden und Füllung in der Bibliothek ab und öffnet es zum Slicen. |
+| **Material- und Lagevergleich** | Nach einer Berechnung: dieselbe Last in PLA, PETG, ABS, ASA, PC, Nylon und den Carbon-Varianten (Festigkeit, Steifigkeit, Gewicht, Hitzefestigkeit, was sich beim Drucken ändert) und in allen sechs Lagen auf dem Bett (Festigkeit, Stützen, Höhe) mit Empfehlung. |
+| **3D-Scan** | Bibliothek → + → 3D-Scan: geführte Aufnahme mit dem LiDAR-iPhone oder Fotos/Video aus der Mediathek; das Modell wird auf dem Gerät gerechnet (Apple Object Capture), aufgeräumt (Löcher geschlossen, lose Teile entfernt) und in echter Größe gesichert. Braucht ein iPhone/iPad mit LiDAR (ab A14); nur auf echtem Gerät testbar. |
 | **Drucker** | Wird im WLAN **automatisch gefunden** (ohne IP-Eingabe). Live-Daten: Fortschritt, Restzeit, Schicht, Temperaturen, Lüfter, Licht, Filament je Slot, ACE-Feuchte. **Live-Ansicht** mit Kamera (Kobra S1: FLV/H.264, U1: Webcam) und dem aktuellen Schritt (Vorbereiten, Aufheizen, Drucken …). Pause/Fortsetzen/Abbrechen, Vorheizen und Trocknen im Expertenmodus. |
 | **Kalibrierung & Protokoll** | Bett-Mesh als Farbkarte, Z-Offset, Pressure Advance, Input Shaper (U1); Fehler- und Ereignislog, exportierbar. |
 
@@ -37,6 +40,9 @@ WLAN an den Drucker schicken. Der einfache Modus fragt nur das Nötigste (Qualit
 | Snapmaker U1 | Moonraker (Port 7125), wird per Bonjour gefunden | im WLAN; die Snapmaker-Cloud-Anbindung darf aktiv bleiben |
 | Anycubic Kobra S1 | **LAN-Modus**: lokales MQTT/TLS + HTTP-Upload | *Einstellungen → Netzwerk → LAN-Modus an*. Achtung: Im LAN-Modus ist der Drucker **nicht** mit Anycubic-Cloud/App verbunden |
 | Kobra S1 mit Rinkhals | Moonraker | Community-Firmware Rinkhals |
+| Bambu Lab P1S | **LAN-Modus**: lokales MQTT/TLS (Port 8883) + FTPS-Upload (Port 990) | *Einstellungen → WLAN → LAN-Modus an*; Seriennummer (Typenschild) und Zugangscode (Display) in der App eintragen; microSD-Karte einlegen. Das Slicen läuft auf dem iPhone (kein Cloud-Slicer für den P1S) |
+
+**Bambu P1S – ehrlicher Stand:** G-Code, Verbindung, Upload und Druckstart sind gegen einen nachgebauten P1S (`tools/virtualprinters/bambu_p1s_sim.py`) geprüft, nicht gegen echte Hardware. Das erste Mal am echten Gerät bitte daneben stehen und Mehrfarbdruck (AMS) erst nach einem einfarbigen Test nutzen. Kamera-Bild und automatische Suche mit Seriennummer fehlen noch.
 
 Beim Kobra S1 gilt: Slot im Modell = Slot der ACE Pro; die Zuordnung wird beim Start mitgeschickt.
 
@@ -53,6 +59,7 @@ Ohne Zugriff auf die echten Geräte wird alles gegen möglichst echte Gegenstüc
   Kobra zweifarbig mit Steckverbindern) werden mit OrcaSlicer gesliced und geprüft.
 - **UI-Tests im iPhone-Simulator** mit Screenshots: Tabs, Suche + Download + Slicen, beide Drucker, Teilen-Werkzeug,
   Druck auf dem virtuellen Kobra.
+- **Virtueller Bambu P1S** (`tools/virtualprinters/bambu_p1s_sim.py`): MQTT über TLS, FTPS-Upload, AMS, Druckablauf; geprüft wird auch, dass die hochgeladene `.gcode.3mf` gültig ist und keine Klipper-Befehle enthält.
 - **72 automatische Tests im Swift-Paket** (davon 5 mit virtuellen Druckern; Import, Slicer-Funktionen, G-Code, Empfehlungen, Protokolle, Cloud-Client gegen nachgebaute GitHub-API).
 
 Lokal auf dem Mac (ohne GitHub-Minuten): `tools/test-local.sh` – siehe [TESTING.md](TESTING.md), dort auch, wie dein Mac
