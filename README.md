@@ -1,9 +1,10 @@
 # MakerSlice – kostenlose 3D-Modelle finden, slicen, direkt drucken
 
 iPhone-App (SwiftUI, iOS 17+) für den **Snapmaker U1** und den **Anycubic Kobra S1 mit ACE Pro**.
-Modelle aus **MakerWorld** und **Printables** suchen, auf dem iPhone **oder mit dem echten OrcaSlicer in der
-Cloud** slicen, Empfehlungen für den perfekten Druck übernehmen und per WLAN an den Drucker schicken.
-Gestaltung: ruhig und reduziert im macOS-Stil, mit Expertenmodus – jede Einstellung ist mit ⓘ erklärt.
+Modelle aus **18 Portalen** (u. a. MakerWorld, Printables, Thingiverse, Anycubic Maker Online, Snapmaker-Bibliothek) holen,
+auf dem iPhone **oder mit dem echten OrcaSlicer in der Cloud** slicen, Empfehlungen für den perfekten Druck übernehmen und per
+WLAN an den Drucker schicken. Der einfache Modus fragt nur das Nötigste (Qualität, Stabilität, Stützen, Material); der
+**Expertenmodus** öffnet alle Einstellungen – jede mit Erklärung und Beispielbild.
 
 **Installation aufs iPhone:** siehe [INSTALL.md](INSTALL.md) (Xcode, Sideloadly/AltStore oder TestFlight).
 
@@ -11,7 +12,10 @@ Gestaltung: ruhig und reduziert im macOS-Stil, mit Expertenmodus – jede Einste
 
 | Bereich | Was geht |
 |---|---|
-| **Entdecken** | Suche über **Printables** und **MakerWorld** (über deinen Login im eingebauten Browser), nur kostenlose Modelle, Sortierung nach Relevanz, Beliebtheit, Neu oder Bewertung. „Drucken“ lädt herunter und öffnet das Projekt. |
+| **Entdecken** | Suche über **Printables** und **MakerWorld** (über deinen Login im eingebauten Browser), nur kostenlose Modelle, Sortierung nach Relevanz, Beliebtheit, Neu oder Bewertung. Unter **Portale** öffnen 18 Webseiten im App-Browser – zuerst die des gewählten Druckers (*Anycubic Maker Online*, *Snapmaker Modelle*), dann Thingiverse, Thangs, MyMiniFactory, Cults3D, Creality Cloud, Yeggi, GrabCAD u. a. Logins bleiben gespeichert, jede Datei (STL/3MF/OBJ/ZIP) landet automatisch in der Bibliothek. |
+| **Mehrere Platten** | Neue, duplizierte und geteilte Objekte werden automatisch auf die passende Platte gelegt (bei Bedarf gedreht); Platten hinzufügen, Objekte verschieben, alle Platten auf einmal slicen. |
+| **Mehrfarbig** | Mehrfarb-Modelle (auch **bemalte** MakerWorld-Modelle) werden erkannt: Farben des Modells → Slot und Filament zuordnen, **Stützmaterial getrennt**, Farbwechsel bei Höhe, Spülmenge und Abfallanzeige. Das empfohlene Profil wird je Filament übernommen und lässt sich anpassen. |
+| **Kalibrieren** | Fünf Testdrucke (Temperatur, Fluss, Pressure Advance, Rückzug, max. Fließgeschwindigkeit) werden aus dem Filamentprofil erzeugt, mit Erklärung „was sehe ich – was bedeutet es“. Das Ergebnis wird je Drucker und Filament gespeichert und für alle späteren Drucke genutzt; beim U1 zusätzlich im Drucker (Moonraker-Datenbank). |
 | **Vorbereiten** | 3D-Vorschau, Drucker (U1 / Kobra S1), 4 Material-Slots, Objekte je Slot, drehen, flach legen, skalieren, duplizieren, anordnen. MakerWorld-3MF (Bambu-Projekte inkl. Platten) werden auf Bauraum, Material und Profil deines Druckers umgerechnet. |
 | **Teilen** | Zu große Objekte per Schnittebene (X/Y/Z) mit Live-Vorschau teilen – mit **Zapfen** oder **Dübeln** (0,2 mm Spiel). „Automatisch passend teilen“ zerlegt so oft wie nötig. |
 | **Empfehlungen** | Vor jedem Druck, mit einem Tipp übernehmen: Stützen, Brim, Glätten, Füllmuster, Schichthöhe, Platte, Reinigungsturm, eingelegtes Filament – plus druckerspezifische Hinweise aus Hersteller- und Community-Erfahrung: TPU nicht über die ACE Pro, kurzer Rückzug bei TPU (Werkzeugwechsel-Staus am U1), Trocknen bei feuchtem Filament (Feuchte aus der ACE Pro), PETG-Fäden und Elefantenfuß, passgenaue Steckverbinder, Düsenspitze am Kobra, Vasenmodus-Prüfung. |
@@ -20,7 +24,7 @@ Gestaltung: ruhig und reduziert im macOS-Stil, mit Expertenmodus – jede Einste
 | **Erklärungen** | Jede Einstellung (Slicer und Filament) hat ein ⓘ: was sie bewirkt, was mehr/weniger bedeutet, Praxistipp mit Werten für U1/Kobra. Auf Wunsch direkt unter jeder Einstellung eingeblendet. |
 | **Filamente** | **325 Profile** aus den offiziellen OrcaSlicer-Daten (25 Kobra S1, 59 U1, 241 Markenfilamente). Auswahl lädt die empfohlenen Werte; im Expertenmodus feinjustierbar mit „Auf Empfehlung zurücksetzen“. Eingelegtes Material (RFID am U1, ACE Pro am Kobra) wird erkannt. |
 | **Drucker-Display** | Der G-Code enthält Vorschaubilder (U1: 48 und 300 px, Kobra: 230×110 px) sowie Druckzeit, Filament je Slot und Temperaturen im OrcaSlicer-Format, damit Drucker und Moonraker sie anzeigen. |
-| **Drucker** | Live-Daten: Fortschritt, Restzeit, Schicht, Temperaturen, Lüfter, Licht, Filament je Slot, ACE-Feuchte und Trocknen, Kamerabild (U1). Pause/Fortsetzen/Abbrechen, Vorheizen. |
+| **Drucker** | Wird im WLAN **automatisch gefunden** (ohne IP-Eingabe). Live-Daten: Fortschritt, Restzeit, Schicht, Temperaturen, Lüfter, Licht, Filament je Slot, ACE-Feuchte. **Live-Ansicht** mit Kamera (Kobra S1: FLV/H.264, U1: Webcam) und dem aktuellen Schritt (Vorbereiten, Aufheizen, Drucken …). Pause/Fortsetzen/Abbrechen, Vorheizen und Trocknen im Expertenmodus. |
 | **Kalibrierung & Protokoll** | Bett-Mesh als Farbkarte, Z-Offset, Pressure Advance, Input Shaper (U1); Fehler- und Ereignislog, exportierbar. |
 
 ## Drucker verbinden
