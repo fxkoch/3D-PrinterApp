@@ -128,6 +128,21 @@ final class KobraVirtualPrintTests: XCTestCase {
         XCTAssertEqual(done.fileName, "makerslice_short.gcode")
     }
 
+    /// Bed and nozzle are sent in one message and checked afterwards (the nozzle once stayed cold while the bed heated).
+    func testPreheatSetsBedAndNozzleAndVerifies() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        _ = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
+        try await client.preheat(bed: 62, nozzle: 213)
+        let hot = try await client.status()
+        XCTAssertEqual(hot.bed.target, 62)
+        XCTAssertEqual(hot.tools.first?.target, 213)
+        try await client.preheat(bed: 0, nozzle: 0)
+        let cold = try await client.status()
+        XCTAssertEqual(cold.tools.first?.target, 0)
+    }
+
     /// The real printer answered the start command with code -1 although it started the job: no error must reach the user.
     func testStartAnsweredWithMinusOneButRunningIsNoError() async throws {
         let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,

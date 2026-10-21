@@ -181,8 +181,7 @@ struct PrinterDetailView: View {
                             Button("\(type): \(f.nozzleTemp)° / \(f.bedTemp)°") {
                                 Task {
                                     await app.printers.perform(on: printer, "Vorheizen \(type)") { driver in
-                                        try await driver.setBedTemperature(f.bedTemp)
-                                        try await driver.setToolTemperature(tool: 0, f.nozzleTemp)
+                                        try await driver.preheat(bed: f.bedTemp, nozzle: f.nozzleTemp)
                                     }
                                 }
                             }

@@ -103,11 +103,20 @@ public protocol PrinterDriver: AnyObject, Sendable {
     func cancel() async throws
     func setBedTemperature(_ t: Int) async throws
     func setToolTemperature(tool: Int, _ t: Int) async throws
+    /// Heats bed and (first) nozzle together.
+    func preheat(bed: Int, nozzle: Int) async throws
     func setLight(_ on: Bool) async throws
     func calibration() async throws -> CalibrationData
     /// Recent messages from the printer (console, errors).
     func recentEvents() async throws -> [PrinterEvent]
     func disconnect()
+}
+
+extension PrinterDriver {
+    public func preheat(bed: Int, nozzle: Int) async throws {
+        try await setBedTemperature(bed)
+        try await setToolTemperature(tool: 0, nozzle)
+    }
 }
 
 public enum PrinterDrivers {

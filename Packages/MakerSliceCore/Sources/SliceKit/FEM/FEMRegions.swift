@@ -23,12 +23,36 @@ public struct SurfaceRegion: Sendable, Equatable {
         self.area = area
     }
 
+    /// True for rounded areas (bores, cylinders): the triangle normals point in clearly different directions.
+    public var isCurved: Bool {
+        var sum = Vec3.zero, total = 0.0
+        for t in triangles where t.count == 3 {
+            let c = (t[1] - t[0]).cross(t[2] - t[0])
+            sum = sum + c
+            total += c.length
+        }
+        return total > 0 && sum.length / total < 0.6
+    }
+
+    /// What a tap on triangle `seed` means: a flat face, or – when the triangle belongs to a bore or another rounded
+    /// feature – that whole rounded feature up to its sharp edges. Rounded areas that would cover most of the model
+    /// (a sphere) count as flat patches instead.
+    public static func pick(from seed: Int, in mesh: TriangleMesh, name: String) -> SurfaceRegion {
+        let flat = grow(from: seed, in: mesh, name: name, maxAngleDegrees: 20)
+        let round = grow(from: seed, in: mesh, name: name, maxAngleDegrees: 30, smooth: true, limit: max(mesh.triangleCount / 2, 8))
+        if round.triangles.count > flat.triangles.count * 3 / 2, round.isCurved, round.triangles.count < mesh.triangleCount * 45 / 100 { return round }
+        return flat
+    }
+
     public func transformed(_ t: Transform3D) -> SurfaceRegion {
         SurfaceRegion(name: name, triangles: triangles.map { $0.map { t.apply($0) } })
     }
 
     /// The connected, nearly flat area around triangle `seed` (angle to the seed's normal at most `maxAngleDegrees`).
-    public static func grow(from seed: Int, in mesh: TriangleMesh, name: String, maxAngleDegrees: Double = 25) -> SurfaceRegion {
+    /// With `smooth` the angle is compared between neighbouring triangles instead of with the seed: the region follows
+    /// a rounded surface (a bore, a fillet, a cylinder) up to the next sharp edge. `limit` caps the number of triangles.
+    public static func grow(from seed: Int, in mesh: TriangleMesh, name: String, maxAngleDegrees: Double = 25,
+                            smooth: Bool = false, limit maxTriangles: Int = 20_000) -> SurfaceRegion {
         guard seed >= 0, seed < mesh.triangleCount else { return SurfaceRegion(name: name, triangles: []) }
         // Merge duplicated vertices so triangles of a soup still touch.
         var ids: [Int: Int] = [:]
@@ -57,10 +81,12 @@ public struct SurfaceRegion: Sendable, Equatable {
         var head = 0
         while head < queue.count {
             let t = queue[head]; head += 1
+            if queue.count >= maxTriangles { break }
+            let reference = smooth ? normal(t) : seedNormal
             for c in 0..<3 {
                 let a = vertex(t, c), b = vertex(t, (c + 1) % 3)
                 for other in edges[min(a, b) &* 1_000_003 &+ max(a, b)] ?? [] where !seen.contains(other) {
-                    if normal(other).dot(seedNormal) >= limit { seen.insert(other); queue.append(other) }
+                    if normal(other).dot(reference) >= limit { seen.insert(other); queue.append(other) }
                 }
             }
         }

@@ -1,12 +1,15 @@
 import SceneKit
+import simd
 import SliceKit
 import SwiftUI
 
 /// The part alone in 3D: tap a surface to pick it, optionally coloured by the strength result.
 struct StrengthSceneView: UIViewRepresentable {
     let mesh: TriangleMesh
-    var fixed: SurfaceRegion?
-    var load: SurfaceRegion?
+    var fixed: [SurfaceRegion] = []
+    var loads: [SurfaceRegion] = []
+    /// A force arrow per load: the region it acts on and the force vector (N).
+    var arrows: [(SurfaceRegion, Vec3)] = []
     var result: FEMResult?
     var onTap: (Int, Vec3) -> Void
 
@@ -27,7 +30,7 @@ struct StrengthSceneView: UIViewRepresentable {
 
     func updateUIView(_ view: SCNView, context: Context) {
         context.coordinator.onTap = onTap
-        context.coordinator.update(mesh: mesh, fixed: fixed, load: load, result: result)
+        context.coordinator.update(mesh: mesh, fixed: fixed, loads: loads, arrows: arrows, result: result)
     }
 
     final class Coordinator: NSObject {
@@ -66,11 +69,11 @@ struct StrengthSceneView: UIViewRepresentable {
             SCNVector3(Float(v.x - c.x), Float(v.z - c.z), Float(-(v.y - c.y)))
         }
 
-        func update(mesh: TriangleMesh, fixed: SurfaceRegion?, load: SurfaceRegion?, result: FEMResult?) {
+        func update(mesh: TriangleMesh, fixed: [SurfaceRegion], loads: [SurfaceRegion], arrows: [(SurfaceRegion, Vec3)], result: FEMResult?) {
             var box = BoundingBox.empty
             mesh.vertices.forEach { box.include($0) }
             let key = mesh.vertices.count &* 31 &+ mesh.indices.count &+ Int(box.size.x * 10) &* 7 &+ Int(box.size.z * 10)
-            let colors = "\(fixed?.triangles.count ?? -1)/\(load?.triangles.count ?? -1)/\(result.map { "\($0.safetyFactor)" } ?? "-")"
+            let colors = "\(fixed.map(\.triangles.count))/\(loads.map(\.triangles.count))/\(arrows.map { "\($0.1.x),\($0.1.y),\($0.1.z)" })/\(result.map { "\($0.safetyFactor)" } ?? "-")"
             guard key != meshKey || colors != colorKey else { return }
             let rebuild = key != meshKey
             meshKey = key
@@ -85,7 +88,7 @@ struct StrengthSceneView: UIViewRepresentable {
             }
             modelNode.childNodes.forEach { $0.removeFromParentNode() }
 
-            let fixedKeys = Self.keys(fixed), loadKeys = Self.keys(load)
+            let fixedKeys = Self.keys(fixed), loadKeys = Self.keys(loads)
             var positions: [SCNVector3] = [], normals: [SCNVector3] = [], colors4: [SIMD4<Float>] = []
             positions.reserveCapacity(mesh.indices.count)
             for t in 0..<mesh.triangleCount {
@@ -115,14 +118,43 @@ struct StrengthSceneView: UIViewRepresentable {
             material.isDoubleSided = true
             geometry.materials = [material]
             modelNode.addChildNode(SCNNode(geometry: geometry))
+            let extent = max(box.size.x, box.size.y, box.size.z, 10)
+            for (region, force) in arrows { modelNode.addChildNode(Self.arrow(region: region, force: force, center: center, length: extent * 0.3)) }
+        }
+
+        /// Red arrow showing a force: it ends on the surface when it pushes into the part, starts there when it pulls away.
+        private static func arrow(region: SurfaceRegion, force: Vec3, center: Vec3, length: Double) -> SCNNode {
+            var sum = Vec3.zero, count = 0.0
+            for t in region.triangles { for p in t { sum = sum + p; count += 1 } }
+            let centroid = count > 0 ? sum * (1 / count) : .zero
+            let dir = force.normalized
+            let start = dir.dot(region.normal) < -0.1 ? centroid - dir * length : centroid
+            let sceneDir = SIMD3<Float>(Float(dir.x), Float(dir.z), Float(-dir.y))
+            let node = SCNNode()
+            node.position = point(start, center)
+            node.simdOrientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: simd_normalize(sceneDir))
+            let color = UIColor.systemRed
+            let shaft = SCNCylinder(radius: CGFloat(length * 0.035), height: CGFloat(length * 0.72))
+            shaft.firstMaterial?.diffuse.contents = color
+            shaft.firstMaterial?.lightingModel = .constant
+            let shaftNode = SCNNode(geometry: shaft)
+            shaftNode.position = SCNVector3(0, Float(length * 0.36), 0)
+            let cone = SCNCone(topRadius: 0, bottomRadius: CGFloat(length * 0.1), height: CGFloat(length * 0.28))
+            cone.firstMaterial?.diffuse.contents = color
+            cone.firstMaterial?.lightingModel = .constant
+            let coneNode = SCNNode(geometry: cone)
+            coneNode.position = SCNVector3(0, Float(length * 0.86), 0)
+            node.addChildNode(shaftNode)
+            node.addChildNode(coneNode)
+            return node
         }
 
         private static func key(_ v: Vec3) -> Int {
             Int((v.x * 100).rounded()) &* 73856093 ^ Int((v.y * 100).rounded()) &* 19349663 ^ Int((v.z * 100).rounded()) &* 83492791
         }
 
-        private static func keys(_ region: SurfaceRegion?) -> Set<Int> {
-            Set((region?.triangles ?? []).filter { $0.count == 3 }.map { key(($0[0] + $0[1] + $0[2]) * (1.0 / 3.0)) })
+        private static func keys(_ regions: [SurfaceRegion]) -> Set<Int> {
+            Set(regions.flatMap(\.triangles).filter { $0.count == 3 }.map { key(($0[0] + $0[1] + $0[2]) * (1.0 / 3.0)) })
         }
 
         /// 0 = green, 0.5 = yellow, 1 and more = red.

@@ -36,7 +36,8 @@ struct VoxelGrid {
         // Never create more than about 4 million cells (sparse parts in a large box).
         while (size.x / h + 1) * (size.y / h + 1) * (size.z / h + 1) > 4_000_000 { h *= 1.15 }
         let nx = max(1, Int((size.x / h).rounded(.up))), ny = max(1, Int((size.y / h).rounded(.up))), nz = max(1, Int((size.z / h).rounded(.up)))
-        let origin = box.min
+        // Centre the part in the grid so the outer cubes (which carry supports and loads) lie inside it, not half outside.
+        let origin = Vec3(box.min.x - (Double(nx) * h - size.x) / 2, box.min.y - (Double(ny) * h - size.y) / 2, box.min.z - (Double(nz) * h - size.z) / 2)
         var solid = [Bool](repeating: false, count: nx * ny * nz)
 
         let mids = (0..<nz).map { origin.z + (Double($0) + 0.5) * h }

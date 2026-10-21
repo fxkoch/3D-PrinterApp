@@ -11,29 +11,46 @@ struct StrengthView: View {
     var onHandOver: (() -> Void)?
 
     private enum Pick: String, CaseIterable, Identifiable {
-        case fixed = "Befestigung", load = "Last"
-        var id: String { rawValue }
-    }
-    private enum Direction: String, CaseIterable, Identifiable {
-        case into = "Drückt auf die Fläche", away = "Zieht von der Fläche weg", down = "Gewicht (nach unten)"
+        case fixed = "Halterung", load = "Last"
         var id: String { rawValue }
     }
 
-    private enum LoadMode: String, CaseIterable, Identifiable {
-        case face = "Ganze Fläche", spot = "Eine Stelle"
+    /// Where a force points. "Auf die Fläche" and "von der Fläche weg" only make sense on flat areas.
+    private enum Direction: String, CaseIterable, Identifiable {
+        case into = "Drückt auf die Fläche", away = "Zieht von der Fläche weg", down = "Nach unten (Gewicht)", up = "Nach oben",
+             xPlus = "Nach rechts (+X)", xMinus = "Nach links (−X)", yPlus = "Nach hinten (+Y)", yMinus = "Nach vorn (−Y)"
+        var id: String { rawValue }
+        var needsFlatSurface: Bool { self == .into || self == .away }
+    }
+
+    private enum Shape: String, CaseIterable, Identifiable {
+        case auto = "Fläche oder Loch", spot = "Eine Stelle"
         var id: String { rawValue }
     }
-    @State private var loadMode: LoadMode = .face
+
+    private struct Support: Identifiable {
+        let id = UUID()
+        var region: SurfaceRegion
+        var title: String
+    }
+
+    private struct LoadItem: Identifiable {
+        let id = UUID()
+        var region: SurfaceRegion
+        var title: String
+        var kilograms = 1.0
+        var direction: Direction
+        var newtons: Double { kilograms * 9.81 }
+    }
+
+    @State private var shape: Shape = .auto
     @State private var spotRadius = 4.0
+    @State private var supports: [Support] = []
+    @State private var loads: [LoadItem] = []
     @State private var scanReport: WeakSpotReport?
     @State private var reinforcement: FEMReinforcement?
     @State private var reinforceNote: String?
     @State private var pick: Pick = .fixed
-    @State private var fixed: SurfaceRegion?
-    @State private var load: SurfaceRegion?
-    @State private var loadPoint: Vec3?
-    @State private var kilograms = 1.0
-    @State private var direction: Direction = .into
     @State private var accurate = false
     @State private var longTerm = false
     @State private var running = false
@@ -63,6 +80,7 @@ struct StrengthView: View {
                 if let object {
                     VStack(spacing: Theme.spacing) {
                         scene(object)
+                        pointsPanel(object)
                         setupPanel(object)
                         weakSpotPanel(object)
                         if running || searching || scanning || comparing || orienting { progressPanel }
@@ -91,34 +109,110 @@ struct StrengthView: View {
 
     private func scene(_ object: ModelObject) -> some View {
         Panel(title: "Modell", systemImage: "cube") {
-            StrengthSceneView(mesh: object.mesh, fixed: fixed, load: load, result: showHeat ? (result ?? scanReport?.result) : nil) { triangle, point in
+            StrengthSceneView(mesh: object.mesh, fixed: supports.map(\.region), loads: loads.map(\.region),
+                              arrows: loads.map { ($0.region, force(of: $0)) },
+                              result: showHeat ? (result ?? scanReport?.result) : nil) { triangle, point in
                 let normal = object.mesh.faceNormal(triangle)
+                let region = shape == .spot
+                    ? SurfaceRegion.disc(center: point, normal: normal, radius: spotRadius, name: pick.rawValue)
+                    : SurfaceRegion.pick(from: triangle, in: object.mesh, name: pick.rawValue)
+                let kind = shape == .spot ? "Stelle" : (region.isCurved ? "Loch/Rundung" : "Fläche")
                 if pick == .fixed {
-                    fixed = SurfaceRegion.grow(from: triangle, in: object.mesh, name: "Befestigung", maxAngleDegrees: 20)
-                } else if loadMode == .spot {
-                    load = SurfaceRegion.disc(center: point, normal: normal, radius: spotRadius, name: "Last")
-                    loadPoint = point
+                    supports.append(Support(region: region, title: "Halterung \(supports.count + 1) · \(kind)"))
+                    if loads.isEmpty { pick = .load }
                 } else {
-                    load = SurfaceRegion.grow(from: triangle, in: object.mesh, name: "Last", maxAngleDegrees: 20)
-                    loadPoint = nil
+                    loads.append(LoadItem(region: region, title: "Last \(loads.count + 1) · \(kind)",
+                                          direction: region.isCurved ? .down : .into))
                 }
                 result = nil; suggestions = []; error = nil; reinforcement = nil; comparison = []; orientations = []
-                if pick == .fixed, load == nil { pick = .load }
             }
             .frame(height: 280)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .accessibilityIdentifier("strengthScene")
-            Text((result != nil || scanReport != nil) && showHeat ? "Farbe = Beanspruchung: grün entspannt, rot an der Grenze." : "Tippe eine Fläche an: erst die Befestigung (blau), dann die Fläche, auf die die Kraft wirkt (rot).")
+            Text((result != nil || scanReport != nil) && showHeat ? "Farbe = Beanspruchung: grün entspannt, rot an der Grenze." : guidance)
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private func setupPanel(_ object: ModelObject) -> some View {
-        Panel(title: "Belastung", systemImage: "arrow.down.to.line") {
-            Picker("Fläche wählen für", selection: $pick) {
-                ForEach(Pick.allCases) { Text($0.rawValue + ((($0 == .fixed ? fixed : load) != nil) ? " ✓" : "")).tag($0) }
+    private var guidance: String {
+        if supports.isEmpty { return "Schritt 1: Tippe dort aufs Modell, wo es festgehalten wird – eine Auflage oder ein Schraubenloch (blau)." }
+        if loads.isEmpty { return "Schritt 2: Tippe die Fläche an, auf die die Kraft wirkt (rot). Der Pfeil zeigt die Kraftrichtung." }
+        return "Du kannst weitere Halterungen (mehrere Schrauben) und weitere Lasten (mehrere Flächen) antippen. Dann „Berechnen“."
+    }
+
+    private func force(of item: LoadItem) -> Vec3 {
+        let n = item.region.normal
+        switch item.direction {
+        case .into: return n * (-item.newtons)
+        case .away: return n * item.newtons
+        case .down: return Vec3(0, 0, -item.newtons)
+        case .up: return Vec3(0, 0, item.newtons)
+        case .xPlus: return Vec3(item.newtons, 0, 0)
+        case .xMinus: return Vec3(-item.newtons, 0, 0)
+        case .yPlus: return Vec3(0, item.newtons, 0)
+        case .yMinus: return Vec3(0, -item.newtons, 0)
+        }
+    }
+
+    /// Supports and loads as lists: tap the model to add, change the force per load, remove with the minus.
+    private func pointsPanel(_ object: ModelObject) -> some View {
+        Panel(title: "Halterungen und Lasten", systemImage: "arrow.down.to.line") {
+            Picker("Antippen setzt", selection: $pick) {
+                ForEach(Pick.allCases) { Text($0.rawValue + ($0 == .fixed ? " (\(supports.count))" : " (\(loads.count))")).tag($0) }
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("pickMode")
+            Picker("Form", selection: $shape) {
+                ForEach(Shape.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            if shape == .spot {
+                VStack(alignment: .leading) {
+                    Text("Größe der Stelle: \(Int(spotRadius * 2)) mm Durchmesser")
+                    Slider(value: $spotRadius, in: 1...15, step: 0.5)
+                }
+            } else {
+                Text("Ein Tipp auf eine Fläche wählt die ganze Fläche, ein Tipp in ein Loch das ganze Loch (z. B. für eine Schraube).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(supports) { item in
+                HStack {
+                    Image(systemName: "pin.fill").foregroundStyle(.blue)
+                    Text(item.title).font(.subheadline)
+                    Spacer()
+                    Button { supports.removeAll { $0.id == item.id }; resetResults() } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.red) }
+                        .accessibilityLabel("Halterung entfernen")
+                }
+            }
+            ForEach($loads) { $item in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: "arrow.down.circle.fill").foregroundStyle(.red)
+                        Text(item.title).font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Button { loads.removeAll { $0.id == item.id }; resetResults() } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.red) }
+                            .accessibilityLabel("Last entfernen")
+                    }
+                    Text("\(item.kilograms.formatted(.number.precision(.fractionLength(1)))) kg (\(Int(item.newtons.rounded())) N)").font(.footnote)
+                    Slider(value: $item.kilograms, in: 0.1...50, step: 0.1) { _ in resetResults() }
+                    Picker("Richtung", selection: $item.direction) {
+                        ForEach(Direction.allCases.filter { !($0.needsFlatSurface && item.region.isCurved) }) { Text($0.rawValue).tag($0) }
+                    }
+                    .onChange(of: item.direction) { _, _ in resetResults() }
+                }
+                Divider()
+            }
+            if supports.isEmpty && loads.isEmpty {
+                Text("Noch nichts gesetzt.").font(.footnote).foregroundStyle(.secondary)
+            }
+            if !supports.isEmpty || !loads.isEmpty {
+                Button("Alles zurücksetzen", role: .destructive) { supports = []; loads = []; pick = .fixed; resetResults() }.font(.footnote)
+            }
+        }
+    }
+
+    private func setupPanel(_ object: ModelObject) -> some View {
+        Panel(title: "Material und Berechnung", systemImage: "function") {
             if ctx.standalone {
                 Picker("Material", selection: $ctx.materialChoice) {
                     ForEach(FEMMaterial.catalog) { Text($0.name).tag($0) }
@@ -133,27 +227,6 @@ struct StrengthView: View {
                 Label("Filament: \(filament?.name ?? "–") → gerechnet als \(material.name)", systemImage: "circle.hexagongrid")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            if pick == .load {
-                Picker("Last wirkt auf", selection: $loadMode) {
-                    ForEach(LoadMode.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                if loadMode == .spot {
-                    VStack(alignment: .leading) {
-                        Text("Größe der Stelle: \(Int(spotRadius * 2)) mm Durchmesser")
-                        Slider(value: $spotRadius, in: 1...15, step: 0.5)
-                        Text("Tippe auf das Modell, um die Last an eine andere Stelle zu setzen.").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            VStack(alignment: .leading) {
-                Text("Last: \(kilograms.formatted(.number.precision(.fractionLength(1)))) kg (\(Int((kilograms * 9.81).rounded())) N)")
-                Slider(value: $kilograms, in: 0.1...50, step: 0.1) { _ in result = nil; suggestions = [] }
-            }
-            Picker("Richtung", selection: $direction) {
-                ForEach(Direction.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .onChange(of: direction) { _, _ in result = nil; suggestions = [] }
             if app.expertMode {
                 Toggle("Genau rechnen (dauert länger)", isOn: $accurate)
             }
@@ -163,7 +236,7 @@ struct StrengthView: View {
                 Label("Berechnen", systemImage: "function").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(fixed == nil || load == nil || running || searching || scanning)
+            .disabled(supports.isEmpty || loads.isEmpty || running || searching || scanning)
             .accessibilityIdentifier("strengthRun")
         }
     }
@@ -376,16 +449,8 @@ struct StrengthView: View {
     }
 
     private func loadCase() -> FEMLoadCase? {
-        guard let fixed, let load else { return nil }
-        let newtons = kilograms * 9.81
-        let n = load.normal
-        let force: Vec3
-        switch direction {
-        case .into: force = n * (-newtons)
-        case .away: force = n * newtons
-        case .down: force = Vec3(0, 0, -newtons)
-        }
-        return FEMLoadCase(fixed: [fixed], loads: [.init(region: load, force: force)])
+        guard !supports.isEmpty, !loads.isEmpty else { return nil }
+        return FEMLoadCase(fixed: supports.map(\.region), loads: loads.map { .init(region: $0.region, force: force(of: $0)) })
     }
 
     private func run(_ object: ModelObject) {
@@ -446,7 +511,7 @@ struct StrengthView: View {
     private func turn(_ o: OrientationOption, object: ModelObject) {
         guard let rotation = o.rotation else { return }
         ctx.rotate(rotation)
-        fixed = nil; load = nil; pick = .fixed; resetResults()
+        supports = []; loads = []; pick = .fixed; resetResults()
         applied = "Das Teil liegt jetzt \(o.name.lowercased()). Bitte die Flächen neu antippen und noch einmal berechnen."
     }
 
@@ -519,7 +584,7 @@ struct StrengthView: View {
 
     private func applyReinforcement(_ r: FEMReinforcement, object: ModelObject) {
         ctx.replaceMesh(r.mesh)
-        fixed = nil; load = nil; result = nil; scanReport = nil; reinforcement = nil; suggestions = []; pick = .fixed
+        supports = []; loads = []; result = nil; scanReport = nil; reinforcement = nil; suggestions = []; pick = .fixed
         applied = "Die verstärkte Form ist übernommen. Für eine neue Rechnung die Flächen erneut antippen."
     }
 
@@ -538,7 +603,7 @@ struct StrengthView: View {
         var text = "Übernommen: \(s.wallLoops) Wände, Füllung \(Int((s.infillDensity * 100).rounded())) %."
         if let rotation = s.rotation {
             ctx.rotate(rotation)
-            fixed = nil; load = nil; pick = .fixed; result = nil; suggestions = []
+            supports = []; loads = []; pick = .fixed; result = nil; suggestions = []
             text += " Das Teil wurde gedreht – bitte die Flächen neu antippen und noch einmal berechnen."
         }
         applied = text

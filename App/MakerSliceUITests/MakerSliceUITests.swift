@@ -446,6 +446,10 @@ final class MakerSliceUITests: XCTestCase {
         scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62)).tap()   // front face = fixed
         scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38)).tap()   // top face = load
         sleep(1)
+        // A second support and a second load can be added by tapping again.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Halterung ('")).firstMatch.tap()
+        scene.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.66)).tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Halterung (2)'")).firstMatch.waitForExistence(timeout: 5), "two supports")
         snapshot("98-Festigkeit-Flaechen")
         app.buttons["strengthRun"].tap()
         XCTAssertTrue(app.staticTexts["Ergebnis"].waitForExistence(timeout: 120) || app.staticTexts["ERGEBNIS"].waitForExistence(timeout: 5),

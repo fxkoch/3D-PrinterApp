@@ -417,11 +417,40 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     public func cancel() async throws { try await command(type: "print", action: "stop", data: ["taskid": "-1"]) }
 
     public func setBedTemperature(_ t: Int) async throws {
-        try await command(type: "print", action: "update", data: ["taskid": "-1", "settings": ["target_hotbed_temp": t]])
+        try await preheat(bed: t, nozzle: nil)
     }
 
     public func setToolTemperature(tool: Int, _ t: Int) async throws {
-        try await command(type: "print", action: "update", data: ["taskid": "-1", "settings": ["target_nozzle_temp": t]])
+        try await preheat(bed: nil, nozzle: t)
+    }
+
+    public func preheat(bed: Int, nozzle: Int) async throws {
+        try await preheat(bed: bed, nozzle: Optional(nozzle))
+    }
+
+    /// Both targets in one message, then a check that the printer really took them over. In LAN mode the Kobra only
+    /// accepts temperature changes as part of a job ("print/update"); when idle it can silently ignore them (the
+    /// community integrations report the same), so the app says so instead of pretending the nozzle heats.
+    private func preheat(bed: Int?, nozzle: Int?) async throws {
+        var settings: [String: Any] = [:]
+        if let bed { settings["target_hotbed_temp"] = bed }
+        if let nozzle { settings["target_nozzle_temp"] = nozzle }
+        try await command(type: "print", action: "update", data: ["taskid": "-1", "settings": settings])
+        for _ in 0..<6 {
+            queryAll()
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            let s = locked { cachedStatus }
+            let nozzleOK = nozzle.map { abs((s.tools.first?.target ?? 0) - Double($0)) < 1 } ?? true
+            let bedOK = bed.map { abs(s.bed.target - Double($0)) < 1 } ?? true
+            if nozzleOK && bedOK { return }
+        }
+        let s = locked { cachedStatus }
+        let nozzleMissing = nozzle.map { abs((s.tools.first?.target ?? 0) - Double($0)) >= 1 } ?? false
+        let bedMissing = bed.map { abs(s.bed.target - Double($0)) >= 1 } ?? false
+        log(.warning, "Temperatur nicht übernommen (Düse \(Int(s.tools.first?.target ?? 0)) °C, Bett \(Int(s.bed.target)) °C Ziel)")
+        if nozzleMissing || bedMissing {
+            throw PrinterError.http(0, (bedMissing ? "Bett" : "Düse") + " wurde vom Drucker nicht übernommen. Der Kobra S1 nimmt im LAN-Modus Temperaturen nur während eines Drucks an – ein Vorheizen im Leerlauf bietet Anycubic nicht an. Bitte am Drucker-Display vorheizen oder den Druck starten (er heizt dann selbst auf).")
+        }
     }
 
     public func setLight(_ on: Bool) async throws {

@@ -137,10 +137,11 @@ public enum FEMAnalysis {
         let nodeTotal = nodeX * nodeY * (nz + 1)
         func regionNodes(_ region: SurfaceRegion, _ what: String) throws -> Set<Int> {
             var found = Set<Int>()
-            let n = region.normal
-            let axis = abs(n.x) >= abs(n.y) && abs(n.x) >= abs(n.z) ? 0 : (abs(n.y) >= abs(n.z) ? 1 : 2)
-            let sign = [n.x, n.y, n.z][axis] >= 0 ? 1.0 : -1.0
             for t in region.triangles where t.count == 3 {
+                // Every triangle looks along its own main axis (a bore has triangles facing in all directions).
+                let n = (t[1] - t[0]).cross(t[2] - t[0]).normalized
+                let axis = abs(n.x) >= abs(n.y) && abs(n.x) >= abs(n.z) ? 0 : (abs(n.y) >= abs(n.z) ? 1 : 2)
+                let sign = [n.x, n.y, n.z][axis] >= 0 ? 1.0 : -1.0
                 let area = (t[1] - t[0]).cross(t[2] - t[0]).length / 2
                 let samples = max(1, Int((area / (h * h * 0.25)).squareRoot().rounded(.up)))
                 for a in 0...samples { for b in 0...(samples - a) {

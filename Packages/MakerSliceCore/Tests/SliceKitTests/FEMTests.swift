@@ -261,4 +261,83 @@ final class FEMTests: XCTestCase {
         XCTAssertLessThan(best.height, 20, "lying rod is low")
         XCTAssertTrue(rows.contains { $0.isRecommended })
     }
+
+    /// Washer: outer radius 12, bore radius 4, height 6, with `n` segments per ring.
+    private func tube(n: Int = 32) -> TriangleMesh {
+        var v: [Vec3] = [], f: [UInt32] = []
+        for ring in [(12.0, 0.0), (12.0, 6.0), (4.0, 0.0), (4.0, 6.0)] {
+            for i in 0..<n { let a = Double(i) / Double(n) * 2 * .pi; v.append(Vec3(ring.0 * cos(a), ring.0 * sin(a), ring.1)) }
+        }
+        func idx(_ ring: Int, _ i: Int) -> UInt32 { UInt32(ring * n + i % n) }
+        for i in 0..<n {
+            // outer wall (outward), bore wall (towards the axis), top and bottom annulus
+            f += [idx(0, i), idx(0, i + 1), idx(1, i + 1), idx(0, i), idx(1, i + 1), idx(1, i)]
+            f += [idx(2, i), idx(3, i + 1), idx(2, i + 1), idx(2, i), idx(3, i), idx(3, i + 1)]
+            f += [idx(1, i), idx(1, i + 1), idx(3, i + 1), idx(1, i), idx(3, i + 1), idx(3, i)]
+            f += [idx(0, i), idx(2, i + 1), idx(0, i + 1), idx(0, i), idx(2, i), idx(2, i + 1)]
+        }
+        return TriangleMesh(vertices: v, indices: f)
+    }
+
+    func testTapOnABoreSelectsTheWholeBoreAndTopStaysFlat() throws {
+        let mesh = tube()
+        var boreTriangle = -1, topTriangle = -1
+        for t in 0..<mesh.triangleCount {
+            let c = (0..<3).map { mesh.vertices[Int(mesh.indices[t * 3 + $0])] }.reduce(Vec3.zero) { $0 + $1 } * (1.0 / 3.0)
+            let radius = (c.x * c.x + c.y * c.y).squareRoot()
+            if abs(radius - 4) < 0.2, boreTriangle < 0 { boreTriangle = t }
+            if abs(c.z - 6) < 1e-6, topTriangle < 0 { topTriangle = t }
+        }
+        let bore = SurfaceRegion.pick(from: boreTriangle, in: mesh, name: "Loch")
+        XCTAssertEqual(bore.triangles.count, 64, "all triangles of the bore wall")
+        XCTAssertTrue(bore.isCurved)
+        for t in bore.triangles { for p in t { XCTAssertEqual((p.x * p.x + p.y * p.y).squareRoot(), 4, accuracy: 0.01) } }
+        let top = SurfaceRegion.pick(from: topTriangle, in: mesh, name: "Oben")
+        XCTAssertFalse(top.isCurved)
+        XCTAssertEqual(top.normal.z, 1, accuracy: 1e-6)
+        let cube = Fixtures.box(10, 10, 10)
+        XCTAssertFalse(SurfaceRegion.pick(from: 0, in: cube, name: "Fläche").isCurved, "a cube face stays a face")
+    }
+
+    func testBoreCanBeTheSupportOfAnAnalysis() throws {
+        let mesh = tube()
+        var boreTriangle = 0
+        for t in 0..<mesh.triangleCount {
+            let c = (0..<3).map { mesh.vertices[Int(mesh.indices[t * 3 + $0])] }.reduce(Vec3.zero) { $0 + $1 } * (1.0 / 3.0)
+            if abs((c.x * c.x + c.y * c.y).squareRoot() - 4) < 0.2 { boreTriangle = t; break }
+        }
+        let bore = SurfaceRegion.pick(from: boreTriangle, in: mesh, name: "Schraube")
+        let patch = SurfaceRegion.disc(center: Vec3(12, 0, 3), normal: Vec3(1, 0, 0), radius: 2, name: "Last")
+        let pla = FEMMaterial.matching(filamentType: "PLA")
+        let r = try FEMAnalysis.run(mesh: mesh, material: pla, setup: solid, loadCase: FEMLoadCase(fixed: [bore], loads: [.init(region: patch, force: Vec3(0, 0, -20))]),
+                                    options: FEMOptions(targetElements: 3000))
+        XCTAssertTrue(r.converged)
+        XCTAssertGreaterThan(r.maxDisplacement, 0)
+        XCTAssertGreaterThan(r.safetyFactor, 1, "20 N on a 6 mm washer holds")
+    }
+
+    func testSupportAtBothEndsIsMuchStifferThanOneEnd() throws {
+        let mesh = Fixtures.box(100, 10, 10)
+        let left = face(of: mesh, axis: 0, value: 0, name: "links"), right = face(of: mesh, axis: 0, value: 100, name: "rechts")
+        let top = face(of: mesh, axis: 2, value: 10, name: "oben")
+        let load = FEMLoadCase.Load(region: top, force: Vec3(0, 0, -10))
+        let one = try FEMAnalysis.run(mesh: mesh, material: isotropic, setup: solid, loadCase: FEMLoadCase(fixed: [left], loads: [load]), options: FEMOptions(targetElements: 4000))
+        let both = try FEMAnalysis.run(mesh: mesh, material: isotropic, setup: solid, loadCase: FEMLoadCase(fixed: [left, right], loads: [load]), options: FEMOptions(targetElements: 4000))
+        XCTAssertLessThan(both.maxDisplacement, one.maxDisplacement * 0.3, "two supports carry the load")
+        XCTAssertGreaterThan(both.safetyFactor, one.safetyFactor)
+    }
+
+    func testSeveralLoadsAddUp() throws {
+        let mesh = Fixtures.box(60, 10, 10)
+        let wall = face(of: mesh, axis: 0, value: 0, name: "Wand")
+        let end = face(of: mesh, axis: 0, value: 60, name: "Ende"), top = face(of: mesh, axis: 2, value: 10, name: "oben")
+        func run(_ loads: [FEMLoadCase.Load]) throws -> FEMResult {
+            try FEMAnalysis.run(mesh: mesh, material: isotropic, setup: solid, loadCase: FEMLoadCase(fixed: [wall], loads: loads), options: FEMOptions(targetElements: 3000))
+        }
+        let a = try run([.init(region: top, force: Vec3(0, 0, -10))])
+        let b = try run([.init(region: end, force: Vec3(0, 0, -10))])
+        let both = try run([.init(region: top, force: Vec3(0, 0, -10)), .init(region: end, force: Vec3(0, 0, -10))])
+        XCTAssertEqual(both.maxDisplacement, a.maxDisplacement + b.maxDisplacement, accuracy: (a.maxDisplacement + b.maxDisplacement) * 0.08, "linear: effects add")
+        XCTAssertLessThan(both.safetyFactor, min(a.safetyFactor, b.safetyFactor))
+    }
 }

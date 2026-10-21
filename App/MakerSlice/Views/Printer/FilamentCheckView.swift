@@ -124,7 +124,10 @@ struct FilamentCheckView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                if i == 1 {
+                if i == 1, printer.kind == .anycubicLAN {
+                    Text("Am Kobra S1 kann die App die Düse im Leerlauf nicht aufheizen (Anycubic erlaubt das im LAN-Modus nicht). Bitte am Drucker-Display aufheizen (Einstellungen → Temperatur).")
+                        .font(.footnote).foregroundStyle(.orange)
+                } else if i == 1 {
                     Button { confirmHeat = true } label: { Label("Düse auf \(heatTemperature) °C heizen …", systemImage: "flame") }
                         .buttonStyle(.bordered).font(.footnote)
                         .accessibilityIdentifier("filamentHeat")
