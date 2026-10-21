@@ -290,6 +290,23 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("96-Farbwechsel-geslicet")
     }
 
+    /// Live view of the virtual Kobra S1: its camera is started over MQTT and the FLV video arrives.
+    func testLiveViewWithCamera() throws {
+        app.launchArguments += ["-uiTestVirtualKobra"]
+        app.launch()
+        app.tabBars.buttons["Drucker"].tap()
+        let live = app.buttons["liveButton"]
+        XCTAssertTrue(live.waitForExistence(timeout: 30), "printer dashboard should offer the live view")
+        live.tap()
+        let camera = app.otherElements["liveCamera"]
+        XCTAssertTrue(camera.waitForExistence(timeout: 10))
+        let started = Date()
+        while (camera.value as? String) != "live", Date().timeIntervalSince(started) < 40 { sleep(1) }
+        XCTAssertEqual(camera.value as? String, "live", "video frames should arrive from the virtual camera")
+        XCTAssertTrue(app.staticTexts["Aktueller Schritt"].exists || app.staticTexts["AKTUELLER SCHRITT"].exists)
+        snapshot("97-Live-Ansicht")
+    }
+
     /// Full virtual print: slice the sample for the virtual Kobra S1 running on the CI Mac, send it,
     /// then watch it print in the printer tab (live data incl. the ACE Pro).
     func testVirtualKobraPrint() throws {

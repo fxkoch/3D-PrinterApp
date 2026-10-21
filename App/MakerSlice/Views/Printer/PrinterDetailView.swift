@@ -8,6 +8,7 @@ struct PrinterDetailView: View {
     let printer: PrinterConnection
     @State private var confirmCancel = false
     @State private var editing = false
+    @State private var showLive = false
 
     private var status: PrinterStatus? { app.printers.status(of: printer) }
     private var model: PrinterModel { app.printers.model(of: printer) }
@@ -18,9 +19,11 @@ struct PrinterDetailView: View {
                 header
                 if let status {
                     jobPanel(status)
-                    if printer.kind == .moonraker {
-                        CameraView(driver: app.printers.driver(for: printer), active: status.state == .printing)
+                    Button { showLive = true } label: {
+                        Label("Live-Ansicht mit Kamera", systemImage: "video").frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("liveButton")
                     temperaturePanel(status)
                     materialPanel(status)
                     machinePanel(status)
@@ -42,6 +45,7 @@ struct PrinterDetailView: View {
             }
         }
         .sheet(isPresented: $editing) { PrinterEditView(existing: printer) }
+        .fullScreenCover(isPresented: $showLive) { LivePrintView(printer: printer) }
         .confirmationDialog("Druck wirklich abbrechen?", isPresented: $confirmCancel, titleVisibility: .visible) {
             Button("Druck abbrechen", role: .destructive) {
                 Task { await app.printers.perform(on: printer, "Druck abgebrochen") { try await $0.cancel() } }
