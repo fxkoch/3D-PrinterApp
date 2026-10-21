@@ -92,3 +92,32 @@ final class PaintTests: XCTestCase {
 private extension Vec3 {
     func sub(by o: Vec3) -> Vec3 { self - o }
 }
+
+final class DisplaySurfaceTests: XCTestCase {
+    func testPlainObjectIsOneSurface() {
+        let object = ModelObject(name: "x", mesh: Fixtures.box(10, 10, 10), tool: 2)
+        let surfaces = object.displaySurfaces()
+        XCTAssertEqual(surfaces.count, 1)
+        XCTAssertEqual(surfaces[0].tool, 2)
+    }
+
+    func testColourChangeSplitsTheSurfaceAtItsHeight() {
+        var object = ModelObject(name: "x", mesh: Fixtures.box(10, 10, 20), tool: 0)
+        object.colorChanges = [ColorChange(z: 8, tool: 1)]
+        let surfaces = object.displaySurfaces()
+        XCTAssertEqual(surfaces.map(\.tool), [0, 1])
+        XCTAssertEqual(surfaces[0].mesh.boundingBox.max.z, 8, accuracy: 1e-9)
+        XCTAssertEqual(surfaces[1].mesh.boundingBox.min.z, 8, accuracy: 1e-9)
+        XCTAssertEqual(surfaces[1].mesh.boundingBox.max.z, 20, accuracy: 1e-9)
+    }
+
+    func testPartsAndPaintGetTheirOwnColours() {
+        var object = ModelObject(name: "x", mesh: Fixtures.box(10, 10, 10), tool: 0)
+        object.parts = [ObjectPart(name: "Deckel", mesh: Fixtures.box(4, 4, 2, at: Vec3(3, 3, 10)), tool: 2)]
+        object.paint = [PaintedFacet(a: Vec3(0, 0, 10), b: Vec3(10, 0, 10), c: Vec3(0, 10, 10), tool: 1)]
+        let surfaces = object.displaySurfaces()
+        XCTAssertEqual(Set(surfaces.map(\.tool)), [0, 1, 2])
+        let overlay = surfaces.first { $0.tool == 1 }!.mesh
+        XCTAssertEqual(overlay.boundingBox.min.z, 10.03, accuracy: 1e-9, "painted triangle floats just above the surface")
+    }
+}

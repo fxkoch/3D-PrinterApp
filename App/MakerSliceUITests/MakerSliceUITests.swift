@@ -191,6 +191,8 @@ final class MakerSliceUITests: XCTestCase {
         app.buttons["Fertig"].firstMatch.tap()
         done.tap()
         XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 10))
+        sleep(2)
+        snapshot("97-Mehrfarb-Vorschau")
         app.buttons["sliceButton"].tap()
         XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 60))
         XCTAssertTrue(app.staticTexts["Wechsel"].exists, "the colours need tool changes")
