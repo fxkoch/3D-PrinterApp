@@ -53,6 +53,8 @@
 		<string>_snapmaker._tcp</string>
 		<string>_moonraker._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Für den 3D-Scan fotografiert MakerSlice dein Objekt von allen Seiten und rechnet daraus ein druckbares 3D-Modell.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>MakerSlice sucht deine 3D-Drucker (Snapmaker U1, Anycubic Kobra S1) im WLAN, zeigt ihren Status und sendet Druckaufträge.</string>
 	<key>UIApplicationSceneManifest</key>

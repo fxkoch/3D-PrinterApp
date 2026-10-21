@@ -89,7 +89,7 @@ struct PrepareView: View {
                 CutView(project: project, object: object)
             }
             .sheet(item: $strengthObject) { object in
-                StrengthView(project: project, objectID: object.id)
+                StrengthView(ctx: StrengthContext(project: project, objectID: object.id))
             }
             .sheet(isPresented: Binding(get: { project.needsColorSetup }, set: { if !$0 { project.finishColorSetup() } })) {
                 MultiColorSetupView(project: project)

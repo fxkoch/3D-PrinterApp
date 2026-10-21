@@ -6,8 +6,9 @@ import SwiftUI
 struct StrengthView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var app
-    let project: PrintProject
-    let objectID: ModelObject.ID
+    @Bindable var ctx: StrengthContext
+    /// Called after "Zum Druck vorbereiten" (workshop only).
+    var onHandOver: (() -> Void)?
 
     private enum Pick: String, CaseIterable, Identifiable {
         case fixed = "Befestigung", load = "Last"
@@ -47,15 +48,14 @@ struct StrengthView: View {
     @State private var applied: String?
     @State private var task: Task<Void, Never>?
     @State private var savedMessage: String?
+    @State private var comparison: [MaterialComparison] = []
+    @State private var comparing = false
+    @State private var orientations: [OrientationOption] = []
+    @State private var orienting = false
 
-    /// The strength is always calculated for the filament of the object's slot – nothing else is offered.
-    private var filament: Filament? {
-        let slot = object?.tool ?? 0
-        return project.settings.filaments.indices.contains(slot) ? project.settings.filaments[slot] : project.settings.filaments.first
-    }
-    private var material: FEMMaterial { FEMMaterial.matching(filamentType: filament?.type ?? "PLA") }
-
-    private var object: ModelObject? { project.allObjects.first { $0.id == objectID } }
+    private var filament: Filament? { ctx.filament }
+    private var material: FEMMaterial { ctx.material }
+    private var object: ModelObject? { ctx.object.mesh.isEmpty ? nil : ctx.object }
 
     var body: some View {
         NavigationStack {
@@ -65,11 +65,14 @@ struct StrengthView: View {
                         scene(object)
                         setupPanel(object)
                         weakSpotPanel(object)
-                        if running || searching || scanning { progressPanel }
+                        if running || searching || scanning || comparing || orienting { progressPanel }
                         if let error { Panel(title: "Hinweis", systemImage: "exclamationmark.triangle") { Text(error).foregroundStyle(.red) } }
                         if let result { resultPanel(result) }
                         if !suggestions.isEmpty || searching { suggestionsPanel(object) }
+                        if let result { orientationPanel(object, base: result) }
+                        if let result { comparePanel(object, base: result) }
                         if result != nil || scanReport != nil { reinforcePanel(object) }
+                        if ctx.standalone { handOverPanel(object) }
                         if let applied { Text(applied).font(.footnote).foregroundStyle(.green).padding(.horizontal) }
                     }
                     .padding()
@@ -99,7 +102,7 @@ struct StrengthView: View {
                     load = SurfaceRegion.grow(from: triangle, in: object.mesh, name: "Last", maxAngleDegrees: 20)
                     loadPoint = nil
                 }
-                result = nil; suggestions = []; error = nil; reinforcement = nil
+                result = nil; suggestions = []; error = nil; reinforcement = nil; comparison = []; orientations = []
                 if pick == .fixed, load == nil { pick = .load }
             }
             .frame(height: 280)
@@ -116,8 +119,20 @@ struct StrengthView: View {
                 ForEach(Pick.allCases) { Text($0.rawValue + ((($0 == .fixed ? fixed : load) != nil) ? " ✓" : "")).tag($0) }
             }
             .pickerStyle(.segmented)
-            Label("Filament: \(filament?.name ?? "–") → gerechnet als \(material.name)", systemImage: "circle.hexagongrid")
-                .font(.footnote).foregroundStyle(.secondary)
+            if ctx.standalone {
+                Picker("Material", selection: $ctx.materialChoice) {
+                    ForEach(FEMMaterial.catalog) { Text($0.name).tag($0) }
+                }
+                .onChange(of: ctx.materialChoice) { _, _ in resetResults() }
+                Stepper("Wände: \(ctx.settings.wallLoops)", value: Binding(get: { ctx.settings.wallLoops }, set: { ctx.setPrint(walls: $0, infill: ctx.settings.infillDensity); resetResults() }), in: 1...8)
+                VStack(alignment: .leading) {
+                    Text("Füllung: \(Int((ctx.settings.infillDensity * 100).rounded())) %")
+                    Slider(value: Binding(get: { ctx.settings.infillDensity }, set: { ctx.setPrint(walls: ctx.settings.wallLoops, infill: $0); resetResults() }), in: 0.05...1, step: 0.05)
+                }
+            } else {
+                Label("Filament: \(filament?.name ?? "–") → gerechnet als \(material.name)", systemImage: "circle.hexagongrid")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             if pick == .load {
                 Picker("Last wirkt auf", selection: $loadMode) {
                     ForEach(LoadMode.allCases) { Text($0.rawValue).tag($0) }
@@ -150,6 +165,78 @@ struct StrengthView: View {
             .buttonStyle(.borderedProminent)
             .disabled(fixed == nil || load == nil || running || searching || scanning)
             .accessibilityIdentifier("strengthRun")
+        }
+    }
+
+    private func resetResults() { orientations = []; result = nil; suggestions = []; comparison = []; reinforcement = nil; scanReport = nil }
+
+    private func orientationPanel(_ object: ModelObject, base: FEMResult) -> some View {
+        Panel(title: "Beste Lage auf dem Druckbett", systemImage: "rotate.3d") {
+            Text("Wie das Teil liegt, bestimmt, in welche Richtung die schwachen Schichtgrenzen laufen. Hier werden alle sechs Lagen mit deiner Last durchgerechnet, samt Stützmaterial und Höhe.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button { rankOrientations(object, base: base) } label: { Label("Lagen vergleichen", systemImage: "rotate.3d").frame(maxWidth: .infinity) }
+                .buttonStyle(.bordered)
+                .disabled(running || searching || scanning || comparing || orienting)
+                .accessibilityIdentifier("rankOrientations")
+            ForEach(orientations) { o in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(o.name).font(.headline)
+                        if o.isRecommended { Text("empfohlen").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 2).background(Color.green.opacity(0.25), in: Capsule()) }
+                        Spacer()
+                        Text(o.isCurrent ? String(format: "Faktor %.1f", o.result.safetyFactor) : String(format: "%.1f× so fest", o.safetyRatio))
+                            .font(.subheadline.weight(.semibold)).foregroundStyle(o.safetyRatio >= 1.1 ? .green : (o.safetyRatio < 0.9 ? .red : .primary))
+                    }
+                    Text(String(format: "Höhe %.0f mm · %@", o.height, o.needsSupport ? "braucht Stützen" : "kaum Stützen nötig"))
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if !o.isCurrent, o.rotation != nil {
+                        Button("So drehen") { turn(o, object: object) }.buttonStyle(.bordered).font(.footnote)
+                    }
+                }
+                Divider()
+            }
+        }
+    }
+
+    private func comparePanel(_ object: ModelObject, base: FEMResult) -> some View {
+        Panel(title: "Anderes Material?", systemImage: "arrow.left.arrow.right") {
+            Text("Rechnet dasselbe Teil mit derselben Last in anderen Materialien – so siehst du vorab, was PETG, ABS, Nylon oder Carbon bringen würden, bevor du etwas kaufst.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button { compareMaterials(object, base: base) } label: { Label("Materialien vergleichen", systemImage: "arrow.left.arrow.right").frame(maxWidth: .infinity) }
+                .buttonStyle(.bordered)
+                .disabled(running || searching || scanning || comparing)
+                .accessibilityIdentifier("compareMaterials")
+            ForEach(comparison) { row in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(row.material.name).font(.headline)
+                        if row.isCurrent { Text("aktuell").font(.caption2.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 2).background(Color.accentColor.opacity(0.2), in: Capsule()) }
+                        Spacer()
+                        Text(row.isCurrent ? String(format: "Faktor %.1f", row.result.safetyFactor) : String(format: "%.1f× so fest", row.safetyRatio))
+                            .font(.subheadline.weight(.semibold)).foregroundStyle(row.safetyRatio >= 1.1 ? .green : (row.safetyRatio < 0.9 ? .red : .primary))
+                    }
+                    Text(String(format: "Steifigkeit %.1f× · Gewicht %.0f g · hitzefest bis ca. %.0f °C", row.stiffnessRatio, row.result.massGrams, row.material.heatDeflection))
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if !row.isCurrent {
+                        let note = row.material.printingNote
+                        if !note.isEmpty { Text("Beim Drucken: " + note).font(.footnote) }
+                    }
+                }
+                Divider()
+            }
+            if !comparison.isEmpty {
+                Text("Die Werte sind Richtwerte aus Datenblättern; einzelne Filamente weichen um 20 % und mehr ab.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func handOverPanel(_ object: ModelObject) -> some View {
+        Panel(title: "Weiter zum Druck", systemImage: "printer") {
+            Text("Speichert das Teil mit den gewählten Wänden und der Füllung in der Bibliothek und öffnet es zum Slicen. Bis dahin ist nichts am Slicer verändert.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button { handOver(object) } label: { Label("Zum Druck vorbereiten", systemImage: "arrow.right.circle").frame(maxWidth: .infinity) }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("handOver")
         }
     }
 
@@ -304,7 +391,7 @@ struct StrengthView: View {
     private func run(_ object: ModelObject) {
         guard let lc = loadCase() else { return }
         running = true; error = nil; result = nil; scanReport = nil; reinforcement = nil; suggestions = []; applied = nil; fraction = 0; phase = "Starte …"
-        let mesh = object.mesh, material = material, setup = FEMPrintSetup(project.settings)
+        let mesh = object.mesh, material = material, setup = FEMPrintSetup(ctx.settings)
         let options: FEMOptions = accurate ? .accurate : .fast
         task = Task {
             let outcome = await Task.detached(priority: .userInitiated) { () -> Result<FEMResult, Error> in
@@ -323,7 +410,7 @@ struct StrengthView: View {
     private func findImprovements(object: ModelObject, _ base: FEMResult) {
         guard let lc = loadCase() else { return }
         searching = true; error = nil; suggestions = []; applied = nil; fraction = 0; phase = "Varianten prüfen …"
-        let mesh = object.mesh, material = material, settings = project.settings
+        let mesh = object.mesh, material = material, settings = ctx.settings
         task = Task {
             let outcome = await Task.detached(priority: .userInitiated) { () -> Result<[FEMSuggestion], Error> in
                 Result { try FEMAdvisor.suggest(mesh: mesh, material: material, settings: settings, loadCase: lc, baseline: base,
@@ -338,9 +425,65 @@ struct StrengthView: View {
         }
     }
 
+    private func rankOrientations(_ object: ModelObject, base: FEMResult) {
+        guard let lc = loadCase() else { return }
+        orienting = true; error = nil; fraction = 0; phase = "Lagen vergleichen …"
+        let mesh = object.mesh, material = material, setup = FEMPrintSetup(ctx.settings)
+        task = Task {
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<[OrientationOption], Error> in
+                Result { try FEMOrientation.rank(mesh: mesh, material: material, setup: setup, loadCase: lc, baseline: base,
+                                                 progress: { text, f in Task { @MainActor in phase = text; fraction = f } },
+                                                 isCancelled: { Task.isCancelled }) }
+            }.value
+            orienting = false
+            switch outcome {
+            case .success(let rows): orientations = rows
+            case .failure(let e): if (e as? FEMError) != .cancelled { error = Self.message(e) }
+            }
+        }
+    }
+
+    private func turn(_ o: OrientationOption, object: ModelObject) {
+        guard let rotation = o.rotation else { return }
+        ctx.rotate(rotation)
+        fixed = nil; load = nil; pick = .fixed; resetResults()
+        applied = "Das Teil liegt jetzt \(o.name.lowercased()). Bitte die Flächen neu antippen und noch einmal berechnen."
+    }
+
+    private func compareMaterials(_ object: ModelObject, base: FEMResult) {
+        guard let lc = loadCase() else { return }
+        comparing = true; error = nil; fraction = 0; phase = "Materialien vergleichen …"
+        let mesh = object.mesh, current = material, setup = FEMPrintSetup(ctx.settings)
+        let candidates = FEMMaterialComparison.defaultCandidates(current: current)
+        task = Task {
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<[MaterialComparison], Error> in
+                Result { try FEMMaterialComparison.compare(mesh: mesh, current: current, candidates: candidates, setup: setup, loadCase: lc, baseline: base,
+                                                           progress: { text, f in Task { @MainActor in phase = text; fraction = f } },
+                                                           isCancelled: { Task.isCancelled }) }
+            }.value
+            comparing = false
+            switch outcome {
+            case .success(let rows): comparison = rows
+            case .failure(let e): if (e as? FEMError) != .cancelled { error = Self.message(e) }
+            }
+        }
+    }
+
+    /// Standalone: store the part with its print hints and open it in the slicer.
+    private func handOver(_ object: ModelObject) {
+        var copy = object
+        copy.name = object.name
+        let hints = PrintHints(wallLoops: ctx.settings.wallLoops, infillDensity: ctx.settings.infillDensity, material: material.id)
+        do {
+            _ = try app.library.add(data: ThreeMFWriter.write([copy.placedOnBed(center: (0, 0))]), fileName: copy.name + ".3mf",
+                                    name: copy.name + " (geprüft)", hints: hints)
+            if let item = app.library.items.first { onHandOver?(); app.open(item) }
+        } catch { savedMessage = "Sichern nicht möglich: \(error.localizedDescription)" }
+    }
+
     private func scan(_ object: ModelObject) {
         scanning = true; error = nil; result = nil; suggestions = []; reinforcement = nil; reinforceNote = nil; fraction = 0; phase = "Schwachstellen suchen …"
-        let mesh = object.mesh, material = material, setup = FEMPrintSetup(project.settings)
+        let mesh = object.mesh, material = material, setup = FEMPrintSetup(ctx.settings)
         task = Task {
             let outcome = await Task.detached(priority: .userInitiated) { () -> Result<WeakSpotReport, Error> in
                 Result { try FEMWeakSpots.scan(mesh: mesh, material: material, setup: setup, options: .fast,
@@ -357,7 +500,7 @@ struct StrengthView: View {
 
     private func reinforce(_ object: ModelObject) {
         scanning = true; error = nil; reinforcement = nil; reinforceNote = nil; fraction = 0; phase = "Verstärkung berechnen …"
-        let mesh = object.mesh, material = material, setup = FEMPrintSetup(project.settings), lc = loadCase()
+        let mesh = object.mesh, material = material, setup = FEMPrintSetup(ctx.settings), lc = loadCase()
         task = Task {
             let outcome = await Task.detached(priority: .userInitiated) { () -> Result<FEMReinforcement?, Error> in
                 Result { try FEMWeakSpots.reinforce(mesh: mesh, material: material, setup: setup, loadCase: lc, options: .fast,
@@ -375,7 +518,7 @@ struct StrengthView: View {
     }
 
     private func applyReinforcement(_ r: FEMReinforcement, object: ModelObject) {
-        project.replaceMesh(object.id, with: r.mesh)
+        ctx.replaceMesh(r.mesh)
         fixed = nil; load = nil; result = nil; scanReport = nil; reinforcement = nil; suggestions = []; pick = .fixed
         applied = "Die verstärkte Form ist übernommen. Für eine neue Rechnung die Flächen erneut antippen."
     }
@@ -391,11 +534,10 @@ struct StrengthView: View {
     }
 
     private func apply(_ s: FEMSuggestion, object: ModelObject) {
-        project.settings.wallLoops = s.wallLoops
-        project.settings.infillDensity = s.infillDensity
+        ctx.setPrint(walls: s.wallLoops, infill: s.infillDensity)
         var text = "Übernommen: \(s.wallLoops) Wände, Füllung \(Int((s.infillDensity * 100).rounded())) %."
         if let rotation = s.rotation {
-            project.transform(object.id, rotation)
+            ctx.rotate(rotation)
             fixed = nil; load = nil; pick = .fixed; result = nil; suggestions = []
             text += " Das Teil wurde gedreht – bitte die Flächen neu antippen und noch einmal berechnen."
         }

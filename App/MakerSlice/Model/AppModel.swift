@@ -144,7 +144,7 @@ final class AppModel {
     func open(_ item: LibraryItem) {
         let url = library.url(for: item)
         let fileName = item.fileName
-        load(name: item.name) {
+        load(name: item.name, hints: item.hints) {
             let data = try Data(contentsOf: url)
             return try ModelImporter.load(data: data, fileName: fileName)
         }
@@ -186,13 +186,14 @@ final class AppModel {
         }
     }
 
-    private func load(name: String, _ work: @escaping @Sendable () throws -> ImportedModel) {
+    private func load(name: String, hints: PrintHints? = nil, _ work: @escaping @Sendable () throws -> ImportedModel) {
         isLoadingModel = true
         loadingMessage = "Modell wird geladen …"
         let printer = printers.selected
         let model = printer.map { printers.model(of: $0) } ?? .snapmakerU1
         var settings = settings(for: model)
         settings.filaments = printers.suggestedFilaments(for: printer, current: settings.filaments, model: model)
+        if let hints { settings.wallLoops = hints.wallLoops; settings.infillDensity = hints.infillDensity }
         let loaded = printers.loadedTypes(printer)
         let humidity = printers.status(of: printer)?.filamentBox?.humidity
         Task {

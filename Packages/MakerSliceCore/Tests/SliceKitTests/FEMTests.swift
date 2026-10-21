@@ -228,4 +228,37 @@ final class FEMTests: XCTestCase {
         }
         XCTAssertEqual(PlateType.coolPlate.rawValue, "Cool Plate", "Orca's name, used in the G-code and cloud jobs")
     }
+
+    func testMaterialComparisonRanksByStrengthAndKeepsCurrent() throws {
+        let mesh = Fixtures.box(60, 10, 10)
+        let pla = FEMMaterial.matching(filamentType: "PLA"), petg = FEMMaterial.matching(filamentType: "PETG"), pacf = FEMMaterial.matching(filamentType: "PA-CF")
+        let lc = FEMLoadCase(fixed: [face(of: mesh, axis: 0, value: 0, name: "Wand")],
+                             loads: [.init(region: face(of: mesh, axis: 0, value: 60, name: "Last"), force: Vec3(0, 0, -40))])
+        let rows = try FEMMaterialComparison.compare(mesh: mesh, current: pla, candidates: [pla, petg, pacf], setup: solid, loadCase: lc,
+                                                     options: FEMOptions(targetElements: 2000))
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.filter(\.isCurrent).count, 1)
+        XCTAssertEqual(rows.first?.material.id, "PA-CF", "carbon nylon is the strongest of the three")
+        let pet = try XCTUnwrap(rows.first { $0.material.id == "PETG" })
+        XCTAssertLessThan(pet.stiffnessRatio, 1, "PETG is less stiff than PLA")
+        XCTAssertTrue(pacf.needsHardenedNozzle)
+        XCTAssertFalse(pacf.printingNote.isEmpty)
+    }
+
+    func testOrientationRankingPrefersLayersAlongTheBendingStress() throws {
+        // A rod standing upright, pushed sideways at the top: bending stress runs across the layers (weak).
+        let mesh = Fixtures.box(8, 8, 60)
+        let pla = FEMMaterial.matching(filamentType: "PLA")
+        let fix = try XCTUnwrap(SurfaceRegion.bottomFace(of: mesh)), top = try XCTUnwrap(SurfaceRegion.topFace(of: mesh))
+        let lc = FEMLoadCase(fixed: [fix], loads: [.init(region: top, force: Vec3(8, 0, 0))])
+        let rows = try FEMOrientation.rank(mesh: mesh, material: pla, setup: solid, loadCase: lc, options: FEMOptions(targetElements: 3000))
+        XCTAssertGreaterThanOrEqual(rows.count, 5)
+        let current = try XCTUnwrap(rows.first { $0.isCurrent })
+        let best = try XCTUnwrap(rows.first)
+        XCTAssertFalse(best.isCurrent)
+        XCTAssertGreaterThan(best.safetyRatio, 1.2, "lying down is clearly stronger than standing")
+        XCTAssertEqual(current.safetyRatio, 1, accuracy: 1e-9)
+        XCTAssertLessThan(best.height, 20, "lying rod is low")
+        XCTAssertTrue(rows.contains { $0.isRecommended })
+    }
 }
