@@ -70,8 +70,12 @@ public enum MeshRepair {
             let a = find(Int(mesh.indices[t * 3]))
             for k in 1..<3 { let b = find(Int(mesh.indices[t * 3 + k])); if a != b { parent[b] = a } }
         }
-        var count: [Int: Int] = [:]
-        for t in 0..<mesh.triangleCount { count[find(Int(mesh.indices[t * 3])), default: 0] += 1 }
+        // The main body is the piece with the largest surface (not the most triangles: a speck can be as finely meshed).
+        var count: [Int: Double] = [:]
+        for t in 0..<mesh.triangleCount {
+            let a = mesh.vertices[Int(mesh.indices[t * 3])], b = mesh.vertices[Int(mesh.indices[t * 3 + 1])], c = mesh.vertices[Int(mesh.indices[t * 3 + 2])]
+            count[find(Int(mesh.indices[t * 3])), default: 0] += (b - a).cross(c - a).length / 2
+        }
         guard let main = count.max(by: { $0.value < $1.value })?.key, count.count > 1 else { return (mesh, 0) }
         var indices: [UInt32] = []
         for t in 0..<mesh.triangleCount where find(Int(mesh.indices[t * 3])) == main {
