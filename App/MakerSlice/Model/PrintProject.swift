@@ -98,8 +98,11 @@ final class PrintProject: Identifiable {
     var filledPlates: [Int] { plates.indices.filter { !plates[$0].isEmpty }.map { $0 + 1 } }
 
     var usedTools: [Int] {
-        Array(Set(objects.map(\.tool))).sorted()
+        Array(objects.reduce(into: Set<Int>()) { $0.formUnion($1.allTools) }).sorted()
     }
+
+    /// True when the plate prints in more than one colour (several objects, parts or colour changes).
+    var isMultiColor: Bool { usedTools.count > 1 }
 
     var openRecommendations: [Recommendation] {
         recommendations.filter { $0.action != nil && !dismissed.contains($0.id) }
@@ -117,6 +120,21 @@ final class PrintProject: Identifiable {
     func setTool(_ tool: Int, for objectID: ModelObject.ID) {
         guard let loc = locate(objectID) else { return }
         plates[loc.plate][loc.index].tool = tool
+        changed(plate: loc.plate + 1)
+    }
+
+    /// Height-based colour changes of an object (sorted, one per height).
+    func setColorChanges(_ changes: [ColorChange], for objectID: ModelObject.ID) {
+        guard let loc = locate(objectID) else { return }
+        var seen = Set<Double>()
+        plates[loc.plate][loc.index].colorChanges = changes.sorted { $0.z < $1.z }.filter { seen.insert($0.z).inserted }
+        changed(plate: loc.plate + 1)
+    }
+
+    /// Slot of a coloured part (multi-colour 3MF).
+    func setPartTool(_ tool: Int, part: Int, for objectID: ModelObject.ID) {
+        guard let loc = locate(objectID), plates[loc.plate][loc.index].parts.indices.contains(part) else { return }
+        plates[loc.plate][loc.index].parts[part].tool = tool
         changed(plate: loc.plate + 1)
     }
 
@@ -347,7 +365,12 @@ final class PrintProject: Identifiable {
     }
 
     private func slice(plate: Int, cloud: CloudSliceConfig?) {
-        if let cloud, cloud.isComplete {
+        // Colour changes at a height are only known to the built-in slicer.
+        let needsLocal = plates[plate - 1].contains { !$0.colorChanges.isEmpty }
+        if needsLocal, cloud?.isComplete == true {
+            warning = "Farbwechsel bei Höhe werden nur vom Slicer auf dem iPhone berücksichtigt – dieser Druck wird deshalb nicht in der Cloud geslict."
+        }
+        if let cloud, cloud.isComplete, !needsLocal {
             sliceInCloud(plate: plate, cloud)
             return
         }

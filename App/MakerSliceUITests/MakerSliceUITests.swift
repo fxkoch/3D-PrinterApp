@@ -257,6 +257,39 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("32-Geteilt-geslicet")
     }
 
+    /// Colour change at a height: the object prints with another slot from there; the slicer reports the changes.
+    func testColorChangeAtHeight() {
+        app.launchArguments += ["-uiTestSampleModel"]
+        app.launch()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20))
+        let menu = app.buttons["objectMenu"].firstMatch
+        let entry = app.buttons["colorChangeMenu"].firstMatch
+        let scroll = app.scrollViews["prepareScroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        var opened = false
+        for _ in 0..<5 {
+            if menu.waitForExistence(timeout: 3), menu.frame.maxY < scroll.frame.minY + scroll.frame.height * 0.6 {
+                menu.tap()
+                if entry.waitForExistence(timeout: 3) { opened = true; break }
+            }
+            scroll.swipeUp(velocity: .slow)
+            sleep(1)
+        }
+        XCTAssertTrue(opened, "object menu should offer colour changes")
+        entry.tap()
+        XCTAssertTrue(app.buttons["addColorChange"].waitForExistence(timeout: 5))
+        app.buttons["addColorChange"].tap()
+        sleep(1)
+        snapshot("95-Farbwechsel")
+        app.buttons["colorChangesDone"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Slot 2'")).firstMatch.waitForExistence(timeout: 5),
+                      "the object row should list the colour change")
+        app.buttons["sliceButton"].tap()
+        XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["Wechsel"].exists, "tool changes should be reported after slicing")
+        snapshot("96-Farbwechsel-geslicet")
+    }
+
     /// Full virtual print: slice the sample for the virtual Kobra S1 running on the CI Mac, send it,
     /// then watch it print in the printer tab (live data incl. the ACE Pro).
     func testVirtualKobraPrint() throws {

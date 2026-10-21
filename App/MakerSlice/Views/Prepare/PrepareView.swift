@@ -12,6 +12,7 @@ struct PrepareView: View {
     @State private var layer = 0.0
     @State private var filamentSlot: SlotSelection?
     @State private var cutObject: ModelObject?
+    @State private var colorObject: ModelObject?
     @State private var showAdvice = false
     @State private var showPrePrint = false
     @State private var printAfterSlice = false
@@ -42,6 +43,7 @@ struct PrepareView: View {
                         printerPanel
                         materialPanel
                         objectsPanel
+                        if project.isMultiColor { multiColorPanel }
                         qualityPanel
                     }
                     .padding()
@@ -70,6 +72,9 @@ struct PrepareView: View {
             .sheet(item: $filamentSlot) { slot in
                 FilamentPickerView(settings: $project.settings, slot: slot.id,
                                    loaded: app.printers.status(of: app.printers.selected)?.filaments)
+            }
+            .sheet(item: $colorObject) { object in
+                ColorChangeView(project: project, objectID: object.id)
             }
             .sheet(item: $cutObject) { object in
                 CutView(project: project, object: object)
@@ -324,10 +329,13 @@ struct PrepareView: View {
         Panel(title: project.plateCount > 1 ? "Objekte auf Platte \(project.currentPlate)" : "Objekte", systemImage: "cube") {
             ForEach(project.objects) { object in
                 ObjectRow(object: object, filaments: project.settings.filaments, toolCount: project.settings.machine.toolCount,
-                          bedSize: project.settings.bedSize, maxHeight: project.settings.maxHeight) { tool in
-                    project.setTool(tool, for: object.id)
-                } menu: {
+                          bedSize: project.settings.bedSize, maxHeight: project.settings.maxHeight,
+                          onTool: { tool in project.setTool(tool, for: object.id) },
+                          onPartTool: { part, tool in project.setPartTool(tool, part: part, for: object.id) }) {
                     Button { cutObject = object } label: { Label("Teilen …", systemImage: "scissors") }
+                        .disabled(object.isMultiColor)
+                    Button { colorObject = object } label: { Label("Farbwechsel bei Höhe …", systemImage: "paintpalette") }
+                        .accessibilityIdentifier("colorChangeMenu")
                     Button { project.layFlat(object.id) } label: { Label("Flach hinlegen", systemImage: "arrow.down.to.line") }
                     Button { project.rotate(object.id, degrees: 90) } label: { Label("90° drehen", systemImage: "rotate.right") }
                     Button { project.duplicate(object.id) } label: { Label("Duplizieren", systemImage: "plus.square.on.square") }
@@ -367,6 +375,42 @@ struct PrepareView: View {
             } label: { Label("Modell hinzufügen", systemImage: "plus.circle") }
                 .font(.subheadline)
                 .accessibilityIdentifier("addModel")
+        }
+    }
+
+    /// Purge tower and colour-change settings, shown when the plate uses more than one slot.
+    private var multiColorPanel: some View {
+        Panel(title: "Mehrfarbig", systemImage: "paintpalette") {
+            let machine = project.settings.machine
+            HStack {
+                Text("Genutzte Slots")
+                Spacer()
+                ForEach(project.usedTools, id: \.self) { tool in
+                    Swatch(color: tool < project.settings.filaments.count ? project.settings.filaments[tool].color : "#888888",
+                           label: "\(tool + 1)", size: 22)
+                }
+            }
+            if machine.multiMaterial == .filamentSwitcher {
+                HelpRow(key: .primeTower) {
+                    Toggle("Reinigungsturm", isOn: $project.settings.primeTower)
+                }
+                if project.settings.primeTower {
+                    HStack {
+                        Text("Spülmenge je Wechsel")
+                        Spacer()
+                        Stepper(value: $project.settings.purgeVolume, in: 0...300, step: 10) {
+                            Text(project.settings.purgeVolume == 0 ? "Standard" : String(format: "%.0f mm³", project.settings.purgeVolume))
+                                .monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .fixedSize()
+                    }
+                    Text("Weniger Spülmenge spart Filament, kann aber zu Mischfarben nach dem Wechsel führen. Nach dem Slicen siehst du den Abfall in Gramm.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Der \(project.settings.printer.displayName) hat vier Druckköpfe – Farbwechsel gehen ohne Reinigungsturm.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -542,6 +586,9 @@ struct SummaryRow: View {
             if estimate.toolChanges > 0 {
                 Metric(value: "\(estimate.toolChanges)", caption: "Wechsel", systemImage: "arrow.triangle.swap")
             }
+            if estimate.purgeGrams > 0.05 {
+                Metric(value: String(format: "%.1f g", estimate.purgeGrams), caption: "Abfall", systemImage: "trash")
+            }
         }
     }
 }
@@ -567,29 +614,53 @@ private struct ObjectRow<MenuContent: View>: View {
     let bedSize: Double
     let maxHeight: Double
     let onTool: (Int) -> Void
+    let onPartTool: (Int, Int) -> Void
     @ViewBuilder let menu: () -> MenuContent
 
     var body: some View {
         let size = object.boundingBox.size
         let tooBig = size.x > bedSize || size.y > bedSize || size.z > maxHeight
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(object.name).lineLimit(1)
-                Text(String(format: "%.0f × %.0f × %.0f mm", size.x, size.y, size.z))
-                    .font(.caption).foregroundStyle(tooBig ? .orange : .secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(object.name).lineLimit(1)
+                    Text(String(format: "%.0f × %.0f × %.0f mm", size.x, size.y, size.z))
+                        .font(.caption).foregroundStyle(tooBig ? .orange : .secondary)
+                    if !object.colorChanges.isEmpty {
+                        Label(object.colorChanges.sorted { $0.z < $1.z }
+                            .map { String(format: "%.1f mm → Slot %d", $0.z, $0.tool + 1) }.joined(separator: " · "),
+                              systemImage: "paintpalette")
+                            .font(.caption2).foregroundStyle(Color.accentColor).lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 4)
+                swatches(selected: object.tool, action: onTool)
+                Menu { menu() } label: {
+                    Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("objectMenu")
             }
-            Spacer(minLength: 4)
+            ForEach(object.parts.indices, id: \.self) { i in
+                HStack(spacing: 10) {
+                    Image(systemName: "square.on.square").font(.caption).foregroundStyle(.secondary)
+                    Text(object.parts[i].name).font(.subheadline).lineLimit(1)
+                    Spacer(minLength: 4)
+                    swatches(selected: object.parts[i].tool) { onPartTool(i, $0) }
+                }
+                .padding(.leading, 14)
+            }
+        }
+    }
+
+    private func swatches(selected: Int, action: @escaping (Int) -> Void) -> some View {
+        HStack(spacing: 8) {
             ForEach(0..<toolCount, id: \.self) { tool in
-                Button { onTool(tool) } label: {
+                Button { action(tool) } label: {
                     Swatch(color: tool < filaments.count ? filaments[tool].color : "#888888", label: "\(tool + 1)",
-                           selected: object.tool == tool, size: 24)
+                           selected: selected == tool, size: 24)
                 }
                 .buttonStyle(.plain)
             }
-            Menu { menu() } label: {
-                Image(systemName: "ellipsis.circle").font(.title3).foregroundStyle(.secondary)
-            }
-            .accessibilityIdentifier("objectMenu")
         }
     }
 }
