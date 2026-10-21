@@ -15,7 +15,7 @@ struct PrinterEditView: View {
     @State private var apiKey = ""
     @State private var testing = false
     @State private var testResult: String?
-    @StateObject private var discovery = PrinterDiscovery()
+    @State private var scan = PrinterScan()
 
     var body: some View {
         NavigationStack {
@@ -37,28 +37,40 @@ struct PrinterEditView: View {
                     TextField("Name", text: $name)
                 }
 
-                if kind == .moonraker {
-                    Section("Im WLAN gefunden") {
-                        if discovery.printers.isEmpty {
-                            HStack { ProgressView(); Text("Suche …").foregroundStyle(.secondary) }
-                        }
-                        ForEach(discovery.printers) { found in
-                            Button {
-                                host = found.host
-                                if name.isEmpty { name = found.name }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "printer")
-                                    VStack(alignment: .leading) {
-                                        Text(found.name)
-                                        Text(found.host).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    if host == found.host { Image(systemName: "checkmark") }
-                                }
-                            }
+                Section {
+                    if scan.scanning {
+                        HStack {
+                            ProgressView()
+                            Text("Suche im WLAN … \(Int(scan.progress * 100)) %").foregroundStyle(.secondary)
                         }
                     }
+                    ForEach(scan.found) { printer in
+                        Button { choose(printer) } label: {
+                            HStack {
+                                Image(systemName: "printer")
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(printer.name)
+                                    Text("\(printer.host) · \(printer.kind.displayName)").font(.caption).foregroundStyle(.secondary)
+                                    if let note = printer.note { Text(note).font(.caption).foregroundStyle(.orange) }
+                                }
+                                Spacer()
+                                if host == printer.host { Image(systemName: "checkmark") }
+                            }
+                        }
+                        .accessibilityIdentifier("found-\(printer.host)")
+                    }
+                    if !scan.scanning {
+                        if scan.found.isEmpty {
+                            Text("Kein Drucker gefunden. Ist er eingeschaltet, im selben WLAN – und beim Kobra S1 der LAN-Modus an?")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Button { scan.start() } label: { Label("Erneut suchen", systemImage: "arrow.clockwise") }
+                            .accessibilityIdentifier("scanAgain")
+                    }
+                } header: {
+                    Text("Im WLAN gefunden")
+                } footer: {
+                    Text("Die Suche fragt alle Adressen deines Heimnetzes ab – ganz ohne IP-Eingabe.")
                 }
 
                 Section {
@@ -117,11 +129,11 @@ struct PrinterEditView: View {
                     host = existing.host
                     apiKey = existing.apiKey ?? ""
                 } else {
+                    scan.start()
                     name = model.displayName
                 }
-                discovery.start()
             }
-            .onDisappear { discovery.stop() }
+            .onDisappear { scan.stop() }
         }
     }
 
@@ -155,6 +167,16 @@ struct PrinterEditView: View {
         } catch {
             testResult = "❌ \(error.localizedDescription)"
         }
+    }
+
+    /// Takes over a printer found on the network: model, connection type, address and name.
+    private func choose(_ printer: DiscoveredPrinter) {
+        let newModel: PrinterModel = printer.looksLikeKobraS1 || printer.modelText.lowercased().contains("kobra") ? .kobraS1 : .snapmakerU1
+        model = newModel
+        host = printer.host
+        if name.isEmpty || PrinterModel.allCases.map(\.displayName).contains(name) { name = printer.name }
+        // `model` resets the connection type in onChange; set the detected one afterwards.
+        Task { @MainActor in kind = printer.kind }
     }
 
     private func save() {

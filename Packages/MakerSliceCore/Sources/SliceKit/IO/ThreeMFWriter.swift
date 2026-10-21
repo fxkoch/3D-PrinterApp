@@ -10,19 +10,20 @@ public enum ThreeMFWriter {
         var nextID = 1
 
         for object in objects {
-            var parts: [(id: Int, name: String, subtype: String)] = []
-            func addMesh(_ mesh: TriangleMesh, name: String, subtype: String) {
+            var parts: [(id: Int, name: String, subtype: String, tool: Int)] = []
+            func addMesh(_ mesh: TriangleMesh, name: String, subtype: String, tool: Int) {
                 let id = nextID
                 nextID += 1
                 resources += "  <object id=\"\(id)\" type=\"model\">\n"
                 resources += meshXML(mesh)
                 resources += "  </object>\n"
-                parts.append((id, name, subtype))
+                parts.append((id, name, subtype, tool))
             }
-            addMesh(object.mesh, name: object.name, subtype: "normal_part")
+            addMesh(object.mesh, name: object.name, subtype: "normal_part", tool: object.tool)
+            for part in object.parts { addMesh(part.mesh, name: part.name, subtype: "normal_part", tool: part.tool) }
             for (i, volume) in object.volumes.enumerated() {
                 addMesh(volume.mesh, name: "\(object.name) Verbinder \(i + 1)",
-                        subtype: volume.kind == .add ? "normal_part" : "negative_part")
+                        subtype: volume.kind == .add ? "normal_part" : "negative_part", tool: object.tool)
             }
             let containerID = nextID
             nextID += 1
@@ -38,7 +39,7 @@ public enum ThreeMFWriter {
             for part in parts {
                 settings += "    <part id=\"\(part.id)\" subtype=\"\(part.subtype)\">\n"
                 settings += "      <metadata key=\"name\" value=\"\(escape(part.name))\"/>\n"
-                settings += "      <metadata key=\"extruder\" value=\"\(extruder)\"/>\n"
+                settings += "      <metadata key=\"extruder\" value=\"\(part.tool + 1)\"/>\n"
                 settings += "    </part>\n"
             }
             settings += "  </object>\n"

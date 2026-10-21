@@ -160,6 +160,8 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     /// Purge tower for single-nozzle multi-material (Kobra S1 + ACE).
     public var primeTower: Bool = false
     public var primeTowerWidth: Double = 30
+    /// Material purged at the tower per colour change in mm³ (0 = default dense strip).
+    public var purgeVolume: Double = 0
 
     // Travel
     public var retractSpeed: Double = 30
@@ -314,7 +316,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.support, &support); d(.supportAngle, &supportAngle); d(.supportTopZDistance, &supportTopZDistance)
         d(.supportXYDistance, &supportXYDistance); d(.supportSpacing, &supportSpacing)
         d(.brimWidth, &brimWidth); d(.skirtLoops, &skirtLoops); d(.skirtDistance, &skirtDistance)
-        d(.primeTower, &primeTower); d(.primeTowerWidth, &primeTowerWidth)
+        d(.primeTower, &primeTower); d(.primeTowerWidth, &primeTowerWidth); d(.purgeVolume, &purgeVolume)
         d(.retractSpeed, &retractSpeed); d(.retractMinTravel, &retractMinTravel); d(.zHop, &zHop)
         d(.topSurfacePattern, &topSurfacePattern); d(.bottomSurfacePattern, &bottomSurfacePattern)
         d(.seamPosition, &seamPosition); d(.wallOrder, &wallOrder); d(.elephantFootCompensation, &elephantFootCompensation)

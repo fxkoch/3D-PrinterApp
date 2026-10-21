@@ -119,6 +119,7 @@ public struct OrcaJob: Sendable {
             "skirt_distance": num(s.skirtDistance),
             "enable_prime_tower": s.primeTower ? "1" : "0",
             "prime_tower_width": num(s.primeTowerWidth),
+            "prime_volume": num(s.purgeVolume > 0 ? s.purgeVolume : 45),
             "curr_bed_type": s.plateType.rawValue,
         ]
         if s.support != .off { o["support_type"] = "normal(auto)" }

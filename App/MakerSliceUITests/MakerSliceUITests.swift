@@ -131,6 +131,24 @@ final class MakerSliceUITests: XCTestCase {
         if signIn.exists { signIn.tap(); sleep(6); snapshot("81-MakerWorld-Login") }
     }
 
+    /// The add-printer screen finds the (virtual) printer by itself – no IP address typed in.
+    func testFindsPrinterWithoutTypingAnAddress() throws {
+        app.launchArguments += ["-uiTestScanHost", "127.0.0.1"]
+        app.launch()
+        app.tabBars.buttons["Drucker"].tap()
+        let add = app.buttons["Drucker hinzufügen"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        add.tap()
+        let found = app.buttons["found-127.0.0.1"]
+        XCTAssertTrue(found.waitForExistence(timeout: 20), "the scan should list the virtual Kobra S1")
+        snapshot("90-Drucker-gefunden")
+        found.tap()
+        let hostField = app.textFields["printerHost"]
+        XCTAssertEqual(hostField.value as? String, "127.0.0.1")
+        XCTAssertTrue(app.staticTexts["Anycubic Kobra S1"].exists || app.buttons["Anycubic Kobra S1"].exists)
+        snapshot("91-Drucker-uebernommen")
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

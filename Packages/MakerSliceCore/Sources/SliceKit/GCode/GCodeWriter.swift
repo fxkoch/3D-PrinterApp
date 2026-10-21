@@ -8,6 +8,8 @@ public struct PrintEstimate: Sendable, Equatable {
     public var filamentGrams: [Int: Double]
     public var layerCount: Int
     public var toolChanges: Int
+    /// Filament used on the purge tower (waste of colour changes) in g.
+    public var purgeGrams: Double = 0
 
     public var totalGrams: Double { filamentGrams.values.reduce(0, +) }
 
@@ -196,6 +198,7 @@ public struct GCodeWriter {
                         stats.move(dist, speed: speed)
                         state.position = p
                         state.filament[island.tool, default: 0] += e
+                        if extrusion.role == .primeTower { state.towerMM += e }
                     }
                     if extrusion.closed, extrusion.role == .outerWall, spiralFromZ == nil {
                         wipeInward(&body, &state, &stats, along: extrusion.points)
@@ -211,7 +214,8 @@ public struct GCodeWriter {
         }
         let estimatedSeconds = stats.seconds + dialect.preparationSeconds
         let estimate = PrintEstimate(seconds: estimatedSeconds, filamentMM: filamentMM, filamentGrams: filamentGrams,
-                                     layerCount: layers.count, toolChanges: toolChanges)
+                                     layerCount: layers.count, toolChanges: toolChanges,
+                                     purgeGrams: state.towerMM * Self.filamentArea / 1000 * s.filament(for: usedTools.first ?? 0).density)
 
         let slots = Array(0..<max(s.machine.toolCount, (usedTools.max() ?? 0) + 1))
         func perSlot(_ value: (Int) -> String, _ separator: String = ",") -> String {
@@ -418,6 +422,7 @@ private struct MachineState {
     var fan = -1
     var lastRole: ExtrusionRole?
     var filament: [Int: Double] = [:]
+    var towerMM = 0.0
 }
 
 /// Rough time estimate using trapezoidal acceleration.

@@ -54,6 +54,7 @@ extension PrintSettings {
         case "skirt_distance": handled = set(\.skirtDistance)
         case "skirt_loops": handled = setInt(\.skirtLoops)
         case "prime_tower_width": handled = set(\.primeTowerWidth)
+        case "prime_volume": handled = set(\.purgeVolume)
         case "spiral_mode": spiralVase = bool(); handled = true
         case "enable_prime_tower": primeTower = bool(); handled = true
         case "ironing_type": ironing = value != "no ironing"; handled = true

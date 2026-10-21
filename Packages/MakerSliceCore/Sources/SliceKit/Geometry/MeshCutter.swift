@@ -61,11 +61,13 @@ public struct CutOptions: Sendable, Equatable {
 public enum CutError: Error, LocalizedError, Equatable {
     case outsideObject
     case emptyPart
+    case multiColor
 
     public var errorDescription: String? {
         switch self {
         case .outsideObject: return "Die Schnittebene liegt außerhalb des Objekts."
         case .emptyPart: return "Der Schnitt würde ein leeres Teil erzeugen."
+        case .multiColor: return "Mehrfarbige Objekte (Farbteile oder Farbwechsel) lassen sich nicht teilen. Entferne zuerst die Farbwechsel."
         }
     }
 }
@@ -76,6 +78,7 @@ public enum MeshCutter {
     /// in plate coordinates (not yet arranged). Parts keep their orientation:
     /// after a horizontal cut the upper part already stands on its flat cut face.
     public static func cut(_ object: ModelObject, _ options: CutOptions) throws -> [ModelObject] {
+        guard !object.isMultiColor else { throw CutError.multiColor }
         let pieces = try cutInPlace(object, options)
         return pieces.parts + pieces.extras
     }
@@ -83,6 +86,7 @@ public enum MeshCutter {
     /// Cuts a too-large object into pieces that fit the printer.
     public static func autoSplit(_ object: ModelObject, bedSize: Double, maxHeight: Double,
                                  connector: ConnectorStyle = .dowels) throws -> [ModelObject] {
+        guard !object.isMultiColor else { throw CutError.multiColor }
         let box = object.boundingBox
         var parts = [object]
         var extras: [ModelObject] = []

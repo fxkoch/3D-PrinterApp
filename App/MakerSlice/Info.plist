@@ -54,7 +54,7 @@
 		<string>_moonraker._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>MakerSlice sucht deinen Snapmaker U1 im WLAN und sendet Druckaufträge an ihn.</string>
+	<string>MakerSlice sucht deine 3D-Drucker (Snapmaker U1, Anycubic Kobra S1) im WLAN, zeigt ihren Status und sendet Druckaufträge.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

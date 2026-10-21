@@ -13,6 +13,31 @@ public struct ObjectVolume: Sendable, Equatable {
     }
 }
 
+/// A further body of an object printed in another colour/material (a part of a multi-colour 3MF).
+public struct ObjectPart: Sendable, Equatable {
+    public var name: String
+    public var mesh: TriangleMesh
+    /// Zero-based tool/slot index (0...3).
+    public var tool: Int
+
+    public init(name: String, mesh: TriangleMesh, tool: Int) {
+        self.name = name
+        self.mesh = mesh
+        self.tool = tool
+    }
+}
+
+/// From this height (mm above the bed) the object is printed with another slot.
+public struct ColorChange: Sendable, Equatable, Hashable, Codable {
+    public var z: Double
+    public var tool: Int
+
+    public init(z: Double, tool: Int) {
+        self.z = z
+        self.tool = tool
+    }
+}
+
 /// One printable object of an imported file, already in build-plate coordinates.
 public struct ModelObject: Identifiable, Sendable, Equatable {
     public var id = UUID()
@@ -23,6 +48,23 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     /// Plate number from a Bambu/Orca project (1-based), if known.
     public var plate: Int?
     public var volumes: [ObjectVolume]
+    /// Further bodies with their own slot (multi-colour parts). The main `mesh` uses `tool`.
+    public var parts: [ObjectPart] = []
+    /// Height-based slot changes of the main body, sorted by height.
+    public var colorChanges: [ColorChange] = []
+
+    /// True when the object is printed in more than one colour.
+    public var isMultiColor: Bool { !parts.isEmpty || !colorChanges.isEmpty }
+
+    /// Slot used by the main body at height `z` (mm).
+    public func tool(atHeight z: Double) -> Int {
+        var result = tool
+        for change in colorChanges.sorted(by: { $0.z < $1.z }) where change.z <= z { result = change.tool }
+        return result
+    }
+
+    /// Every slot this object can use.
+    public var allTools: Set<Int> { Set([tool] + parts.map(\.tool) + colorChanges.map(\.tool)) }
 
     public init(name: String, mesh: TriangleMesh, tool: Int = 0, plate: Int? = nil, volumes: [ObjectVolume] = []) {
         self.name = name
@@ -36,6 +78,7 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     public var boundingBox: BoundingBox {
         var box = mesh.boundingBox
         for v in volumes where v.kind == .add { box.include(v.mesh.boundingBox) }
+        for part in parts { box.include(part.mesh.boundingBox) }
         return box
     }
 
@@ -43,6 +86,7 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
         var copy = self
         copy.mesh = mesh.transformed(t)
         copy.volumes = volumes.map { ObjectVolume(kind: $0.kind, mesh: $0.mesh.transformed(t)) }
+        copy.parts = parts.map { ObjectPart(name: $0.name, mesh: $0.mesh.transformed(t), tool: $0.tool) }
         return copy
     }
 
@@ -264,31 +308,45 @@ public enum ThreeMFReader {
         for (index, item) in buildItems.enumerated() where item.printable {
             guard let object = rootObjects[item.objectID] else { continue }
             let objectSettings = settings.objects[item.objectID]
-            var mesh = TriangleMesh()
+            // Meshes per extruder (1-based): parts of a multi-colour project keep their own slot.
+            var byExtruder: [Int: TriangleMesh] = [:]
+            var partNames: [Int: String] = [:]
+            let objectExtruder = objectSettings?.extruder ?? objectSettings?.parts.values.compactMap({ $0.extruder }).first ?? 1
 
             // Collect the object's own mesh plus all (nested) components.
-            func collect(_ obj: ObjectResource, file: String, transform: Transform3D, partID: String?, depth: Int) throws {
+            func collect(_ obj: ObjectResource, file: String, transform: Transform3D, partID: String?, extruder inherited: Int?, depth: Int) throws {
                 guard depth < 16 else { return }
                 if let partID, let subtype = objectSettings?.parts[partID]?.subtype,
                    subtype != "normal_part" && !subtype.isEmpty {
                     return // modifiers, negative volumes, support blockers
                 }
-                if !obj.mesh.isEmpty { mesh.append(obj.mesh.transformed(transform)) }
+                let extruder = partID.flatMap { objectSettings?.parts[$0]?.extruder } ?? inherited
+                if !obj.mesh.isEmpty {
+                    let slot = extruder ?? objectExtruder
+                    byExtruder[slot, default: TriangleMesh()].append(obj.mesh.transformed(transform))
+                    if partNames[slot] == nil { partNames[slot] = obj.name }
+                }
                 for component in obj.components {
                     let compFile = component.path.map(normalize) ?? file
                     let pool = try resources(in: compFile)
                     guard let child = pool[component.objectID] else { continue }
                     try collect(child, file: compFile, transform: component.transform.then(transform),
-                                partID: component.objectID, depth: depth + 1)
+                                partID: component.objectID, extruder: extruder, depth: depth + 1)
                 }
             }
-            try collect(object, file: normalize(rootPath), transform: item.transform, partID: nil, depth: 0)
-            guard !mesh.isEmpty else { continue }
+            try collect(object, file: normalize(rootPath), transform: item.transform, partID: nil, extruder: nil, depth: 0)
+            // The main body is the one with the most triangles; the rest become coloured parts.
+            guard let mainSlot = byExtruder.max(by: { $0.value.triangleCount < $1.value.triangleCount })?.key,
+                  let mesh = byExtruder[mainSlot], !mesh.isEmpty else { continue }
 
             let name = objectSettings?.name ?? object.name ?? "Objekt \(index + 1)"
-            let extruder = objectSettings?.extruder ?? objectSettings?.parts.values.compactMap({ $0.extruder }).first ?? 1
-            result.append(ModelObject(name: name, mesh: mesh, tool: max(0, extruder - 1),
-                                      plate: settings.plateForObject[item.objectID]))
+            var imported = ModelObject(name: name, mesh: mesh, tool: max(0, mainSlot - 1),
+                                       plate: settings.plateForObject[item.objectID])
+            for slot in byExtruder.keys.sorted() where slot != mainSlot {
+                guard let partMesh = byExtruder[slot], !partMesh.isEmpty else { continue }
+                imported.parts.append(ObjectPart(name: partNames[slot] ?? "Teil \(slot)", mesh: partMesh, tool: max(0, slot - 1)))
+            }
+            result.append(imported)
         }
         guard !result.isEmpty else { throw ModelImportError.empty }
         return ImportedModel(objects: result, projectSettings: project, hasPaintedColors: painted)
