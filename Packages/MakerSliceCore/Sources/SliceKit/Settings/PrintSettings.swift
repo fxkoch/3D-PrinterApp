@@ -87,6 +87,17 @@ public enum SurfacePattern: String, Codable, CaseIterable, Sendable, Identifiabl
 }
 
 /// Everything the slicer needs. Defaults mirror the "0.20mm Standard" Orca profiles.
+/// A value that applies from a height upwards (mm above the bed).
+public struct HeightValue: Codable, Equatable, Sendable {
+    public var z: Double
+    public var value: Double
+
+    public init(z: Double, value: Double) {
+        self.z = z
+        self.value = value
+    }
+}
+
 public struct PrintSettings: Codable, Equatable, Sendable {
     public var printer: PrinterModel = .snapmakerU1
 
@@ -185,6 +196,17 @@ public struct PrintSettings: Codable, Equatable, Sendable {
 
     /// G-code taken over from a project file, inserted before the layer at the given height (e.g. temperature towers).
     public var layerGCodes: [LayerGCode] = []
+    /// Retraction length that applies from a height upwards (retraction calibration).
+    public var retractLengthSteps: [HeightValue] = []
+    /// Harmless commands written at the end of the print (calibration prints reset speed/flow factors here).
+    public var footerGCode: [String] = []
+
+    /// Retraction length at height `z`.
+    public func retractLength(atHeight z: Double, tool: Int) -> Double {
+        var result = filament(for: tool).retractLength
+        for step in retractLengthSteps.sorted(by: { $0.z < $1.z }) where step.z <= z + 1e-6 { result = step.value }
+        return result
+    }
 
     public init() {}
 
@@ -330,6 +352,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.plateType, &plateType); d(.filaments, &filaments)
         d(.enableTimelapse, &enableTimelapse); d(.enableBedLeveling, &enableBedLeveling)
         d(.extraOptions, &extraOptions); d(.layerGCodes, &layerGCodes)
+        d(.retractLengthSteps, &retractLengthSteps); d(.footerGCode, &footerGCode)
         while filaments.count < machine.toolCount { filaments.append(filaments.last ?? .pla) }
     }
 }

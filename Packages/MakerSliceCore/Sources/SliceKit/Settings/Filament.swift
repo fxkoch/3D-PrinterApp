@@ -38,6 +38,8 @@ public struct Filament: Codable, Hashable, Sendable, Identifiable {
     public var color: String
     /// Where the values come from.
     public var source: String
+    /// Calibrations (raw `CalibrationKind` values) whose results are included in this profile.
+    public var calibratedKinds: [String]?
 
     public init(name: String, vendor: String = "Generic", type: String, nozzleTemp: Int, firstLayerNozzleTemp: Int? = nil,
                 nozzleTempMin: Int? = nil, nozzleTempMax: Int? = nil,
@@ -184,7 +186,11 @@ public enum FilamentLibrary {
     /// Profiles for a printer: its own profiles first, then brand filaments.
     public static func entries(for printer: PrinterModel) -> [Entry] {
         let scope = printer.machine.filamentScope
-        return all.filter { $0.scope == scope } + all.filter { $0.scope == "any" }
+        return (all.filter { $0.scope == scope } + all.filter { $0.scope == "any" }).map { entry in
+            var e = entry
+            e.filament = CalibrationBook.shared.apply(to: entry.filament, printer: printer)
+            return e
+        }
     }
 
     public static var vendors: [String] {

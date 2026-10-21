@@ -100,6 +100,7 @@ public struct GCodeWriter {
         var pendingLayerGCodes = s.layerGCodes.map { ($0.z, $0.lines.filter(LayerGCode.isAllowed)) }.filter { !$0.1.isEmpty }
         for layer in layers {
             let height = layer.height
+            if !s.retractLengthSteps.isEmpty { state.retractLength = s.retractLength(atHeight: layer.z, tool: state.tool) }
             body.line(";LAYER_CHANGE")
             while let next = pendingLayerGCodes.first, next.0 <= layer.z + 0.001 {
                 body.line("; vom Modell eingefügt (Höhe \(fmt(next.0)))")
@@ -255,7 +256,12 @@ public struct GCodeWriter {
         out.line("G90")
         out.append(body.text)
         if !state.retracted {
-            out.line("G1 E-\(fmt5(s.filament(for: state.tool).retractLength)) F\(Int(s.retractSpeed * 60))")
+            out.line("G1 E-\(fmt5(state.retractLength ?? s.filament(for: state.tool).retractLength)) F\(Int(s.retractSpeed * 60))")
+        }
+        let footer = s.footerGCode.filter(LayerGCode.isAllowed)
+        if !footer.isEmpty {
+            out.line("; Kalibrierung: Werte zurücksetzen")
+            footer.forEach { out.line($0) }
         }
         dialect.end(ctx).forEach { out.line($0) }
 
@@ -320,7 +326,7 @@ public struct GCodeWriter {
 
     private func retract(_ g: inout GCodeBuffer, _ state: inout MachineState, _ stats: inout MotionStats) {
         guard !state.retracted else { return }
-        let length = settings.filament(for: state.tool).retractLength
+        let length = state.retractLength ?? settings.filament(for: state.tool).retractLength
         g.line("G1 E-\(fmt5(length)) F\(Int(settings.retractSpeed * 60))")
         stats.add(length / settings.retractSpeed)
         state.retracted = true
@@ -328,7 +334,7 @@ public struct GCodeWriter {
 
     private func unretract(_ g: inout GCodeBuffer, _ state: inout MachineState, _ stats: inout MotionStats) {
         guard state.retracted else { return }
-        let length = settings.filament(for: state.tool).retractLength
+        let length = state.retractLength ?? settings.filament(for: state.tool).retractLength
         g.line("G1 E\(fmt5(length)) F\(Int(settings.retractSpeed * 60))")
         stats.add(length / settings.retractSpeed)
         state.retracted = false
@@ -423,6 +429,8 @@ private struct MachineState {
     var lastRole: ExtrusionRole?
     var filament: [Int: Double] = [:]
     var towerMM = 0.0
+    /// Retraction length at the current layer (calibration prints change it with the height).
+    var retractLength: Double?
 }
 
 /// Rough time estimate using trapezoidal acceleration.

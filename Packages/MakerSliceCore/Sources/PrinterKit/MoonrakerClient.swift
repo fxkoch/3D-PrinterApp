@@ -266,6 +266,33 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         return request
     }
 
+    // MARK: - Notes stored in the printer (calibration results)
+
+    /// Moonraker database namespace the app uses.
+    public static let databaseNamespace = "makerslice"
+
+    /// A JSON value the app stored in this printer's Moonraker database, as JSON data (nil if nothing is stored).
+    public func storedValue(key: String) async throws -> Data? {
+        do {
+            let json = try await getJSON("/server/database/item?namespace=\(Self.databaseNamespace)&key=\(key)")
+            guard let result = json["result"] as? [String: Any], let value = result["value"] else { return nil }
+            return try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
+        } catch PrinterError.http(404, _) {
+            return nil
+        }
+    }
+
+    /// Stores a JSON value in the printer's database (namespace "makerslice"). This only writes a small note into
+    /// Moonraker's database – it does not change the printer's configuration or start anything.
+    public func store(value: Data, key: String) async throws {
+        let json = try JSONSerialization.jsonObject(with: value, options: [.fragmentsAllowed])
+        var request = try makeRequest("/server/database/item", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["namespace": Self.databaseNamespace, "key": key, "value": json])
+        let (body, response) = try await perform { try await self.session.data(for: request) }
+        try check(response, body)
+    }
+
     private func getJSON(_ path: String) async throws -> [String: Any] {
         let request = try makeRequest(path, method: "GET")
         let (data, response) = try await perform { try await self.session.data(for: request) }
