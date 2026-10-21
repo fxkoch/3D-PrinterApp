@@ -299,6 +299,19 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         return answer
     }
 
+    /// After a start: true when the job is still there ~20 s later; false when the printer dropped it again (back to idle).
+    private func jobSurvives() async -> Bool {
+        var seenPrinting = false
+        for second in 0..<20 {
+            queryAll()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            let state = locked { cachedStatus.state }
+            if state == .printing || state == .paused { seenPrinting = true }
+            if [.standby, .error, .cancelled].contains(state), seenPrinting || second >= 10 { return false }
+        }
+        return true
+    }
+
     /// True when the printer really is working on `name` (it can answer a start command with an error code and still start).
     private func startedPrinting(_ name: String) async -> Bool {
         for _ in 0..<20 {
@@ -357,20 +370,42 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         }
         log(.info, "Datei \(name) hochgeladen (\(gcode.count / 1024) KB)")
         guard startPrint else { return }
+        // The printer writes the file to its storage after the upload; starting at once ends with "SD busy" (code 11535).
+        try await Task.sleep(nanoseconds: 5_000_000_000)
 
         let md5 = LANCrypto.md5([UInt8](gcode)).map { String(format: "%02x", $0) }.joined()
         let payload = AnycubicHandshake.startPayload(fileName: name, md5: md5, size: gcode.count, mapping: mapping,
                                                      msgID: UUID().uuidString.lowercased(),
                                                      now: Int64(Date().timeIntervalSince1970 * 1000))
-        let answer = try await commandResult(type: "print", action: "start", data: payload["data"], topic: slicerTopic("print"))
-        if answer.code != 0 && answer.code != 200 {
-            log(.warning, "print/start: Antwortcode \(answer.code)\(answer.message.isEmpty ? "" : " (\(answer.message))") – prüfe, ob der Druck trotzdem läuft")
-            guard await startedPrinting(name) else {
-                log(.error, "print/start abgelehnt (Code \(answer.code))")
-                throw PrinterError.http(answer.code, "Der Drucker hat den Start abgelehnt\(answer.message.isEmpty ? "" : " (\(answer.message))"). Läuft noch ein anderer Auftrag oder ist einer pausiert?")
+        // Right after the upload the printer is still busy with the file (SD card write, preview) and may answer
+        // "SD busy" (code 11535). Wait and ask again a few times before giving up.
+        var attempt = 0
+        while true {
+            let answer = try await commandResult(type: "print", action: "start", data: payload["data"], topic: slicerTopic("print"))
+            var accepted = answer.code == 0 || answer.code == 200
+            if !accepted {
+                log(.warning, "print/start: Antwortcode \(answer.code)\(answer.message.isEmpty ? "" : " (\(answer.message))") – prüfe, ob der Druck trotzdem läuft")
+                accepted = await startedPrinting(name)
             }
+            // The printer can accept the start, heat up and then drop the job again (SD still busy).
+            if accepted, await jobSurvives() { break }
+            attempt += 1
+            let busy = accepted || Self.isBusyCode(answer.code, answer.message)
+            guard busy, attempt < 4 else {
+                log(.error, "print/start abgelehnt (Code \(answer.code))")
+                throw PrinterError.http(answer.code, busy
+                    ? "Der Drucker ist noch mit der Datei beschäftigt (SD-Karte, Code \(answer.code)). Kurz warten und „Drucken“ erneut tippen – die Datei ist hochgeladen."
+                    : "Der Drucker hat den Start abgelehnt\(answer.message.isEmpty ? "" : " (\(answer.message))"). Läuft noch ein anderer Auftrag oder ist einer pausiert?")
+            }
+            log(.info, "Drucker beschäftigt oder Auftrag verworfen – neuer Startversuch in 6 s (\(attempt)/3)")
+            try await Task.sleep(nanoseconds: 6_000_000_000)
         }
         log(.info, "Druck von \(name) gestartet")
+    }
+
+    /// "SD busy" and similar: the printer is occupied with a file or another job and will accept the command later.
+    static func isBusyCode(_ code: Int, _ message: String) -> Bool {
+        code == 11535 || message.lowercased().contains("busy")
     }
 
     private func taskData() -> [String: Any] {
