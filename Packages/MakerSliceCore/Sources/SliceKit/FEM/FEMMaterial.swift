@@ -6,7 +6,7 @@ import Foundation
 /// standard settings (sources: Bambu Lab heat deflection table (0.45 MPa), ABS data sheet XY/Z, Xometry FDM data for
 /// PETG/ASA/nylon-CF, university study on XY/Z anisotropy of PLA/ABS/PETG). Individual filaments and printers vary
 /// by ±20 % or more – the estimate is meant to compare variants and to find weak spots, not to certify a part.
-public struct FEMMaterial: Equatable, Sendable, Identifiable {
+public struct FEMMaterial: Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     /// g/cm³

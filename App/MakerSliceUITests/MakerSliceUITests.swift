@@ -395,6 +395,47 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("96-Farbwechsel-geslicet")
     }
 
+    /// Strength check: pick two faces on the sample cube, calculate, ask for improvements.
+    func testStrengthCheck() {
+        app.launchArguments += ["-uiTestSampleModel"]
+        app.launch()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20))
+        let menu = app.buttons["objectMenu"].firstMatch
+        let entry = app.buttons["strengthMenu"].firstMatch
+        let scroll = app.scrollViews["prepareScroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        var opened = false
+        for _ in 0..<5 {
+            if menu.waitForExistence(timeout: 3), menu.frame.maxY < scroll.frame.minY + scroll.frame.height * 0.6 {
+                menu.tap()
+                if entry.waitForExistence(timeout: 3) { opened = true; break }
+            }
+            scroll.swipeUp(velocity: .slow)
+            sleep(1)
+        }
+        XCTAssertTrue(opened, "object menu should offer the strength check")
+        entry.tap()
+        let scene = app.otherElements["strengthScene"].firstMatch
+        XCTAssertTrue(scene.waitForExistence(timeout: 10))
+        sleep(2)
+        snapshot("97-Festigkeit-leer")
+        scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62)).tap()   // front face = fixed
+        scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38)).tap()   // top face = load
+        sleep(1)
+        snapshot("98-Festigkeit-Flaechen")
+        app.buttons["strengthRun"].tap()
+        XCTAssertTrue(app.staticTexts["Ergebnis"].waitForExistence(timeout: 120) || app.staticTexts["ERGEBNIS"].waitForExistence(timeout: 5),
+                      "the result should appear")
+        sleep(1)
+        snapshot("99-Festigkeit-Ergebnis")
+        let suggest = app.buttons["strengthSuggest"]
+        if suggest.waitForExistence(timeout: 5) {
+            suggest.tap()
+            XCTAssertTrue(app.buttons["Übernehmen"].firstMatch.waitForExistence(timeout: 180) || app.staticTexts["Es wird nichts Besseres gefunden, als du schon eingestellt hast."].exists)
+            snapshot("99b-Festigkeit-Vorschlaege")
+        }
+    }
+
     /// Live view of the virtual Kobra S1: its camera is started over MQTT and the FLV video arrives.
     func testLiveViewWithCamera() throws {
         app.launchArguments += ["-uiTestVirtualKobra"]

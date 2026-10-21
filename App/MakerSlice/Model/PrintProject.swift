@@ -313,7 +313,7 @@ final class PrintProject: Identifiable {
         put(list, preferred: index)
     }
 
-    private func transform(_ objectID: ModelObject.ID, _ t: Transform3D) {
+    func transform(_ objectID: ModelObject.ID, _ t: Transform3D) {
         guard let loc = locate(objectID) else { return }
         var list = plates[loc.plate]
         let center = list[loc.index].boundingBox.center

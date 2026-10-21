@@ -11,6 +11,7 @@ struct PrepareView: View {
     @State private var showLayers = false
     @State private var layer = 0.0
     @State private var filamentSlot: SlotSelection?
+    @State private var strengthObject: ModelObject?
     @State private var cutObject: ModelObject?
     @State private var colorObject: ModelObject?
     @State private var showAdvice = false
@@ -86,6 +87,9 @@ struct PrepareView: View {
             }
             .sheet(item: $cutObject) { object in
                 CutView(project: project, object: object)
+            }
+            .sheet(item: $strengthObject) { object in
+                StrengthView(project: project, objectID: object.id)
             }
             .sheet(isPresented: Binding(get: { project.needsColorSetup }, set: { if !$0 { project.finishColorSetup() } })) {
                 MultiColorSetupView(project: project)
@@ -362,6 +366,8 @@ struct PrepareView: View {
                         .disabled(object.isMultiColor)
                     Button { colorObject = object } label: { Label("Farbwechsel bei Höhe …", systemImage: "paintpalette") }
                         .accessibilityIdentifier("colorChangeMenu")
+                    Button { strengthObject = object } label: { Label("Festigkeit prüfen …", systemImage: "checkmark.shield") }
+                        .accessibilityIdentifier("strengthMenu")
                     Button { project.layFlat(object.id) } label: { Label("Flach hinlegen", systemImage: "arrow.down.to.line") }
                     Button { project.rotate(object.id, degrees: 90) } label: { Label("90° drehen", systemImage: "rotate.right") }
                     Button { project.duplicate(object.id) } label: { Label("Duplizieren", systemImage: "plus.square.on.square") }
