@@ -101,7 +101,10 @@ struct StrengthView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Festigkeit prüfen")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { task?.cancel(); dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button { task?.cancel(); dismiss() } label: { Label("Zurück", systemImage: "chevron.left") }.accessibilityIdentifier("backButton") }
+                ToolbarItem(placement: .confirmationAction) { Button("Fertig") { task?.cancel(); dismiss() } }
+            }
         }
     }
 

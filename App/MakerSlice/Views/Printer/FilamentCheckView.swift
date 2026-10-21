@@ -51,7 +51,10 @@ struct FilamentCheckView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Filament prüfen")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button { dismiss() } label: { Label("Zurück", systemImage: "chevron.left") }.accessibilityIdentifier("backButton") }
+                ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
+            }
             .task { await recheck() }
             .confirmationDialog("Düse auf \(heatTemperature) °C heizen?", isPresented: $confirmHeat, titleVisibility: .visible) {
                 Button("Heizen auf \(heatTemperature) °C") {

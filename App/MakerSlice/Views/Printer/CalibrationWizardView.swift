@@ -185,6 +185,7 @@ struct CalibrationResultSection: View {
     let filamentName: String
     @State private var chosen: Int?
     @State private var saved = false
+    @State private var noneGood = false
 
     var body: some View {
         Section {
@@ -211,10 +212,38 @@ struct CalibrationResultSection: View {
                 Label("Gespeichert – künftige Drucke mit diesem Filament nutzen den Wert automatisch.", systemImage: "checkmark.seal.fill")
                     .font(.footnote).foregroundStyle(.green)
             }
+            Button { noneGood.toggle() } label: { Label("Keine Stufe war gut", systemImage: "questionmark.circle") }
+                .accessibilityIdentifier("noStepGood")
         } header: {
             Text("Ergebnis auswerten")
         } footer: {
             Text("Wähle die Stufe, die am besten aussieht. Die App rechnet den Wert aus und merkt ihn sich je Drucker und Filament.")
+        }
+        if noneGood {
+            Section("Was jetzt?") {
+                ForEach(CalibrationAdvice.whenNoStepIsGood(plan.kind, filamentType: plan.settings.filament(for: 0).type)) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.title).font(.subheadline.weight(.semibold))
+                        Text(item.detail).font(.caption).foregroundStyle(.secondary)
+                        if let run = item.run {
+                            Button("\(run.displayName)-Test starten") { app.startCalibration(run, like: plan) }
+                                .buttonStyle(.bordered).font(.footnote)
+                        }
+                    }
+                }
+            }
+        }
+        let next = CalibrationAdvice.open(printer: plan.settings.printer, filament: filamentName).filter { $0 != plan.kind }
+        if !next.isEmpty {
+            Section {
+                ForEach(next) { kind in
+                    Button { app.startCalibration(kind, like: plan) } label: {
+                        Label("\(kind.displayName) – \(kind.summary)", systemImage: kind.symbol)
+                    }
+                }
+            } header: {
+                Text("Noch offen für \(filamentName)")
+            }
         }
     }
 }
@@ -229,7 +258,10 @@ struct CalibrationResultSheet: View {
             List { CalibrationResultSection(plan: plan, filamentName: plan.settings.filament(for: 0).name) }
                 .navigationTitle("Ergebnis")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } } }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button { dismiss() } label: { Label("Zurück", systemImage: "chevron.left") } }
+                    ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
+                }
         }
         .presentationDetents([.large])
     }

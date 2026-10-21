@@ -276,6 +276,15 @@ final class MakerSliceUITests: XCTestCase {
         save.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'automatisch'")).firstMatch.waitForExistence(timeout: 5))
         snapshot("A4-Gespeichert")
+        // "No step was good" leads to what to do next, and the open tests are offered.
+        let none = app.buttons["noStepGood"]
+        for _ in 0..<4 where !none.isHittable { app.swipeUp() }
+        none.tap()
+        XCTAssertTrue(app.staticTexts["Filament trocknen"].waitForExistence(timeout: 5), "advice: dry the filament first")
+        let retraction = app.buttons["Rückzug-Test starten"]
+        for _ in 0..<4 where !retraction.exists { app.swipeUp() }
+        XCTAssertTrue(retraction.waitForExistence(timeout: 5), "advice offers the retraction test")
+        snapshot("A5-Keine-Stufe-gut")
     }
 
     func testSliceSampleForBothPrinters() {

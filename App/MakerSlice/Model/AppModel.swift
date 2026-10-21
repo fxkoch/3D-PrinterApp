@@ -112,6 +112,17 @@ final class AppModel {
         project = p
     }
 
+    /// Starts another calibration print for the same printer and filament (closes the current project first).
+    func startCalibration(_ kind: CalibrationKind, like plan: CalibrationPlan) {
+        let filament = plan.settings.filament(for: 0)
+        let next = CalibrationFactory.plan(kind, filament: filament, base: settings(for: plan.settings.printer))
+        project = nil
+        Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            openCalibration(next)
+        }
+    }
+
     /// Saves a calibration result for the printer model and puts it into the printers' own database where possible.
     func saveCalibration(_ result: CalibrationResult) {
         CalibrationBook.shared.set(result)

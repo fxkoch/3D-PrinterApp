@@ -143,6 +143,20 @@ final class KobraVirtualPrintTests: XCTestCase {
         XCTAssertEqual(cold.tools.first?.target, 0)
     }
 
+    /// Drying settings from the plan for the loaded filaments reach the dryer box.
+    func testDryingUsesTheTemperatureOfThePlan() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        let status = try await waitFor(client, "ACE data") { $0.filaments.count == 4 && $0.filamentBox?.humidity != nil }
+        let plan = try XCTUnwrap(DryingAdvice.plan(types: status.filaments.filter(\.present).compactMap(\.type)))
+        XCTAssertEqual(plan.temperature, 50, "the virtual ACE holds PLA and PETG: PLA limits to 50 °C")
+        try await client.setDrying(true, temperature: plan.temperature, minutes: plan.minutes)
+        let drying = try await waitFor(client, "drying") { $0.filamentBox?.drying == true }
+        XCTAssertEqual(drying.filamentBox?.dryingTarget, Double(plan.temperature))
+        try await client.setDrying(false)
+    }
+
     /// The real printer answered the start command with code -1 although it started the job: no error must reach the user.
     func testStartAnsweredWithMinusOneButRunningIsNoError() async throws {
         let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,

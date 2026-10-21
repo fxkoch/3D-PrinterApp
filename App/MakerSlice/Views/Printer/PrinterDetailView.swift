@@ -7,6 +7,7 @@ struct PrinterDetailView: View {
     @Environment(AppModel.self) private var app
     let printer: PrinterConnection
     @State private var confirmCancel = false
+    @State private var confirmDry = false
     @State private var showFilamentCheck = false
     @State private var editing = false
     @State private var showLive = false
@@ -230,14 +231,33 @@ struct PrinterDetailView: View {
                            systemImage: "sun.max")
                 }
                 #if canImport(Network)
-                if app.expertMode, let lan = app.printers.driver(for: printer) as? AnycubicLANClient {
-                    Button(box.drying ? "Trocknen beenden" : "Trocknen starten (45 °C, 4 h)") {
-                        let on = !box.drying
-                        Task { await app.printers.perform(on: printer, on ? "Trocknen gestartet" : "Trocknen beendet") { _ in
-                            try await lan.setDrying(on)
-                        } }
+                if let lan = app.printers.driver(for: printer) as? AnycubicLANClient {
+                    let plan = DryingAdvice.plan(types: s.filaments.filter(\.present).compactMap(\.type))
+                    Button(box.drying ? "Trocknen beenden" : (plan.map { "Trocknen starten (\($0.summary))" } ?? "Trocknen starten")) {
+                        if box.drying {
+                            Task { await app.printers.perform(on: printer, "Trocknen beendet") { _ in try await lan.setDrying(false) } }
+                        } else {
+                            confirmDry = true
+                        }
                     }
                     .font(.subheadline)
+                    .disabled(!box.drying && plan == nil)
+                    .accessibilityIdentifier("dryButton")
+                    if !box.drying, let plan {
+                        Text(plan.explanation).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Color.clear.frame(height: 0)
+                        .confirmationDialog("Trocknen starten?", isPresented: $confirmDry, titleVisibility: .visible) {
+                            if let plan {
+                                Button("Starten: \(plan.summary)") {
+                                    Task { await app.printers.perform(on: printer, "Trocknen gestartet (\(plan.summary))") { _ in
+                                        try await lan.setDrying(true, temperature: plan.temperature, minutes: plan.minutes)
+                                    } }
+                                }
+                            }
+                        } message: {
+                            Text((plan?.explanation ?? "") + " Der ACE heizt dabei auf. Spulen dürfen im Fach bleiben.")
+                        }
                 }
                 #endif
             }
