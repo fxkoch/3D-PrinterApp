@@ -56,5 +56,22 @@ public enum SlicerOptionCatalog {
 
     public static func option(_ key: String) -> SlicerOption? { byKey[key] }
 
+    /// The generated catalog (Anycubic Slicer Next / Snapmaker Orca) for all printers: the P1S uses the same Orca options, with
+    /// Bambu's own "0.20mm Standard" values as its vendor defaults (`Resources/p1s_process_defaults.json`).
+    static let all: [SlicerOption] = generated.map { option in
+        guard option.availableFor.contains(.kobraS1) else { return option }
+        var o = option
+        o.availableFor.insert(.bambuP1S)
+        if let value = bambuDefaults[o.key] { o.vendor[.bambuP1S] = value }
+        return o
+    }
+
+    private static let bambuDefaults: [String: String] = {
+        guard let url = Bundle.module.url(forResource: "p1s_process_defaults", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let values = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        return values
+    }()
+
     private static let byKey: [String: SlicerOption] = Dictionary(all.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
 }

@@ -99,6 +99,16 @@ final class PrintProject: Identifiable {
 
     func dismissProfile() { profileReport = nil }
 
+    /// Offers the differences of a profile file (OrcaSlicer/Bambu process or filament JSON) to take over – nothing changes
+    /// before the user has chosen. Returns a message when there is nothing to offer.
+    func offerProfile(_ data: Data) -> String? {
+        guard let project = ProjectSettings.fromConfig(data) else { return "Die Datei ist kein Slicer-Profil (JSON von OrcaSlicer oder Bambu Studio)." }
+        let report = ProfileAdvisor.analyze(project: project, settings: settings)
+        guard !report.isEmpty else { return "Das Profil unterscheidet sich nicht von deinen Einstellungen." }
+        profileReport = report
+        return nil
+    }
+
     var output: SliceJob.Output? { output(ofPlate: currentPlate) }
 
     func output(ofPlate plate: Int) -> SliceJob.Output? {
@@ -366,13 +376,14 @@ final class PrintProject: Identifiable {
         // Calibration prints must not be changed by recommendations (supports, ironing, …).
         if calibration != nil { recommendations = []; analyzing = false; return }
         let objects = self.objects, settings = self.settings, loaded = loadedTypes, humidity = dryerHumidity
+        let sinceLeveling = LevelingLog.hoursSince(printer: settings.printer, plate: settings.plateType)
         analyzing = true
         adviceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000) // debounce
             guard !Task.isCancelled else { return }
             let recs = await Task.detached(priority: .utility) {
                 PrintAdvisor.recommendations(objects: objects, settings: settings, loadedTypes: loaded,
-                                             dryerHumidity: humidity)
+                                             dryerHumidity: humidity, hoursSinceLeveling: sinceLeveling)
             }.value
             guard let self, !Task.isCancelled else { return }
             self.recommendations = recs

@@ -65,6 +65,7 @@ struct PrepareView: View {
                     Button("Schließen") { app.project = nil }.accessibilityIdentifier("closeProject")
                 }
                 if app.expertMode {
+                    ToolbarItem(placement: .topBarTrailing) { ProfileImportButton(project: project) }
                     ToolbarItem(placement: .topBarTrailing) {
                         NavigationLink {
                             AdvancedSettingsView(settings: $project.settings)

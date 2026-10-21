@@ -19,6 +19,19 @@ public enum ConnectionKind: String, Codable, CaseIterable, Sendable, Identifiabl
     }
 }
 
+/// What the printer does before a print starts (the same switches the makers' own apps offer in their send dialog).
+public struct PrintStartOptions: Equatable, Sendable {
+    public var autoLeveling = true
+    public var vibrationCompensation = false
+    public var flowCalibration = false
+
+    public init(autoLeveling: Bool = true, vibrationCompensation: Bool = false, flowCalibration: Bool = false) {
+        self.autoLeveling = autoLeveling
+        self.vibrationCompensation = vibrationCompensation
+        self.flowCalibration = flowCalibration
+    }
+}
+
 /// Filament slot assignment sent with a print start (ACE mapping).
 public struct SlotMapping: Sendable, Equatable {
     /// Tool index in the G-code (T0…T3).

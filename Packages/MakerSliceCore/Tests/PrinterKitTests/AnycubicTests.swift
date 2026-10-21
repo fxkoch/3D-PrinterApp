@@ -164,4 +164,20 @@ final class AnycubicTests: XCTestCase {
         s.applyAnycubic(type: "info", data: data)
         XCTAssertEqual(s.state, .standby)
     }
+
+    func testStartOptionsReachTheTaskSettings() throws {
+        func settings(_ options: PrintStartOptions) throws -> [String: Any] {
+            let p = AnycubicHandshake.startPayload(fileName: "a.gcode", md5: "x", size: 10, mapping: [], msgID: "m", now: 1, options: options)
+            let data = try XCTUnwrap(p["data"] as? [String: Any])
+            return try XCTUnwrap(data["task_settings"] as? [String: Any])
+        }
+        let defaults = try settings(PrintStartOptions())
+        XCTAssertEqual(defaults["auto_leveling"] as? Int, 1)
+        XCTAssertEqual(defaults["vibration_compensation"] as? Int, 0)
+        XCTAssertEqual(defaults["flow_calibration"] as? Int, 0)
+        let custom = try settings(PrintStartOptions(autoLeveling: false, vibrationCompensation: true, flowCalibration: true))
+        XCTAssertEqual(custom["auto_leveling"] as? Int, 0)
+        XCTAssertEqual(custom["vibration_compensation"] as? Int, 1)
+        XCTAssertEqual(custom["flow_calibration"] as? Int, 1)
+    }
 }

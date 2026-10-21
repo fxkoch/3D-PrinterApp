@@ -21,6 +21,7 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case retraction(slot: Int, length: Double)
         case elephantFoot(Double)
         case spiralVase(Bool)
+        case leveling(Bool)
     }
 
     public var id: String
@@ -98,7 +99,8 @@ public enum PrintAdvisor {
     /// - Parameter loadedTypes: material reported by the printer per slot (nil = unknown/empty).
     /// - Parameter dryerHumidity: relative humidity (%) reported by the ACE Pro, if known.
     public static func recommendations(objects: [ModelObject], settings s: PrintSettings,
-                                       loadedTypes: [String?] = [], dryerHumidity: Double? = nil) -> [Recommendation] {
+                                       loadedTypes: [String?] = [], dryerHumidity: Double? = nil,
+                                       hoursSinceLeveling: Double? = nil) -> [Recommendation] {
         var result: [Recommendation] = []
         let analyses = objects.map { analyze($0, supportAngle: s.supportAngle) }
         let usedTools = Set(objects.map(\.tool))
@@ -204,6 +206,15 @@ public enum PrintAdvisor {
                 icon: "hare", severity: .info, action: .layerHeight(0.28)))
         }
 
+        // The bed was levelled a short while ago with the same plate: leveling again costs minutes for nothing.
+        if s.enableBedLeveling, let hours = hoursSinceLeveling, hours < 12 {
+            let saved = s.printer == .kobraS1 ? "ca. 4" : "2–3"
+            result.append(Recommendation(
+                id: "skip-leveling", title: "Nivellierung überspringen",
+                detail: "Das Bett wurde vor \(hours < 1 ? "weniger als einer Stunde" : "\(Int(hours.rounded())) Stunden") nivelliert, Platte und Drucker sind unverändert. Das Überspringen spart \(saved) Minuten. Bei Plattenwechsel oder schlechter Haftung der ersten Schicht wieder einschalten.",
+                icon: "timer", severity: .suggestion, action: .leveling(false)))
+        }
+
         // Material vs plate.
         if materials.contains(where: { $0.type.uppercased().hasPrefix("PETG") }), s.plateType == .highTemp {
             result.append(Recommendation(
@@ -265,6 +276,7 @@ public enum PrintAdvisor {
         case .walls(let n): s.wallLoops = n
         case .plate(let p): s.plateType = p
         case .primeTower(let on): s.primeTower = on
+        case .leveling(let on): s.enableBedLeveling = on
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
         case .elephantFoot(let value): s.elephantFootCompensation = value

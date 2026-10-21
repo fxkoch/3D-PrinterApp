@@ -241,8 +241,9 @@ public struct ProjectSettings: Sendable, Equatable {
         s.filamentVendors = json["filament_vendor"] as? [String] ?? []
         s.filamentColors = json["filament_colour"] as? [String] ?? []
         s.filamentTypes = json["filament_type"] as? [String] ?? []
-        s.printerModel = string("printer_model")
-        s.profileName = string("print_settings_id")
+        // A profile file of its own (from GitHub/Printables) has no printer_model: it names the printers it fits instead.
+        s.printerModel = string("printer_model") ?? (json["compatible_printers"] as? [String])?.first
+        s.profileName = string("print_settings_id") ?? string("name") ?? string("filament_settings_id")
         for (key, value) in json {
             if let v = value as? String { s.raw[key] = v }
             else if let list = value as? [String] {

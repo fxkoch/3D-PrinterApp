@@ -2,7 +2,7 @@
 // Source: Anycubic Slicer Next (Kobra S1) and Snapmaker Orca (U1) process settings, vendor profile values as `vendor`.
 
 extension SlicerOptionCatalog {
-    static let all: [SlicerOption] = [
+    static let generated: [SlicerOption] = [
         SlicerOption(key: "layer_height", page: "Qualität", group: "Schichthöhe", kind: .float, title: "Schichthöhe", summary: "Definiert die Höhe der einzelnen Schichten. Eine geringe Schichthöhe steigert die Genauigkeit und verringert die Sichtbarkeit der einzelnen Schichten, verlängert dafür aber die Druckzeit.", unit: "mm", min: 0.0, max: nil, choices: [], availableFor: [.kobraS1, .snapmakerU1], vendor: [.kobraS1: "0.2", .snapmakerU1: "0.2"]),
         SlicerOption(key: "initial_layer_print_height", page: "Qualität", group: "Schichthöhe", kind: .float, title: "Höhe der ersten Schicht", summary: "Höhe der ersten Schicht. Eine etwas dickere erste Schicht verbessert die Haftung auf dem Druckbett.", unit: "mm", min: 0.0, max: nil, choices: [], availableFor: [.kobraS1, .snapmakerU1], vendor: [.kobraS1: "0.2", .snapmakerU1: "0.25"]),
         SlicerOption(key: "line_width", page: "Qualität", group: "Breite der Linie", kind: .floatOrPercent, title: "Linienbreite (Standard)", summary: "Standardmäßige Linienbreite, wenn andere Linienbreiten auf 0 gesetzt sind. Wenn als Prozentsatz angegeben, wird sie in Bezug auf den Düsendurchmesser berechnet.", unit: "mm oder %", min: 0.0, max: 1000.0, choices: [], availableFor: [.kobraS1, .snapmakerU1], vendor: [.kobraS1: "0.42", .snapmakerU1: "0.42"]),

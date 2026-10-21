@@ -255,7 +255,7 @@ extension FEMWeakSpots {
             let ratio = after.safety / max(base.safety, 1e-9)
             if ratio >= 1.05, best == nil || ratio > best!.safetyRatio {
                 best = FEMReinforcement(mesh: shifted, spots: base.spots, maxShift: spotSpec.map(\.depth).max() ?? 0,
-                                        safetyRatio: ratio, massRatio: after.mass / max(base.mass, 1e-9))
+                                        safetyRatio: ratio, massRatio: shifted.volume / max(mesh.volume, 1e-9))   // added volume, not the voxel mass (±3 % grid noise)
             }
         }
         progress("Fertig", 1)

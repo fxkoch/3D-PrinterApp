@@ -193,6 +193,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var filaments: [Filament] = [.pla, .pla, .pla, .pla]
     public var enableTimelapse: Bool = true
     public var enableBedLeveling: Bool = true
+    /// Kobra S1 start options (sent with the print command): the printer's own vibration compensation and flow calibration.
+    public var startVibrationCompensation: Bool = false
+    public var startFlowCalibration: Bool = false
 
     /// Further slicer settings (OrcaSlicer keys, see `SlicerOptionCatalog`) the user changed in expert mode.
     /// They only take effect when slicing in the cloud with OrcaSlicer.
@@ -355,6 +358,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.fuzzySkinThickness, &fuzzySkinThickness); d(.fuzzySkinPointDistance, &fuzzySkinPointDistance)
         d(.plateType, &plateType); d(.filaments, &filaments)
         d(.enableTimelapse, &enableTimelapse); d(.enableBedLeveling, &enableBedLeveling)
+        d(.startVibrationCompensation, &startVibrationCompensation); d(.startFlowCalibration, &startFlowCalibration)
         d(.extraOptions, &extraOptions); d(.layerGCodes, &layerGCodes)
         d(.retractLengthSteps, &retractLengthSteps); d(.footerGCode, &footerGCode)
         while filaments.count < machine.toolCount { filaments.append(filaments.last ?? .pla) }

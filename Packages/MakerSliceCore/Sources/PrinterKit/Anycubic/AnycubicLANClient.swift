@@ -7,6 +7,8 @@ import Network
 /// anycubic-lan, anycubic_ha_local and kobra-lan-cli.
 public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     public let connection: PrinterConnection
+    /// Switches sent with the next print start (set by the app from the print settings).
+    public var startOptions = PrintStartOptions()
 
     private let queue = DispatchQueue(label: "AnycubicLANClient")
     private let lock = NSLock()
@@ -376,7 +378,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         let md5 = LANCrypto.md5([UInt8](gcode)).map { String(format: "%02x", $0) }.joined()
         let payload = AnycubicHandshake.startPayload(fileName: name, md5: md5, size: gcode.count, mapping: mapping,
                                                      msgID: UUID().uuidString.lowercased(),
-                                                     now: Int64(Date().timeIntervalSince1970 * 1000))
+                                                     now: Int64(Date().timeIntervalSince1970 * 1000), options: startOptions)
         // Right after the upload the printer is still busy with the file (SD card write, preview) and may answer
         // "SD busy" (code 11535). Wait and ask again a few times before giving up.
         var attempt = 0

@@ -149,7 +149,8 @@ public enum AnycubicHandshake {
     }
 
     /// MQTT payload that starts an uploaded file, with ACE slot mapping.
-    static func startPayload(fileName: String, md5: String, size: Int, mapping: [SlotMapping], msgID: String, now: Int64) -> [String: Any] {
+    static func startPayload(fileName: String, md5: String, size: Int, mapping: [SlotMapping], msgID: String, now: Int64,
+                             options: PrintStartOptions = PrintStartOptions()) -> [String: Any] {
         let boxMapping: [[String: Any]] = mapping.map { m in
             let rgba = m.color.count >= 4 ? Array(m.color.prefix(4)) : m.color + [255]
             return ["paint_index": m.tool, "ams_index": m.slot, "paint_color": rgba, "ams_color": rgba,
@@ -159,7 +160,8 @@ public enum AnycubicHandshake {
             "taskid": "-1", "url": "", "filename": fileName, "md5": md5, "filepath": NSNull(),
             "filetype": 1, "project_type": 1, "filesize": size,
             "task_settings": [
-                "auto_leveling": 1, "vibration_compensation": 0, "flow_calibration": 0, "dry_mode": 0,
+                "auto_leveling": options.autoLeveling ? 1 : 0, "vibration_compensation": options.vibrationCompensation ? 1 : 0,
+                "flow_calibration": options.flowCalibration ? 1 : 0, "dry_mode": 0,
                 "ai_settings": ["status": 0, "count": 0, "type": 0],
                 "timelapse": ["status": 0, "count": 0, "type": 0],
                 "drying_settings": ["status": 0, "target_temp": 0, "duration": 0, "remain_time": 0],

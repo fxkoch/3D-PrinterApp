@@ -296,9 +296,17 @@ final class AppModel {
         }
         do {
             let data = Data(output.gcode.utf8)
+            #if canImport(Network)
+            if let lan = printers.driver(for: printer) as? AnycubicLANClient {
+                lan.startOptions = PrintStartOptions(autoLeveling: project.settings.enableBedLeveling,
+                                                     vibrationCompensation: project.settings.startVibrationCompensation,
+                                                     flowCalibration: project.settings.startFlowCalibration)
+            }
+            #endif
             try await printers.driver(for: printer).upload(gcode: data, fileName: project.gcodeFileName,
                                                            startPrint: startPrint, mapping: mapping)
             sendState = .done
+            if startPrint, project.settings.enableBedLeveling { LevelingLog.record(printer: project.settings.printer, plate: project.settings.plateType) }
             log.add(.info, startPrint ? "Druck gestartet: \(project.gcodeFileName)" : "Hochgeladen: \(project.gcodeFileName)",
                     source: printer.name)
             remember(project.settings)

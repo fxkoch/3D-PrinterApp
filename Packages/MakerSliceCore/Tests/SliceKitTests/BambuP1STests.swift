@@ -75,4 +75,52 @@ final class BambuP1STests: XCTestCase {
         XCTAssertTrue(p1s.contains { $0.id == "community-p1s-start" })
         XCTAssertTrue(tips.filter { $0.id.hasPrefix("community") }.allSatisfy { $0.action == nil }, "community hints never change settings on their own")
     }
+
+    func testSkipLevelingHintOnlyWhenRecentlyLevelled() {
+        let objects = [ModelObject(name: "A", mesh: Fixtures.box(20, 20, 10))]
+        let s = PrintSettings(printer: .kobraS1)
+        let recent = PrintAdvisor.recommendations(objects: objects, settings: s, hoursSinceLeveling: 3)
+        let tip = recent.first { $0.id == "skip-leveling" }
+        XCTAssertEqual(tip?.action, .leveling(false))
+        XCTAssertFalse(PrintAdvisor.recommendations(objects: objects, settings: s, hoursSinceLeveling: 30).contains { $0.id == "skip-leveling" })
+        XCTAssertFalse(PrintAdvisor.recommendations(objects: objects, settings: s).contains { $0.id == "skip-leveling" })
+        var off = s
+        off.enableBedLeveling = false
+        XCTAssertFalse(PrintAdvisor.recommendations(objects: objects, settings: off, hoursSinceLeveling: 3).contains { $0.id == "skip-leveling" }, "already off")
+        var list = objects
+        var settings = s
+        try? PrintAdvisor.apply(.leveling(false), settings: &settings, objects: &list)
+        XCTAssertFalse(settings.enableBedLeveling)
+    }
+
+    func testOlderSavedSettingsStillLoadAndNewOnesRoundTrip() throws {
+        var s = PrintSettings(printer: .kobraS1)
+        s.startVibrationCompensation = true
+        s.startFlowCalibration = true
+        let back = try JSONDecoder().decode(PrintSettings.self, from: JSONEncoder().encode(s))
+        XCTAssertTrue(back.startVibrationCompensation && back.startFlowCalibration)
+        let old = try JSONDecoder().decode(PrintSettings.self, from: Data(#"{"printer":"kobraS1","layerHeight":0.2}"#.utf8))
+        XCTAssertFalse(old.startVibrationCompensation)
+        XCTAssertTrue(old.enableBedLeveling)
+    }
+
+    func testP1SGetsTheExpertOptionsWithBambuDefaults() {
+        let options = SlicerOptionCatalog.options(for: .bambuP1S)
+        XCTAssertGreaterThan(options.count, 250, "the same Orca options as the other printers")
+        XCTAssertEqual(SlicerOptionCatalog.option("layer_height")?.vendor[.bambuP1S], "0.2")
+        XCTAssertNotNil(SlicerOptionCatalog.option("seam_gap")?.availableFor.contains(.bambuP1S))
+    }
+
+    /// A process profile from the internet (own file, no printer_model) is turned into differences to choose from.
+    func testProfileFileFromTheInternetBecomesAReport() throws {
+        let json = #"{"name":"0.20mm Speed @Kobra S1 (Community)","from":"User","compatible_printers":["Anycubic Kobra S1 0.4 nozzle"],"layer_height":"0.24","sparse_infill_density":"25%","outer_wall_acceleration":"5000"}"#
+        let project = try XCTUnwrap(ProjectSettings.fromConfig(Data(json.utf8)))
+        XCTAssertEqual(project.profileName, "0.20mm Speed @Kobra S1 (Community)")
+        let report = ProfileAdvisor.analyze(project: project, settings: PrintSettings(printer: .kobraS1))
+        XCTAssertFalse(report.isEmpty)
+        XCTAssertFalse(report.foreignPrinter, "made for the Kobra S1")
+        XCTAssertTrue(report.changes.contains { $0.title.lowercased().contains("schichth") }, "layer height is offered")
+        XCTAssertTrue(ProfileAdvisor.analyze(project: project, settings: PrintSettings(printer: .snapmakerU1)).foreignPrinter)
+        XCTAssertNil(ProjectSettings.fromConfig(Data("no json".utf8)))
+    }
 }

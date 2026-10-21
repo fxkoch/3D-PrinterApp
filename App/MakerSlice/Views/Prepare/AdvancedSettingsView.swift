@@ -117,7 +117,11 @@ struct AdvancedSettingsView: View {
                 }
                 if settings.printer == .snapmakerU1 {
                     toggle(.enableTimelapse, $settings.enableTimelapse)
-                    toggle(.enableBedLeveling, $settings.enableBedLeveling)
+                }
+                toggle(.enableBedLeveling, $settings.enableBedLeveling)
+                if settings.printer == .kobraS1 {
+                    toggle(.startVibrationCompensation, $settings.startVibrationCompensation)
+                    toggle(.startFlowCalibration, $settings.startFlowCalibration)
                 }
                 LabeledContent("Bauraum", value: "\(Int(settings.bedSize)) × \(Int(settings.bedSize)) × \(Int(settings.maxHeight)) mm")
             }
