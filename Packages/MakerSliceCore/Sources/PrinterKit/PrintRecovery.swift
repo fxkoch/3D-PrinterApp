@@ -26,7 +26,7 @@ public struct PrintRecovery: Equatable, Sendable {
         let m = (message ?? "").lowercased()
         func has(_ words: [String]) -> Bool { words.contains { m.contains($0) } }
         if has(["runaway", "heater", "mintemp", "maxtemp", "thermistor", "temperature", "temperatur", "heizer"]) { return .heater }
-        if has(["runout", "run out", "out of filament", "no filament", "filament sensor", "filament", "material", "feed", "ausgegangen", "leer"]) { return .filamentOut }
+        if has(["runout", "run out", "out of filament", "no filament", "filament sensor", "filament", "material", "feed", "ausgegangen", "leer", "retract", "rückgang", "rueckgang", "abnormal", "slip"]) { return .filamentOut }
         if has(["clog", "jam", "extru", "blocked", "verstopf", "grind", "skip"]) { return .clog }
         if has(["detach", "adhesion", "spaghetti", "first layer", "lift", "warp", "haftung", "gelöst"]) { return .adhesion }
         if has(["power", "strom", "outage"]) { return .power }
@@ -76,7 +76,10 @@ public struct PrintRecovery: Equatable, Sendable {
         }
         switch cause {
         case .filamentOut:
-            reasons.append("Filament leer oder nicht nachgeführt: lässt sich beheben, das Teil bleibt warm und fest.")
+            let retract = ["retract", "rückgang", "rueckgang", "abnormal", "slip"].contains { (s.stateMessage ?? "").lowercased().contains($0) }
+            reasons.append(retract
+                ? "Das Filament wurde unerwartet zurückgezogen oder rutscht – meist ein verheddertes oder klemmendes Filament, ein geknickter Schlauch oder ein zu glattes Filamentende. Das lässt sich beheben, das Teil bleibt warm und fest."
+                : "Filament leer oder nicht nachgeführt: lässt sich beheben, das Teil bleibt warm und fest.")
             return result(.resume, "Fortsetzen ist sinnvoll",
                           steps: ["Neues Filament desselben Typs einlegen (am ACE/Wechsler den Slot prüfen).", "Prüfen, dass es bis zur Düse läuft und sauber extrudiert.", "Dann „Fortsetzen“."])
         case .clog:

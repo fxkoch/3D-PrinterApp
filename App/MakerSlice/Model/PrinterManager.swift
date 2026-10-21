@@ -125,6 +125,7 @@ final class PrinterManager {
             if errors[printer.id] != nil { log?.add(.info, "Verbindung wiederhergestellt", source: printer.name) }
             errors[printer.id] = nil
             noteChanges(printer, old: old, new: new)
+            NotificationService.shared.observe(printer: printer, status: new)
             // Printer-side messages (console / reports) every 30 s.
             if Date().timeIntervalSince(lastEventFetch[printer.id] ?? .distantPast) > 30 {
                 lastEventFetch[printer.id] = Date()

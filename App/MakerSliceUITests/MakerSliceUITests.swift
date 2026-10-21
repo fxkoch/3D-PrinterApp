@@ -488,6 +488,32 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("99c-Schwachstellen")
     }
 
+    /// Standard filament check on the virtual Kobra S1, and the notification settings.
+    func testFilamentCheckAndNotificationSettings() throws {
+        app.launchArguments += ["-uiTestVirtualKobra"]
+        app.launch()
+        app.tabBars.buttons["Drucker"].tap()
+        let printer = app.staticTexts["Virtueller Kobra S1"].firstMatch
+        XCTAssertTrue(printer.waitForExistence(timeout: 20))
+        printer.tap()
+        let button = app.buttons["filamentCheckButton"]
+        for _ in 0..<5 where !button.exists || !button.isHittable { app.swipeUp(); sleep(1) }
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        button.tap()
+        XCTAssertTrue(app.buttons["filamentRecheck"].waitForExistence(timeout: 15), "re-check button")
+        XCTAssertTrue(app.staticTexts["Meldung des Druckers"].waitForExistence(timeout: 15), "traffic lights from the printer status")
+        app.buttons["filamentRecheck"].tap()
+        sleep(2)
+        snapshot("34-Filament-pruefen")
+        app.buttons["Fertig"].tap()
+        app.tabBars.buttons["Einstellungen"].tap()
+        let toggle = app.switches["notifyToggle"]
+        for _ in 0..<4 where !toggle.exists { app.swipeUp() }
+        snapshot("35-Einstellungen-unten")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "notification switch in the settings")
+        snapshot("35-Benachrichtigungen")
+    }
+
     /// Live view of the virtual Kobra S1: its camera is started over MQTT and the FLV video arrives.
     func testLiveViewWithCamera() throws {
         app.launchArguments += ["-uiTestVirtualKobra"]

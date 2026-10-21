@@ -53,6 +53,14 @@
 		<string>_snapmaker._tcp</string>
 		<string>_moonraker._tcp</string>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>de.makerslice.refresh</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Für den 3D-Scan fotografiert MakerSlice dein Objekt von allen Seiten und rechnet daraus ein druckbares 3D-Modell.</string>
 	<key>NSLocalNetworkUsageDescription</key>

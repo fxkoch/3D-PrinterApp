@@ -7,6 +7,7 @@ struct PrinterDetailView: View {
     @Environment(AppModel.self) private var app
     let printer: PrinterConnection
     @State private var confirmCancel = false
+    @State private var showFilamentCheck = false
     @State private var editing = false
     @State private var showLive = false
 
@@ -45,6 +46,7 @@ struct PrinterDetailView: View {
             }
         }
         .sheet(isPresented: $editing) { PrinterEditView(existing: printer) }
+        .sheet(isPresented: $showFilamentCheck) { FilamentCheckView(printer: printer) }
         .fullScreenCover(isPresented: $showLive) { LivePrintView(printer: printer) }
         .confirmationDialog("Druck wirklich abbrechen?", isPresented: $confirmCancel, titleVisibility: .visible) {
             Button("Druck abbrechen", role: .destructive) {
@@ -130,6 +132,10 @@ struct PrinterDetailView: View {
             ForEach(Array(advice.steps.enumerated()), id: \.offset) { i, step in
                 Text("\(i + 1). \(step)").font(.footnote)
             }
+            if FilamentCheck.isFilamentMessage(status?.stateMessage) {
+                Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
+                    .buttonStyle(.bordered).font(.footnote)
+            }
             HStack {
                 if advice.verdict != .discard, status?.state == .paused {
                     Button {
@@ -213,6 +219,9 @@ struct PrinterDetailView: View {
                     }
                 }
             }
+            Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
+                .font(.subheadline)
+                .accessibilityIdentifier("filamentCheckButton")
             if let box = s.filamentBox {
                 Divider()
                 HStack {

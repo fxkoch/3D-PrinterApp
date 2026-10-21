@@ -5,6 +5,10 @@ import PrinterKit
 import SliceKit
 import SwiftUI
 
+struct PrinterRef: Identifiable, Equatable {
+    let id: UUID
+}
+
 enum AppTab: Hashable {
     case discover, library, printers, settings
 }
@@ -19,6 +23,8 @@ final class AppModel {
     let browser = MakerWorldBrowser()
 
     var tab: AppTab = .discover
+    /// Printer whose filament check is shown (after tapping a filament notification).
+    var filamentCheckPrinter: PrinterRef?
     /// Set when the user wants to enter the result of a calibration print.
     var pendingCalibrationResult: CalibrationPlan?
     /// Project shown in the "prepare & slice" screen.
@@ -137,6 +143,14 @@ final class AppModel {
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "settings-\(settings.printer.rawValue)")
         }
+    }
+
+    // MARK: - Notifications
+
+    func openFromNotification(printer id: UUID, kind: PrintAlert.Kind) {
+        tab = .printers
+        printers.selectedID = id
+        if kind == .filament { filamentCheckPrinter = PrinterRef(id: id) }
     }
 
     // MARK: - Opening models
