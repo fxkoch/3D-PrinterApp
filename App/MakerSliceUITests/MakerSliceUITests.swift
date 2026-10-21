@@ -48,7 +48,15 @@ final class MakerSliceUITests: XCTestCase {
         app.tabBars.buttons["Einstellungen"].tap()
         let expert = app.switches["expertToggle"]
         XCTAssertTrue(expert.waitForExistence(timeout: 5))
-        if expert.value as? String != "1" { expert.tap() }
+        let before = expert.value as? String
+        if before != "1" {
+            // The switch sits at the right end of its row: tap there, not in the middle of the label.
+            expert.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        }
+        sleep(1)
+        snapshot("49-Expertenmodus-an")
+        XCTAssertTrue(app.staticTexts["Standard-Einstellungen"].waitForExistence(timeout: 5),
+                      "expert mode should reveal the default settings (switch was \(before ?? "nil"), is \(expert.value as? String ?? "nil"))")
         for (i, model) in ["Snapmaker U1", "Anycubic Kobra S1"].enumerated() {
             let row = app.staticTexts[model].firstMatch
             for _ in 0..<4 { app.swipeDown() }
