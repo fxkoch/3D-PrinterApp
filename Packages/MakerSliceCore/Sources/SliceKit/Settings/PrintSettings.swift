@@ -152,6 +152,10 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var supportTopZDistance: Double = 0.2
     public var supportXYDistance: Double = 0.35
     public var supportSpacing: Double = 2.5
+    /// Slot (0-based) that prints the support; nil = the first slot used by the objects.
+    public var supportSlot: Int?
+    /// Slot for the support interface layers; nil = same as the support.
+    public var supportInterfaceSlot: Int?
     public var brimWidth: Double = 0
     public var skirtLoops: Int = 1
     public var skirtDistance: Double = 3
@@ -315,6 +319,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.detectBridges, &detectBridges); d(.bridgeSpeed, &bridgeSpeed); d(.bridgeFlow, &bridgeFlow)
         d(.support, &support); d(.supportAngle, &supportAngle); d(.supportTopZDistance, &supportTopZDistance)
         d(.supportXYDistance, &supportXYDistance); d(.supportSpacing, &supportSpacing)
+        d(.supportSlot, &supportSlot); d(.supportInterfaceSlot, &supportInterfaceSlot)
         d(.brimWidth, &brimWidth); d(.skirtLoops, &skirtLoops); d(.skirtDistance, &skirtDistance)
         d(.primeTower, &primeTower); d(.primeTowerWidth, &primeTowerWidth); d(.purgeVolume, &purgeVolume)
         d(.retractSpeed, &retractSpeed); d(.retractMinTravel, &retractMinTravel); d(.zHop, &zHop)

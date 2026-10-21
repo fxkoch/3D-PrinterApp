@@ -30,7 +30,7 @@ struct PrepareView: View {
                     .frame(height: 280)
                     .background(Color(.secondarySystemBackground))
                     .overlay(alignment: .topTrailing) { previewToggle }
-                plateStrip
+                if app.expertMode || project.plateCount > 1 { plateStrip }
                 ScrollView {
                     VStack(spacing: Theme.spacing) {
                         if let warning = project.warning {
@@ -79,7 +79,11 @@ struct PrepareView: View {
             .sheet(item: $cutObject) { object in
                 CutView(project: project, object: object)
             }
-            .sheet(isPresented: Binding(get: { project.profileReport != nil }, set: { if !$0 { project.dismissProfile() } })) {
+            .sheet(isPresented: Binding(get: { project.needsColorSetup }, set: { if !$0 { project.finishColorSetup() } })) {
+                MultiColorSetupView(project: project)
+            }
+            .sheet(isPresented: Binding(get: { project.profileReport != nil && !project.needsColorSetup },
+                                        set: { if !$0 { project.dismissProfile() } })) {
                 if let report = project.profileReport { ProjectProfileView(project: project, report: report) }
             }
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: Self.modelTypes, allowsMultipleSelection: true) { result in
@@ -356,9 +360,11 @@ struct PrepareView: View {
                 }
                 if object.id != project.objects.last?.id { Divider() }
             }
-            Button { project.autoArrange() } label: { Label("Automatisch anordnen", systemImage: "square.grid.3x3") }
-                .font(.subheadline)
-            if project.plateCount > 1 {
+            if app.expertMode {
+                Button { project.autoArrange() } label: { Label("Automatisch anordnen", systemImage: "square.grid.3x3") }
+                    .font(.subheadline)
+            }
+            if app.expertMode, project.plateCount > 1 {
                 Button { project.redistributeAll() } label: { Label("Alle Platten neu verteilen", systemImage: "rectangle.grid.2x2") }
                     .font(.subheadline)
                     .accessibilityIdentifier("redistributeAll")
@@ -390,7 +396,12 @@ struct PrepareView: View {
                            label: "\(tool + 1)", size: 22)
                 }
             }
-            if machine.multiMaterial == .filamentSwitcher {
+            if project.imported.isMultiColor {
+                Button { project.reopenColorSetup() } label: { Label("Farben & Filamente zuordnen …", systemImage: "paintpalette") }
+                    .font(.subheadline)
+                    .accessibilityIdentifier("openColorSetup")
+            }
+            if machine.multiMaterial == .filamentSwitcher, app.expertMode {
                 HelpRow(key: .primeTower) {
                     Toggle("Reinigungsturm", isOn: $project.settings.primeTower)
                 }
@@ -407,6 +418,9 @@ struct PrepareView: View {
                     Text("Weniger Spülmenge spart Filament, kann aber zu Mischfarben nach dem Wechsel führen. Nach dem Slicen siehst du den Abfall in Gramm.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+            } else if machine.multiMaterial == .filamentSwitcher {
+                Text("Beim Farbwechsel spült der Drucker an einem Reinigungsturm – die App richtet ihn automatisch ein.")
+                    .font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("Der \(project.settings.printer.displayName) hat vier Druckköpfe – Farbwechsel gehen ohne Reinigungsturm.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -423,9 +437,81 @@ struct PrepareView: View {
                 ForEach(PrintSettings.Quality.allCases) { q in Text(q.displayName).tag(Optional(q)) }
             }
             .pickerStyle(.segmented)
-            Text(String(format: "Schichthöhe %.2f mm", project.settings.layerHeight)).font(.caption).foregroundStyle(.secondary)
+            if app.expertMode {
+                Text(String(format: "Schichthöhe %.2f mm", project.settings.layerHeight)).font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text(qualityHint).font(.caption).foregroundStyle(.secondary)
+            }
 
             Divider()
+            if app.expertMode { expertInfill } else { simpleStrength }
+
+            Divider()
+            if app.expertMode {
+                expertSupport
+            } else {
+                Toggle("Stützen für Überhänge", isOn: Binding(
+                    get: { project.settings.support != .off },
+                    set: { project.settings.support = $0 ? .everywhere : .off }
+                ))
+                .accessibilityIdentifier("supportToggle")
+            }
+            if project.settings.machine.supportsPlateTypes.count > 1 {
+                HelpRow(key: .plateType) {
+                    Picker("Druckplatte", selection: $project.settings.plateType) {
+                        ForEach(project.settings.machine.supportsPlateTypes) { Text($0.displayName).tag($0) }
+                    }
+                }
+            }
+            if app.expertMode {
+                HelpRow(key: .brimWidth) {
+                    Toggle("Brim (Haftrand)", isOn: Binding(
+                        get: { project.settings.brimWidth > 0 },
+                        set: { project.settings.brimWidth = $0 ? 5 : 0 }
+                    ))
+                }
+                HelpRow(key: .ironing) {
+                    Toggle("Oberseite glätten (Ironing)", isOn: $project.settings.ironing)
+                }
+            } else {
+                Text("Haftrand, Glätten und Reinigungsturm stellt die App bei Bedarf selbst vor (siehe Empfehlungen). Alle Einstellungen gibt es im Expertenmodus.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var qualityHint: String {
+        switch PrintSettings.Quality.allCases.first(where: { $0.layerHeight == project.settings.layerHeight }) {
+        case .draft: return "Schnell: kürzere Druckzeit, sichtbare Schichten."
+        case .standard: return "Standard: gute Balance aus Zeit und Aussehen."
+        case .fine: return "Fein: glatte Oberfläche, dauert deutlich länger."
+        case .none: return "Eigene Schichthöhe aus dem Modellprofil."
+        }
+    }
+
+    /// Simple mode: three levels instead of pattern and percentage.
+    private var simpleStrength: some View {
+        let levels: [(String, Double)] = [("Leicht", 0.10), ("Normal", 0.15), ("Stabil", 0.30)]
+        let current = levels.min { abs($0.1 - project.settings.infillDensity) < abs($1.1 - project.settings.infillDensity) }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Stabilität")
+                HelpButton(key: .infillDensity)
+            }
+            Picker("Stabilität", selection: Binding(get: { current?.0 ?? "Normal" }, set: { name in
+                if let level = levels.first(where: { $0.0 == name }) { project.settings.infillDensity = level.1 }
+            })) {
+                ForEach(levels, id: \.0) { Text($0.0).tag($0.0) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("strengthPicker")
+            Text("Leicht spart Material und Zeit, Stabil für Teile, die Kraft aushalten müssen.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var expertInfill: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Füllung")
                 HelpButton(key: .infillPattern)
@@ -438,37 +524,23 @@ struct PrepareView: View {
                 Text("\(Int((project.settings.infillDensity * 100).rounded())) %").monospacedDigit().foregroundStyle(.secondary)
             }
             Slider(value: $project.settings.infillDensity, in: 0...1, step: 0.05)
+        }
+    }
 
-            Divider()
-            HelpRow(key: .support) {
-                Picker("Stützen", selection: $project.settings.support) {
-                    ForEach(SupportMode.allCases) { Text($0.displayName).tag($0) }
+    @ViewBuilder private var expertSupport: some View {
+        HelpRow(key: .support) {
+            Picker("Stützen", selection: $project.settings.support) {
+                ForEach(SupportMode.allCases) { Text($0.displayName).tag($0) }
+            }
+        }
+        if project.settings.support != .off, project.settings.machine.toolCount > 1 {
+            Picker("Stütz-Material", selection: $project.settings.supportSlot) {
+                Text("Wie das Objekt").tag(Int?.none)
+                ForEach(0..<project.settings.machine.toolCount, id: \.self) { s in
+                    Text("Slot \(s + 1): \(project.settings.filament(for: s).name)").tag(Int?.some(s))
                 }
             }
-            HelpRow(key: .brimWidth) {
-                Toggle("Brim (Haftrand)", isOn: Binding(
-                    get: { project.settings.brimWidth > 0 },
-                    set: { project.settings.brimWidth = $0 ? 5 : 0 }
-                ))
-            }
-            HelpRow(key: .ironing) {
-                Toggle("Oberseite glätten (Ironing)", isOn: $project.settings.ironing)
-            }
-            if project.settings.machine.multiMaterial == .filamentSwitcher, project.usedTools.count > 1 {
-                HelpRow(key: .primeTower) {
-                    Toggle("Reinigungsturm", isOn: $project.settings.primeTower)
-                }
-            }
-            if project.settings.machine.supportsPlateTypes.count > 1 {
-                HelpRow(key: .plateType) {
-                    Picker("Druckplatte", selection: $project.settings.plateType) {
-                        ForEach(project.settings.machine.supportsPlateTypes) { Text($0.displayName).tag($0) }
-                    }
-                }
-            }
-            if !app.expertMode {
-                Text("Weitere Einstellungen im Expertenmodus (Einstellungen).").font(.caption).foregroundStyle(.secondary)
-            }
+            .accessibilityIdentifier("supportSlot")
         }
     }
 

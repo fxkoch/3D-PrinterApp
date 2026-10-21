@@ -59,8 +59,10 @@ struct PrinterDetailView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.displayName).font(.headline)
-                Text("\(printer.hostOnly) · \(printer.kind.displayName)").font(.caption).foregroundStyle(.secondary)
-                if let fw = status?.firmware { Text("Firmware \(fw)").font(.caption2).foregroundStyle(.tertiary) }
+                if app.expertMode {
+                    Text("\(printer.hostOnly) · \(printer.kind.displayName)").font(.caption).foregroundStyle(.secondary)
+                    if let fw = status?.firmware { Text("Firmware \(fw)").font(.caption2).foregroundStyle(.tertiary) }
+                }
             }
             Spacer()
             StatusBadge(text: app.printers.isOnline(printer) ? "Online" : "Offline",
@@ -127,7 +129,7 @@ struct PrinterDetailView: View {
                     Metric(value: Format.temp(chamber.temperature), caption: "Kammer", systemImage: "cube.transparent")
                 }
             }
-            if s.state != .printing && s.state != .paused {
+            if app.expertMode, s.state != .printing, s.state != .paused {
                 Menu {
                     ForEach(["PLA", "PETG", "ABS", "TPU"], id: \.self) { type in
                         if let f = FilamentLibrary.bestMatch(type: type, printer: model) {
@@ -181,7 +183,7 @@ struct PrinterDetailView: View {
                            systemImage: "sun.max")
                 }
                 #if canImport(Network)
-                if let lan = app.printers.driver(for: printer) as? AnycubicLANClient {
+                if app.expertMode, let lan = app.printers.driver(for: printer) as? AnycubicLANClient {
                     Button(box.drying ? "Trocknen beenden" : "Trocknen starten (45 °C, 4 h)") {
                         let on = !box.drying
                         Task { await app.printers.perform(on: printer, on ? "Trocknen gestartet" : "Trocknen beendet") { _ in
@@ -197,11 +199,13 @@ struct PrinterDetailView: View {
 
     private func machinePanel(_ s: PrinterStatus) -> some View {
         Panel(title: "Gerät", systemImage: "gearshape") {
-            HStack {
-                if let fan = s.fanPercent { Metric(value: "\(Int(fan)) %", caption: "Bauteillüfter", systemImage: "fan") }
-                if let aux = s.auxFanPercent { Metric(value: "\(Int(aux)) %", caption: "Zusatzlüfter", systemImage: "wind") }
-                if let mode = s.speedMode {
-                    Metric(value: ["", "Leise", "Standard", "Sport"][min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+            if app.expertMode {
+                HStack {
+                    if let fan = s.fanPercent { Metric(value: "\(Int(fan)) %", caption: "Bauteillüfter", systemImage: "fan") }
+                    if let aux = s.auxFanPercent { Metric(value: "\(Int(aux)) %", caption: "Zusatzlüfter", systemImage: "wind") }
+                    if let mode = s.speedMode {
+                        Metric(value: ["", "Leise", "Standard", "Sport"][min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+                    }
                 }
             }
             Toggle(isOn: Binding(get: { s.lightOn ?? false }, set: { on in
@@ -225,10 +229,12 @@ struct PrinterDetailView: View {
 
     private var links: some View {
         VStack(spacing: 0) {
-            NavigationLink { CalibrationView(printer: printer) } label: {
-                LinkRow(title: "Kalibrierdaten", icon: "level")
+            if app.expertMode {
+                NavigationLink { CalibrationView(printer: printer) } label: {
+                    LinkRow(title: "Kalibrierdaten", icon: "level")
+                }
+                Divider().padding(.leading, 44)
             }
-            Divider().padding(.leading, 44)
             NavigationLink { LogView(source: printer.name) } label: {
                 LinkRow(title: "Protokoll & Fehler", icon: "list.bullet.rectangle")
             }

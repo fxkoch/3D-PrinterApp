@@ -47,6 +47,13 @@ final class PrintProject: Identifiable {
     /// Recommendations the user dismissed for this project.
     var dismissed: Set<String> = []
 
+    /// Colours the downloaded model uses, as defined in its file.
+    var modelColors: [ModelColor] { imported.modelColors }
+    /// File colour → printer slot.
+    private(set) var colorMap: [Int: Int] = [:]
+    /// True until the user has chosen filaments for a multi-colour model.
+    var needsColorSetup = false
+
     /// What is special in the profile the downloaded model brings along; shown to the user before anything is taken over.
     private(set) var profileReport: ProfileReport?
 
@@ -70,6 +77,12 @@ final class PrintProject: Identifiable {
         }
         settings = s
         layoutImported()
+        if imported.isMultiColor {
+            // Multi-colour model: keep the file's numbering where possible and ask which filament prints which colour.
+            let map = ColorMapper.suggest(colors: imported.modelColors, slotColors: s.filaments.map(\.color))
+            applyColorMap(map)
+            needsColorSetup = true
+        }
         if imported.hasPaintedColors {
             warning = "Das Modell enthält Farbbemalung. Sie wird nicht übernommen – jedes Objekt wird mit einem Slot gedruckt."
         }
@@ -122,6 +135,32 @@ final class PrintProject: Identifiable {
         plates[loc.plate][loc.index].tool = tool
         changed(plate: loc.plate + 1)
     }
+
+    /// Assigns the file's colours to printer slots and moves every object/part to its slot.
+    func applyColorMap(_ map: [Int: Int]) {
+        colorMap = map
+        for p in plates.indices {
+            for i in plates[p].indices { plates[p][i] = plates[p][i].applyingColorMap(map) }
+        }
+        changed()
+    }
+
+    /// Prints a file colour with a slot and loads the matching material profile (type of the file, colour of the file).
+    func assign(color: ModelColor, toSlot slot: Int) {
+        var map = colorMap
+        map[color.tool] = slot
+        applyColorMap(map)
+        guard settings.filaments.indices.contains(slot) else { return }
+        if let type = color.type, var f = FilamentLibrary.bestMatch(type: type, vendor: color.vendor, printer: settings.printer) {
+            f.color = color.colorHex
+            settings.filaments[slot] = f
+        } else {
+            settings.filaments[slot].color = color.colorHex
+        }
+    }
+
+    func finishColorSetup() { needsColorSetup = false }
+    func reopenColorSetup() { needsColorSetup = true }
 
     /// Height-based colour changes of an object (sorted, one per height).
     func setColorChanges(_ changes: [ColorChange], for objectID: ModelObject.ID) {

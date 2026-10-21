@@ -166,6 +166,48 @@ final class MakerSliceUITests: XCTestCase {
         }
     }
 
+    /// A multi-colour model is recognised: the app asks which filament prints which colour and slices it with colour changes.
+    func testMultiColorModelAsksForFilaments() {
+        app.launchArguments += ["-uiTestMultiColorModel"]
+        app.launch()
+        let done = app.buttons["colorSetupDone"]
+        XCTAssertTrue(done.waitForExistence(timeout: 20), "multi-colour models should open the colour assignment")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Farbe 3'")).firstMatch.exists)
+        snapshot("98-Farben-zuordnen")
+        // Print colour 3 with slot 4 instead.
+        app.buttons["map-2-slot-3"].tap()
+        XCTAssertTrue(app.buttons["pick-filament-2"].exists)
+        app.buttons["pick-filament-2"].tap()
+        XCTAssertTrue(app.buttons["editFilament"].waitForExistence(timeout: 5), "the filament profile can be adjusted")
+        snapshot("99-Filament-anpassen")
+        app.buttons["Fertig"].firstMatch.tap()
+        done.tap()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 10))
+        app.buttons["sliceButton"].tap()
+        XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["Wechsel"].exists, "the colours need tool changes")
+    }
+
+    /// Screenshots of the simple mode for a review of how much it asks of the user.
+    func testSimpleModeReview() {
+        app.launchArguments += ["-uiTestMultiColorModel", "-uiTestVirtualKobra"]
+        app.launch()
+        if app.buttons["colorSetupDone"].waitForExistence(timeout: 20) { app.buttons["colorSetupDone"].tap() }
+        let scroll = app.scrollViews["prepareScroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        for i in 0..<5 {
+            snapshot("7\(i)-Einfach-Vorbereiten")
+            scroll.swipeUp(velocity: .slow)
+        }
+        app.buttons["closeProject"].tap()
+        app.tabBars.buttons["Drucker"].tap()
+        sleep(3)
+        snapshot("75-Einfach-Drucker")
+        app.tabBars.buttons["Einstellungen"].tap()
+        sleep(1)
+        snapshot("76-Einfach-Einstellungen")
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

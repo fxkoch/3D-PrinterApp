@@ -72,7 +72,7 @@ final class AppModel {
             printers.add(PrinterConnection(name: "Virtueller Kobra S1", host: "127.0.0.1",
                                            model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
         }
-        if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") || ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") || ProcessInfo.processInfo.arguments.contains("-uiTestPlates") {
+        if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") || ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") || ProcessInfo.processInfo.arguments.contains("-uiTestPlates") || ProcessInfo.processInfo.arguments.contains("-uiTestMultiColorModel") {
             loadSample()
         }
     }
@@ -173,6 +173,16 @@ final class AppModel {
             load(name: "Temperaturturm") {
                 ImportedModel(objects: [ModelObject(name: "Turm", mesh: SampleModels.cube(20))],
                               projectSettings: ProjectSettings.fromConfig(Data(config.utf8), layerGCodeXML: Data(xml.utf8)))
+            }
+            return
+        }
+        if ProcessInfo.processInfo.arguments.contains("-uiTestMultiColorModel") {
+            // A multi-colour download: a base and a lid in two colours (like a MakerWorld key ring with text).
+            let config = ##"{"print_settings_id":"0.20mm Standard","filament_colour":["#F5F5F0","#2B2B2E","#E5483C"],"filament_type":["PLA","PETG","PLA"],"filament_vendor":["Generic","Generic","Generic"]}"##
+            load(name: "Mehrfarbiger Schlüsselanhänger") {
+                var base = ModelObject(name: "Anhänger", mesh: SampleModels.cube(30), tool: 0)
+                base.parts = [ObjectPart(name: "Schrift", mesh: SampleModels.cube(10).transformed(.translation(Vec3(10, 10, 30))), tool: 2)]
+                return ImportedModel(objects: [base], projectSettings: ProjectSettings.fromConfig(Data(config.utf8)))
             }
             return
         }

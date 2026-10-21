@@ -67,3 +67,60 @@ final class MultiColorTests: XCTestCase {
         XCTAssertEqual(Set([back.objects[0].tool] + back.objects[0].parts.map(\.tool)), [1, 3])
     }
 }
+
+final class MaterialMappingTests: XCTestCase {
+    private func color(_ tool: Int, _ hex: String, type: String? = "PLA") -> ModelColor {
+        ModelColor(tool: tool, colorHex: hex, type: type, vendor: nil, users: ["x"])
+    }
+
+    func testMappingKeepsFileNumbersWhenTheyFit() {
+        let map = ColorMapper.suggest(colors: [color(0, "#FFFFFF"), color(2, "#FF0000")], slotColors: ["#FFFFFF", "#000000", "#FF0000", "#0000FF"])
+        XCTAssertEqual(map, [0: 0, 2: 2])
+    }
+
+    func testMoreColoursThanSlotsPickTheNearestFreeSlot() {
+        let map = ColorMapper.suggest(colors: [color(0, "#FFFFFF"), color(5, "#101010"), color(6, "#FE0000")],
+                                      slotColors: ["#FFFFFF", "#000000", "#FF0000", "#0000FF"])
+        XCTAssertEqual(map[0], 0)
+        XCTAssertEqual(map[5], 1, "near-black goes to the black slot")
+        XCTAssertEqual(map[6], 2, "red goes to the red slot")
+    }
+
+    func testObjectsFollowTheColourMap() {
+        var object = ModelObject(name: "A", mesh: Fixtures.box(10, 10, 10), tool: 4)
+        object.parts = [ObjectPart(name: "B", mesh: Fixtures.box(5, 5, 5, at: Vec3(0, 0, 10)), tool: 6)]
+        let mapped = object.applyingColorMap([4: 1, 6: 3])
+        XCTAssertEqual(mapped.tool, 1)
+        XCTAssertEqual(mapped.parts[0].tool, 3)
+        // Mapping again from the original colours (not from the previous result) stays correct.
+        XCTAssertEqual(mapped.applyingColorMap([4: 2, 6: 0]).tool, 2)
+    }
+
+    func testImportedModelListsTheColoursItUses() throws {
+        var a = ModelObject(name: "Körper", mesh: Fixtures.box(10, 10, 10), tool: 0)
+        a.parts = [ObjectPart(name: "Text", mesh: Fixtures.box(4, 4, 2, at: Vec3(0, 0, 10)), tool: 2)]
+        let project = ProjectSettings.fromConfig(Data(##"{"filament_colour":["#FFFFFF","#00FF00","#FF8800"],"filament_type":["PLA","PETG","PLA"],"filament_vendor":["Bambu","","Generic"]}"##.utf8))
+        let model = ImportedModel(objects: [a], projectSettings: project)
+        XCTAssertTrue(model.isMultiColor)
+        XCTAssertEqual(model.modelColors.map(\.tool), [0, 2], "the unused green extruder is not listed")
+        XCTAssertEqual(model.modelColors[1].colorHex, "#FF8800")
+        XCTAssertEqual(model.modelColors[0].vendor, "Bambu")
+        XCTAssertEqual(model.modelColors[1].users, ["Text"])
+    }
+
+    func testSupportCanUseItsOwnSlot() throws {
+        var s = PrintSettings(printer: .snapmakerU1)
+        s.support = .buildPlateOnly
+        s.supportSlot = 2
+        let object = ModelObject(name: "T", mesh: Fixtures.tShape(), tool: 0)
+        let arranged = try XCTUnwrap(PlateArranger.arrange([object], bedSize: s.bedSize))
+        let layers = try Slicer(settings: s).slice(arranged)
+        let supportTools = Set(layers.flatMap { $0.islands.filter { $0.extrusions.contains { $0.role == .support } }.map(\.tool) })
+        XCTAssertEqual(supportTools, [2], "support is printed with slot 3")
+        XCTAssertTrue(layers.contains { $0.islands.contains { $0.tool == 0 } }, "the object itself stays in slot 1")
+        // The cloud job asks OrcaSlicer for the same filament.
+        let overrides = OrcaJob.processOverrides(s)
+        XCTAssertEqual(overrides["support_filament"], "3")
+        XCTAssertEqual(overrides["support_interface_filament"], "0")
+    }
+}

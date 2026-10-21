@@ -133,11 +133,16 @@ public final class Slicer: @unchecked Sendable {
                 if let support, !support.areas[i].isEmpty {
                     let gen = LayerToolpathGenerator(settings: s, layerIndex: i, z: tops[i], height: height)
                     let supportPaths = gen.supportPaths(area: support.areas[i], interface: support.interfaces[i])
-                    let supportTool = tools.first ?? 0
-                    if let idx = islands.firstIndex(where: { $0.tool == supportTool }) {
-                        islands[idx].extrusions.insert(contentsOf: supportPaths, at: 0)
-                    } else {
-                        islands.insert(ToolIsland(tool: supportTool, extrusions: supportPaths), at: 0)
+                    // Support (and its contact layers) may use their own slots, e.g. a soluble or cheaper material.
+                    let supportTool = s.supportSlot ?? tools.first ?? 0
+                    let interfaceTool = s.supportInterfaceSlot ?? supportTool
+                    for (tool, paths) in [(supportTool, supportPaths.filter { $0.role != .supportInterface }),
+                                          (interfaceTool, supportPaths.filter { $0.role == .supportInterface })] where !paths.isEmpty {
+                        if let idx = islands.firstIndex(where: { $0.tool == tool }) {
+                            islands[idx].extrusions.insert(contentsOf: paths, at: 0)
+                        } else {
+                            islands.insert(ToolIsland(tool: tool, extrusions: paths), at: 0)
+                        }
                     }
                 }
                 var layer = SlicedLayer(index: i, z: tops[i], height: height, islands: islands, outline: all[i])
@@ -180,7 +185,8 @@ public final class Slicer: @unchecked Sendable {
         }
 
         // 6. Purge tower for single-nozzle multi-material printers.
-        if s.primeTower, s.machine.multiMaterial == .filamentSwitcher, tools.count > 1 {
+        let toolsInPrint = Set(result.flatMap { $0.islands.map(\.tool) })
+        if s.primeTower, s.machine.multiMaterial == .filamentSwitcher, toolsInPrint.count > 1 {
             try PrimeTower(settings: s).insert(into: &result, footprint: all)
         }
         progress(SliceProgress(phase: "Fertig", fraction: 1))

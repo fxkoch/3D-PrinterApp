@@ -19,11 +19,14 @@ public struct ObjectPart: Sendable, Equatable {
     public var mesh: TriangleMesh
     /// Zero-based tool/slot index (0...3).
     public var tool: Int
+    /// Extruder/colour index this part had in the imported file (before the user mapped colours to slots).
+    public var sourceTool: Int?
 
-    public init(name: String, mesh: TriangleMesh, tool: Int) {
+    public init(name: String, mesh: TriangleMesh, tool: Int, sourceTool: Int? = nil) {
         self.name = name
         self.mesh = mesh
         self.tool = tool
+        self.sourceTool = sourceTool ?? tool
     }
 }
 
@@ -48,6 +51,8 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     /// Plate number from a Bambu/Orca project (1-based), if known.
     public var plate: Int?
     public var volumes: [ObjectVolume]
+    /// Extruder/colour index the main body had in the imported file.
+    public var sourceTool: Int?
     /// Further bodies with their own slot (multi-colour parts). The main `mesh` uses `tool`.
     public var parts: [ObjectPart] = []
     /// Height-based slot changes of the main body, sorted by height.
@@ -70,8 +75,21 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
         self.name = name
         self.mesh = mesh
         self.tool = tool
+        self.sourceTool = tool
         self.plate = plate
         self.volumes = volumes
+    }
+
+    /// The object with its colours mapped to printer slots (`map`: file colour → slot).
+    public func applyingColorMap(_ map: [Int: Int]) -> ModelObject {
+        var copy = self
+        copy.tool = map[sourceTool ?? tool] ?? tool
+        copy.parts = parts.map { part in
+            var p = part
+            p.tool = map[part.sourceTool ?? part.tool] ?? part.tool
+            return p
+        }
+        return copy
     }
 
     /// Bounds of the printed shape (mesh plus added volumes).
@@ -86,7 +104,7 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
         var copy = self
         copy.mesh = mesh.transformed(t)
         copy.volumes = volumes.map { ObjectVolume(kind: $0.kind, mesh: $0.mesh.transformed(t)) }
-        copy.parts = parts.map { ObjectPart(name: $0.name, mesh: $0.mesh.transformed(t), tool: $0.tool) }
+        copy.parts = parts.map { ObjectPart(name: $0.name, mesh: $0.mesh.transformed(t), tool: $0.tool, sourceTool: $0.sourceTool) }
         return copy
     }
 
@@ -98,11 +116,44 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     }
 }
 
+/// A colour/material of an imported project, as the file defines it.
+public struct ModelColor: Identifiable, Equatable, Sendable {
+    public var id: Int { tool }
+    /// Zero-based extruder index in the file.
+    public var tool: Int
+    /// "#RRGGBB"
+    public var colorHex: String
+    /// Material type from the project (PLA, PETG …), if known.
+    public var type: String?
+    public var vendor: String?
+    /// Names of the objects/parts printed in this colour.
+    public var users: [String]
+}
+
 /// Result of importing a model file.
 public struct ImportedModel: Sendable {
     public var objects: [ModelObject]
     /// Settings found in a Bambu Studio / Orca project (Metadata/project_settings.config).
     public var projectSettings: ProjectSettings?
+    /// Colours the project really uses (an extruder counts when an object or part is printed with it).
+    public var modelColors: [ModelColor] {
+        var users: [Int: [String]] = [:]
+        for object in objects {
+            users[object.sourceTool ?? object.tool, default: []].append(object.name)
+            for part in object.parts { users[part.sourceTool ?? part.tool, default: []].append(part.name) }
+        }
+        func at(_ list: [String]?, _ i: Int) -> String? { list.flatMap { $0.indices.contains(i) ? $0[i] : nil } }
+        return users.keys.sorted().map { tool in
+            let raw = at(projectSettings?.filamentColors, tool) ?? "#888888"
+            let hex = raw.hasPrefix("#") && raw.count >= 7 ? String(raw.prefix(7)) : "#888888"
+            let vendor = at(projectSettings?.filamentVendors, tool).flatMap { $0.isEmpty ? nil : $0 }
+            return ModelColor(tool: tool, colorHex: hex, type: at(projectSettings?.filamentTypes, tool), vendor: vendor, users: users[tool] ?? [])
+        }
+    }
+
+    /// True when the project prints in more than one colour.
+    public var isMultiColor: Bool { modelColors.count > 1 }
+
     public var plates: [Int] {
         Array(Set(objects.compactMap(\.plate))).sorted()
     }

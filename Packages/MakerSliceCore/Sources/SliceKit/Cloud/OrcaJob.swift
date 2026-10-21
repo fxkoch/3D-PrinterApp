@@ -108,6 +108,8 @@ public struct OrcaJob: Sendable {
             "default_acceleration": num(s.acceleration),
             "outer_wall_acceleration": num(s.outerWallAcceleration),
             "enable_support": s.support == .off ? "0" : "1",
+            "support_filament": "\((s.supportSlot ?? -1) + 1)",
+            "support_interface_filament": "\((s.supportInterfaceSlot ?? -1) + 1)",
             "support_on_build_plate_only": s.support == .buildPlateOnly ? "1" : "0",
             "support_threshold_angle": num(s.supportAngle),
             "support_top_z_distance": num(s.supportTopZDistance),

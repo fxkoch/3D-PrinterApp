@@ -57,9 +57,8 @@ struct FilamentPickerView: View {
                             Label("Eingelegtes Material übernehmen: \(loaded[slot].displayName)", systemImage: "dot.radiowaves.left.and.right")
                         }
                     }
-                    if app.expertMode {
-                        Button { showEditor = true } label: { Label("Werte anpassen", systemImage: "slider.horizontal.3") }
-                    }
+                    Button { showEditor = true } label: { Label("Profil dieses Filaments anpassen", systemImage: "slider.horizontal.3") }
+                        .accessibilityIdentifier("editFilament")
                 }
                 ForEach(grouped, id: \.0) { group in
                     Section(group.0) {

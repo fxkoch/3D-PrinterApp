@@ -55,6 +55,14 @@ extension PrintSettings {
         case "skirt_loops": handled = setInt(\.skirtLoops)
         case "prime_tower_width": handled = set(\.primeTowerWidth)
         case "prime_volume": handled = set(\.purgeVolume)
+        case "support_filament":
+            guard let v = double() else { handled = false; break }
+            supportSlot = v >= 1 ? Int(v) - 1 : nil
+            handled = true
+        case "support_interface_filament":
+            guard let v = double() else { handled = false; break }
+            supportInterfaceSlot = v >= 1 ? Int(v) - 1 : nil
+            handled = true
         case "spiral_mode": spiralVase = bool(); handled = true
         case "enable_prime_tower": primeTower = bool(); handled = true
         case "ironing_type": ironing = value != "no ironing"; handled = true

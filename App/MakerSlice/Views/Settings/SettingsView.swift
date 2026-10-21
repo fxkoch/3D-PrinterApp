@@ -12,8 +12,9 @@ struct SettingsView: View {
                     Toggle("Expertenmodus", isOn: $app.expertMode)
                         .accessibilityIdentifier("expertToggle")
                 } footer: {
-                    Text("Zeigt alle Slicer-Parameter und erlaubt, Filament-Werte im Detail anzupassen. Empfohlene Werte werden immer je Filament vorgeladen.")
+                    Text("Zeigt zusätzlich alle Slicer-Einstellungen mit Erklärungen, Filament-Werte, Cloud-Slicing und Gerätedetails. Ohne Expertenmodus bleibt die App bewusst einfach – die App wählt passende Werte selbst.")
                 }
+                if app.expertMode {
                 Section {
                     NavigationLink {
                         CloudSetupView()
@@ -36,6 +37,7 @@ struct SettingsView: View {
                     LabeledContent("Filamentprofile", value: "\(FilamentLibrary.all.count)")
                     LabeledContent("Hersteller", value: "\(FilamentLibrary.vendors.count)")
                     LabeledContent("Modelle in der Bibliothek", value: "\(app.library.items.count)")
+                }
                 }
                 Section("Über") {
                     LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–")
