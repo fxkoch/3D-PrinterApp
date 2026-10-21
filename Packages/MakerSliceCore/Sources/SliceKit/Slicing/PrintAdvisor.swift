@@ -107,10 +107,20 @@ public enum PrintAdvisor {
         // Too big for the printer.
         for (object, a) in zip(objects, analyses)
         where a.size.x > s.bedSize - 2 || a.size.y > s.bedSize - 2 || a.size.z > s.maxHeight {
+            // Often turning the object (diagonally or onto its side) is enough.
+            var fitsTurned = false
+            if !object.isMultiColor, let turn = BestOrientation.best(for: object, bedSize: s.bedSize, maxHeight: s.maxHeight,
+                                                                     limitXY: s.bedSize - 2, limitZ: s.maxHeight - 1) {
+                let size = object.transformed(turn).boundingBox.size
+                fitsTurned = BestOrientation.pieces(size: size, limitXY: s.bedSize - 2, limitZ: s.maxHeight - 1) == 1
+            }
             result.append(Recommendation(
-                id: "split-\(object.id)", title: "„\(object.name)“ ist zu groß",
-                detail: String(format: "%.0f × %.0f × %.0f mm passt nicht in den %@. Automatisch in Teile schneiden – mit Dübeln zum Zusammenstecken.",
-                               a.size.x, a.size.y, a.size.z, s.printer.displayName),
+                id: "split-\(object.id)", title: fitsTurned ? "„\(object.name)“ passt nur gedreht" : "„\(object.name)“ ist zu groß",
+                detail: fitsTurned
+                    ? String(format: "%.0f × %.0f × %.0f mm passt nicht – gedreht (schräg auf dem Druckbett oder auf der Seite) aber ohne Schnitt in den %@. Die App dreht es für dich.",
+                             a.size.x, a.size.y, a.size.z, s.printer.displayName)
+                    : String(format: "%.0f × %.0f × %.0f mm passt nicht in den %@. Automatisch in möglichst wenige Teile schneiden (das Teil wird dafür gedreht) – mit Dübeln zum Zusammenstecken.",
+                             a.size.x, a.size.y, a.size.z, s.printer.displayName),
                 icon: "scissors", severity: .warning, action: .autoSplit(objectID: object.id)))
         }
 

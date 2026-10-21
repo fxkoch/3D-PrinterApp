@@ -87,6 +87,15 @@ public enum MeshCutter {
     public static func autoSplit(_ object: ModelObject, bedSize: Double, maxHeight: Double,
                                  connector: ConnectorStyle = .dowels) throws -> [ModelObject] {
         guard !object.isMultiColor else { throw CutError.multiColor }
+        // Fits as it is, or fits when turned: no cut at all.
+        let fitXY = bedSize - 2, fitZ = maxHeight - 1
+        if BestOrientation.pieces(size: object.boundingBox.size, limitXY: fitXY, limitZ: fitZ) == 1 { return [object] }
+        if let turn = BestOrientation.best(for: object, bedSize: bedSize, maxHeight: maxHeight, limitXY: fitXY, limitZ: fitZ) {
+            var turned = object.transformed(turn)
+            let low = turned.boundingBox
+            turned = turned.transformed(.translation(Vec3(-low.min.x, -low.min.y, -low.min.z)))
+            if BestOrientation.pieces(size: turned.boundingBox.size, limitXY: fitXY, limitZ: fitZ) == 1 { return [turned] }
+        }
         // Connector pegs stick out of a cut face by their depth; without connectors only a thin margin is needed.
         let margin = connector == .none ? 2.0 : 8.0
         let usable = (x: bedSize - margin, y: bedSize - margin, z: maxHeight - 2)
