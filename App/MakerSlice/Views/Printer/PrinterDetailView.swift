@@ -130,6 +130,24 @@ struct PrinterDetailView: View {
             ForEach(Array(advice.steps.enumerated()), id: \.offset) { i, step in
                 Text("\(i + 1). \(step)").font(.footnote)
             }
+            HStack {
+                if advice.verdict != .discard, status?.state == .paused {
+                    Button {
+                        Task { await app.printers.perform(on: printer, "Druck fortgesetzt") { try await $0.resume() } }
+                    } label: { Label("Fortsetzen", systemImage: "play.fill") }
+                        .buttonStyle(.bordered)
+                }
+                if advice.verdict == .discard {
+                    Button(role: .destructive) { confirmCancel = true } label: { Label("Jetzt abbrechen", systemImage: "stop.fill") }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("recoveryCancel")
+                } else {
+                    Button(role: .destructive) { confirmCancel = true } label: { Label("Abbrechen", systemImage: "stop.fill") }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("recoveryCancel")
+                }
+            }
+            .font(.footnote)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -254,6 +254,8 @@ class Printer:
             self.bed[1] = first["max_bed"] or 60
             self.state = "printing"
             self.report("print", self.project())
+            if "reject" in (name or ""):
+                return -1  # like the real printer seen answering -1 although the job starts
         elif action == "pause":
             if self.state != "printing":
                 return 10006

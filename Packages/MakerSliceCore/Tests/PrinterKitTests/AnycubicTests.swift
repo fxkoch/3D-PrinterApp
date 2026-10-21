@@ -136,4 +136,32 @@ final class AnycubicTests: XCTestCase {
         XCTAssertEqual(c.model, "snapmakerU1")
         XCTAssertEqual(PrinterConnection(name: "K", host: "http://10.0.0.9:7125").hostOnly, "10.0.0.9")
     }
+
+    /// Real report of a Kobra S1 that is heating for a job: `project.state` is null, the top-level state says "busy".
+    func testJobStartingIsPrintingNotUnknown() throws {
+        let json = """
+        {"printerName":"Anycubic Kobra S1","project":{"remain_time":0,"curr_layer":0,"total_layers":0,"progress":0,"state":null,"print_status":6,
+         "filename":"Temperaturturm_0.20mm.gcode","pause":0,"project_type":2,"task_id":-1},
+         "last_project":{"state":"failed","print_status":3,"filename":"Temperaturturm_0.20mm.gcode","progress":100,"total_layers":280},
+         "model":"Anycubic Kobra S1","version":"2.7.2.7","state":"busy",
+         "temp":{"curr_hotbed_temp":68,"curr_nozzle_temp":146,"target_hotbed_temp":65,"target_nozzle_temp":190}}
+        """
+        let data = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        var s = PrinterStatus()
+        s.applyAnycubic(type: "info", data: data)
+        XCTAssertEqual(s.state, .printing, "the app must offer pause and cancel while a job starts")
+        XCTAssertEqual(s.fileName, "Temperaturturm_0.20mm.gcode")
+        XCTAssertEqual(s.taskID, "-1")
+        XCTAssertEqual(s.tools.first?.target, 190)
+    }
+
+    func testFreePrinterWithOldFailedJobIsStandby() throws {
+        let json = """
+        {"project":{"state":null,"pause":0,"task_id":-1,"filename":"alt.gcode"},"state":"free","temp":{"curr_hotbed_temp":24,"curr_nozzle_temp":24,"target_hotbed_temp":0,"target_nozzle_temp":0}}
+        """
+        let data = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        var s = PrinterStatus()
+        s.applyAnycubic(type: "info", data: data)
+        XCTAssertEqual(s.state, .standby)
+    }
 }

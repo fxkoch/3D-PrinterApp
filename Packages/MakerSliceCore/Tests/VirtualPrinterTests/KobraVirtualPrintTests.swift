@@ -127,6 +127,23 @@ final class KobraVirtualPrintTests: XCTestCase {
         let done = try await waitFor(client, "finished", timeout: 120) { $0.state == .complete }
         XCTAssertEqual(done.fileName, "makerslice_short.gcode")
     }
+
+    /// The real printer answered the start command with code -1 although it started the job: no error must reach the user.
+    func testStartAnsweredWithMinusOneButRunningIsNoError() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        let settings = PrintSettings(printer: .kobraS1)
+        let objects = PlateArranger.arrange([ModelObject(name: "Würfel", mesh: box(10, 10, 4))], bedSize: settings.bedSize)!
+        let job = try SliceJob(name: "Kurz", objects: objects, settings: settings).run()
+        _ = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
+        try await client.upload(gcode: Data(job.gcode.utf8), fileName: "reject_minus_one.gcode", startPrint: true,
+                                mapping: [SlotMapping(tool: 0, slot: 0, materialType: "PLA", color: [255, 255, 255])])
+        let events = try await client.recentEvents()
+        XCTAssertTrue(events.contains { $0.message.contains("Antwortcode -1") }, "the odd answer is logged for diagnosis")
+        _ = try await waitFor(client, "printing") { $0.state == .printing || $0.state == .complete }
+        try await client.cancel()   // virtual printer only
+    }
     #endif
 
     func box(_ x: Double, _ y: Double, _ z: Double) -> TriangleMesh {

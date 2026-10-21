@@ -196,7 +196,7 @@ extension PrinterStatus {
             if let v = num(p["remain_time"]) { reportedRemainingSeconds = v * 60 }
             if let v = num(p["print_time"]) { printDuration = v }
             if let f = p["filename"] as? String, !f.isEmpty { fileName = f }
-            if let t = p["taskid"] { taskID = "\(t)" }
+            if let t = p["taskid"] ?? p["task_id"], !(t is NSNull) { taskID = "\(t)" }
             if let st = p["state"] as? String { state = Self.anycubicState(st, pause: num(p["pause"])) }
         }
         switch type {
@@ -208,6 +208,11 @@ extension PrinterStatus {
             if let v = num(data["aux_fan_speed_pct"]) { auxFanPercent = v }
             if let project = data["project"] as? [String: Any], !project.isEmpty {
                 applyProject(project)
+                // While a job starts (heating, leveling) the printer reports `project.state: null` and only the
+                // top-level state ("busy"); without this the app would show "unknown" and offer no cancel button.
+                if project["state"] == nil || project["state"] is NSNull, let top = data["state"] as? String {
+                    state = Self.anycubicState(top, pause: num(project["pause"]))
+                }
             } else if (data["state"] as? String) == "free" {
                 if state == .printing || state == .paused || state == .unknown { state = .standby }
                 if let last = data["last_project"] as? [String: Any], let st = last["state"] as? String {

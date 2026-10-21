@@ -15,7 +15,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     private var credentials: AnycubicHandshake.Credentials?
     private var connected = false
     private var connAck: CheckedContinuation<Void, Error>?
-    private var responseWaiters: [String: CheckedContinuation<Int, Error>] = [:]
+    private var responseWaiters: [String: CheckedContinuation<(code: Int, message: String), Error>] = [:]
     private var cachedStatus = PrinterStatus()
     private var infoReceived = false
     private var uploadURL: String?
@@ -126,7 +126,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     }
 
     private func handleDisconnect(_ reason: String?, from conn: NWConnection) {
-        let (wasConnected, ack, waiters): (Bool, CheckedContinuation<Void, Error>?, [CheckedContinuation<Int, Error>]) = locked {
+        let (wasConnected, ack, waiters): (Bool, CheckedContinuation<Void, Error>?, [CheckedContinuation<(code: Int, message: String), Error>]) = locked {
             // A replaced connection reporting late must not tear down the current one.
             guard mqtt === conn else { return (false, nil, []) }
             let w = connected
@@ -206,8 +206,12 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         guard let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else { return }
         if topic.hasSuffix("/response") {
             if let msgid = json["msgid"] as? String {
-                let waiter: CheckedContinuation<Int, Error>? = locked { responseWaiters.removeValue(forKey: msgid) }
-                waiter?.resume(returning: Int(jsonNumber(json["code"]) ?? -1))
+                let waiter: CheckedContinuation<(code: Int, message: String), Error>? = locked { responseWaiters.removeValue(forKey: msgid) }
+                let code = Int(jsonNumber(json["code"]) ?? -1)
+                if code != 0 && code != 200 {
+                    log(.warning, "Antwort des Druckers: \(String(decoding: payload.prefix(600), as: UTF8.self))")
+                }
+                waiter?.resume(returning: (code, json["msg"] as? String ?? ""))
             }
             return
         }
@@ -269,9 +273,18 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
 
     /// Publishes and waits for the printer's acknowledgement on /response.
     private func command(type: String, action: String, data: Any?, topic: String? = nil) async throws {
+        let answer = try await commandResult(type: type, action: action, data: data, topic: topic)
+        if answer.code != 0 && answer.code != 200 {
+            log(.error, "\(type)/\(action) abgelehnt (Code \(answer.code)\(answer.message.isEmpty ? "" : ": \(answer.message)"))")
+            throw PrinterError.http(answer.code, "Befehl \(action) abgelehnt\(answer.message.isEmpty ? "" : " (\(answer.message))")")
+        }
+    }
+
+    /// Like `command`, but hands back the printer's answer instead of throwing when it says no.
+    private func commandResult(type: String, action: String, data: Any?, topic: String? = nil) async throws -> (code: Int, message: String) {
         try await ensureConnected()
         let msgid = UUID().uuidString.lowercased()
-        let code: Int = try await withCheckedThrowingContinuation { cont in
+        let answer: (code: Int, message: String) = try await withCheckedThrowingContinuation { cont in
             locked { responseWaiters[msgid] = cont }
             let message: [String: Any] = ["type": type, "action": action, "timestamp": Int64(Date().timeIntervalSince1970 * 1000),
                                           "msgid": msgid, "data": data ?? NSNull()]
@@ -279,14 +292,24 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
                 send(MQTTCodec.publish(topic: t, payload: body))
             }
             queue.asyncAfter(deadline: .now() + 10) { [weak self] in
-                let waiter: CheckedContinuation<Int, Error>? = self?.locked { self?.responseWaiters.removeValue(forKey: msgid) }
+                let waiter: CheckedContinuation<(code: Int, message: String), Error>? = self?.locked { self?.responseWaiters.removeValue(forKey: msgid) }
                 waiter?.resume(throwing: PrinterError.unreachable("Keine Bestätigung vom Drucker"))
             }
         }
-        if code != 0 && code != 200 {
-            log(.error, "\(type)/\(action) abgelehnt (Code \(code))")
-            throw PrinterError.http(code, "Befehl \(action) abgelehnt")
+        return answer
+    }
+
+    /// True when the printer really is working on `name` (it can answer a start command with an error code and still start).
+    private func startedPrinting(_ name: String) async -> Bool {
+        for _ in 0..<20 {
+            queryAll()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            let s = locked { cachedStatus }
+            let sameFile = s.fileName.map { $0.hasPrefix((name as NSString).deletingPathExtension) || name.hasPrefix(($0 as NSString).deletingPathExtension) } ?? false
+            let heating = (s.tools.first?.target ?? 0) > 0 || s.bed.target > 0
+            if s.state == .printing, sameFile || heating { return true }
         }
+        return false
     }
 
     // MARK: - PrinterDriver
@@ -339,7 +362,14 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         let payload = AnycubicHandshake.startPayload(fileName: name, md5: md5, size: gcode.count, mapping: mapping,
                                                      msgID: UUID().uuidString.lowercased(),
                                                      now: Int64(Date().timeIntervalSince1970 * 1000))
-        try await command(type: "print", action: "start", data: payload["data"], topic: slicerTopic("print"))
+        let answer = try await commandResult(type: "print", action: "start", data: payload["data"], topic: slicerTopic("print"))
+        if answer.code != 0 && answer.code != 200 {
+            log(.warning, "print/start: Antwortcode \(answer.code)\(answer.message.isEmpty ? "" : " (\(answer.message))") – prüfe, ob der Druck trotzdem läuft")
+            guard await startedPrinting(name) else {
+                log(.error, "print/start abgelehnt (Code \(answer.code))")
+                throw PrinterError.http(answer.code, "Der Drucker hat den Start abgelehnt\(answer.message.isEmpty ? "" : " (\(answer.message))"). Läuft noch ein anderer Auftrag oder ist einer pausiert?")
+            }
+        }
         log(.info, "Druck von \(name) gestartet")
     }
 
