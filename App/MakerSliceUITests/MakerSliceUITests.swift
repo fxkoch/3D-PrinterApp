@@ -100,6 +100,24 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("61-Profil-uebernommen")
     }
 
+    /// Several plates: objects that don't fit spill onto new plates; plates can be added and switched.
+    func testMultiplePlates() {
+        app.launchArguments += ["-uiTestPlates"]
+        app.launch()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20))
+        for plate in 1...3 {
+            XCTAssertTrue(app.buttons["plate-\(plate)"].exists, "plate \(plate) should exist")
+        }
+        XCTAssertFalse(app.buttons["plate-4"].exists, "the two small cubes share a plate with a big one")
+        XCTAssertTrue(app.buttons["sliceAllButton"].exists)
+        snapshot("70-Mehrere-Platten")
+        app.buttons["addPlate"].tap()
+        XCTAssertTrue(app.buttons["plate-4"].waitForExistence(timeout: 5))
+        app.buttons["plate-2"].tap()
+        XCTAssertTrue(app.staticTexts["Objekte auf Platte 2"].waitForExistence(timeout: 5))
+        snapshot("71-Platte-2")
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

@@ -71,7 +71,7 @@ final class AppModel {
             printers.add(PrinterConnection(name: "Virtueller Kobra S1", host: "127.0.0.1",
                                            model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
         }
-        if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") || ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") {
+        if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") || ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") || ProcessInfo.processInfo.arguments.contains("-uiTestPlates") {
             loadSample()
         }
     }
@@ -160,6 +160,14 @@ final class AppModel {
             load(name: "Temperaturturm") {
                 ImportedModel(objects: [ModelObject(name: "Turm", mesh: SampleModels.cube(20))],
                               projectSettings: ProjectSettings.fromConfig(Data(config.utf8), layerGCodeXML: Data(xml.utf8)))
+            }
+            return
+        }
+        if ProcessInfo.processInfo.arguments.contains("-uiTestPlates") {
+            // Three large cubes (only one fits per plate) and two small ones: tests the automatic distribution.
+            load(name: "Plattentest") {
+                ImportedModel(objects: (0..<3).map { ModelObject(name: "Großer Würfel \($0 + 1)", mesh: SampleModels.cube(150)) }
+                              + (0..<2).map { ModelObject(name: "Kleiner Würfel \($0 + 1)", mesh: SampleModels.cube(20)) })
             }
             return
         }

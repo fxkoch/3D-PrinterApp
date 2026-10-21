@@ -15,6 +15,7 @@ struct PrepareView: View {
     @State private var showAdvice = false
     @State private var showPrePrint = false
     @State private var printAfterSlice = false
+    @State private var showFileImporter = false
 
     struct SlotSelection: Identifiable {
         let id: Int
@@ -28,6 +29,7 @@ struct PrepareView: View {
                     .frame(height: 280)
                     .background(Color(.secondarySystemBackground))
                     .overlay(alignment: .topTrailing) { previewToggle }
+                plateStrip
                 ScrollView {
                     VStack(spacing: Theme.spacing) {
                         if let warning = project.warning {
@@ -75,6 +77,15 @@ struct PrepareView: View {
             .sheet(isPresented: Binding(get: { project.profileReport != nil }, set: { if !$0 { project.dismissProfile() } })) {
                 if let report = project.profileReport { ProjectProfileView(project: project, report: report) }
             }
+            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: Self.modelTypes, allowsMultipleSelection: true) { result in
+                guard case .success(let urls) = result else { return }
+                for url in urls {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    let data = try? Data(contentsOf: url)
+                    if scoped { url.stopAccessingSecurityScopedResource() }
+                    if let data { addModel(data: data, fileName: url.lastPathComponent) }
+                }
+            }
             .sheet(isPresented: $showAdvice) {
                 RecommendationsView(project: project, mode: .review)
             }
@@ -97,6 +108,71 @@ struct PrepareView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Plates
+
+    private static let modelTypes: [UTType] = [
+        UTType(filenameExtension: "3mf") ?? .data,
+        UTType(filenameExtension: "stl") ?? .data,
+        UTType(filenameExtension: "obj") ?? .data,
+    ]
+
+    private func addModel(data: Data, fileName: String) {
+        Task {
+            let model = await Task.detached { try? ModelImporter.load(data: data, fileName: fileName) }.value
+            if let model { project.addImported(model) } else { app.alert = "„\(fileName)“ konnte nicht gelesen werden." }
+        }
+    }
+
+    private func addFromLibrary(_ item: LibraryItem) {
+        let url = app.library.url(for: item)
+        addModel(data: (try? Data(contentsOf: url)) ?? Data(), fileName: item.fileName)
+    }
+
+    /// One chip per plate; tap to switch, "+" adds an empty plate.
+    private var plateStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(1...project.plateCount, id: \.self) { plate in
+                    plateChip(plate)
+                }
+                Button { project.addPlate() } label: {
+                    Image(systemName: "plus").font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                }
+                .accessibilityLabel("Platte hinzufügen")
+                .accessibilityIdentifier("addPlate")
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+        }
+        .background(Color(.secondarySystemBackground))
+    }
+
+    private func plateChip(_ plate: Int) -> some View {
+        let selected = plate == project.currentPlate
+        let count = project.plates[plate - 1].count
+        var sliced = false
+        if case .done = project.state(ofPlate: plate) { sliced = true }
+        return Button { project.currentPlate = plate } label: {
+            HStack(spacing: 4) {
+                Text("Platte \(plate)")
+                Text("\(count)").foregroundStyle(selected ? .white.opacity(0.8) : .secondary)
+                if sliced { Image(systemName: "checkmark.circle.fill").imageScale(.small) }
+            }
+            .font(.subheadline.weight(selected ? .semibold : .regular))
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .background(selected ? Color.accentColor : Color(.tertiarySystemFill), in: Capsule())
+        }
+        .contextMenu {
+            if count == 0, project.plateCount > 1 {
+                Button(role: .destructive) { project.removePlate(plate) } label: { Label("Platte entfernen", systemImage: "trash") }
+            }
+        }
+        .accessibilityIdentifier("plate-\(plate)")
     }
 
     // MARK: - Preview
@@ -245,7 +321,7 @@ struct PrepareView: View {
     }
 
     private var objectsPanel: some View {
-        Panel(title: "Objekte", systemImage: "cube") {
+        Panel(title: project.plateCount > 1 ? "Objekte auf Platte \(project.currentPlate)" : "Objekte", systemImage: "cube") {
             ForEach(project.objects) { object in
                 ObjectRow(object: object, filaments: project.settings.filaments, toolCount: project.settings.machine.toolCount,
                           bedSize: project.settings.bedSize, maxHeight: project.settings.maxHeight) { tool in
@@ -255,6 +331,14 @@ struct PrepareView: View {
                     Button { project.layFlat(object.id) } label: { Label("Flach hinlegen", systemImage: "arrow.down.to.line") }
                     Button { project.rotate(object.id, degrees: 90) } label: { Label("90° drehen", systemImage: "rotate.right") }
                     Button { project.duplicate(object.id) } label: { Label("Duplizieren", systemImage: "plus.square.on.square") }
+                    if project.plateCount > 1 {
+                        Menu {
+                            ForEach(1...project.plateCount, id: \.self) { plate in
+                                Button("Platte \(plate)") { project.move(object.id, toPlate: plate) }
+                                    .disabled(plate == project.currentPlate)
+                            }
+                        } label: { Label("Auf Platte verschieben", systemImage: "rectangle.on.rectangle") }
+                    }
                     Menu {
                         ForEach([0.5, 0.8, 1.25, 1.5, 2.0], id: \.self) { f in
                             Button("\(Int(f * 100)) %") { project.scale(object.id, factor: f) }
@@ -266,6 +350,23 @@ struct PrepareView: View {
             }
             Button { project.autoArrange() } label: { Label("Automatisch anordnen", systemImage: "square.grid.3x3") }
                 .font(.subheadline)
+            if project.plateCount > 1 {
+                Button { project.redistributeAll() } label: { Label("Alle Platten neu verteilen", systemImage: "rectangle.grid.2x2") }
+                    .font(.subheadline)
+                    .accessibilityIdentifier("redistributeAll")
+            }
+            Menu {
+                Button { showFileImporter = true } label: { Label("Aus Dateien …", systemImage: "folder") }
+                if !app.library.items.isEmpty {
+                    Menu {
+                        ForEach(app.library.items) { item in
+                            Button(item.name) { addFromLibrary(item) }
+                        }
+                    } label: { Label("Aus der Bibliothek", systemImage: "books.vertical") }
+                }
+            } label: { Label("Modell hinzufügen", systemImage: "plus.circle") }
+                .font(.subheadline)
+                .accessibilityIdentifier("addModel")
         }
     }
 
@@ -350,6 +451,15 @@ struct PrepareView: View {
                 .controlSize(.large)
                 .disabled(project.objects.isEmpty)
                 .accessibilityIdentifier("sliceButton")
+                if project.filledPlates.count > 1 {
+                    Button {
+                        project.sliceAll(cloud: app.useCloudSlicer ? app.cloud : nil)
+                    } label: {
+                        Label("Alle \(project.filledPlates.count) Platten slicen", systemImage: "square.stack.3d.down.right").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("sliceAllButton")
+                }
             case .slicing(let phase, let fraction):
                 HStack {
                     ProgressView(value: fraction) { Text(phase).font(.caption) }
@@ -361,7 +471,8 @@ struct PrepareView: View {
             case .done(let output):
                 SummaryRow(estimate: output.estimate)
                     .accessibilityIdentifier("sliceSummary")
-                Text("Gesliced mit \(output.engine)").font(.caption2).foregroundStyle(.secondary)
+                Text("Gesliced mit \(output.engine)\(project.plateCount > 1 ? " · Platte \(project.currentPlate) von \(project.plateCount)" : "")")
+                    .font(.caption2).foregroundStyle(.secondary)
                 printButtons
             }
         }
