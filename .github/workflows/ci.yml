@@ -1,0 +1,122 @@
+name: CI
+
+# Linux jobs (core tests, virtual printers) run on every push – they count 1:1 against the minutes.
+# The iOS job needs macOS, which counts ten-fold on GitHub's runners. It only runs
+#   - when started by hand (Actions → CI → Run workflow), on pull requests,
+#   - or when the commit message contains [ios].
+# With the repository variable MAC_RUNNER=self-hosted it runs on your own Mac instead (free, see TESTING.md).
+on:
+  push:
+    branches-ignore: [slice-jobs]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push cancels the run of the previous one (saves macOS minutes).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: Core tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+      - name: Test MakerSliceCore
+        working-directory: Packages/MakerSliceCore
+        run: swift test
+
+  virtual-printers:
+    name: Virtual prints (U1 + Kobra S1)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Start virtual Snapmaker U1 (u1sim + Snapmaker Moonraker)
+        run: WORK=$RUNNER_TEMP/u1 tools/virtualprinters/start_u1.sh
+      - name: Start virtual Kobra S1
+        run: |
+          nohup python3 tools/virtualprinters/kobra_s1_sim.py --speed 30 > $RUNNER_TEMP/kobra.log 2>&1 &
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:18910/info >/dev/null && break; sleep 1; done
+      - name: Virtual print tests
+        working-directory: Packages/MakerSliceCore
+        env:
+          U1_HOST: 127.0.0.1
+          KOBRA_HOST: 127.0.0.1
+        run: swift test --filter VirtualPrinterTests
+      - name: Simulator logs
+        if: failure()
+        run: tail -60 $RUNNER_TEMP/u1/moonraker.log $RUNNER_TEMP/u1/u1sim.log $RUNNER_TEMP/kobra.log || true
+
+  ios-build:
+    name: iOS app build
+    if: >-
+      github.event_name != 'push' || vars.MAC_RUNNER != '' ||
+      contains(github.event.head_commit.message, '[ios]')
+    runs-on: ${{ vars.MAC_RUNNER || 'macos-15' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Generate project
+        run: xcodegen
+      - name: Build for simulator
+        run: |
+          set +e
+          xcodebuild build \
+            -project MakerSlice.xcodeproj \
+            -scheme MakerSlice \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO > build.log 2>&1
+          status=$?
+          echo "=== errors ==="
+          grep -E "error:|fatal error" build.log | sort -u | head -150
+          echo "=== tail ==="
+          tail -15 build.log
+          exit $status
+      - name: Start virtual Kobra S1
+        run: |
+          pkill -f "[k]obra_s1_sim.py" || true   # a self-hosted Mac may still run one from an earlier job
+          nohup python3 tools/virtualprinters/kobra_s1_sim.py --speed 30 --duration 1800 > kobra.log 2>&1 &
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:18910/info >/dev/null && break; sleep 1; done
+      - name: UI tests on simulator
+        run: |
+          set +e
+          DEVICE=$(xcrun simctl list devices available | grep -E "iPhone 1[5-7]( Pro)? \(" | head -1 | sed -E 's/^ *(iPhone[^(]*) \(.*/\1/' | xargs)
+          echo "Using simulator: $DEVICE"
+          xcodebuild test \
+            -project MakerSlice.xcodeproj \
+            -scheme MakerSlice \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            -resultBundlePath UITests.xcresult \
+            CODE_SIGNING_ALLOWED=NO > test.log 2>&1
+          status=$?
+          grep -E "error:|Test Case .*(passed|failed)|XCTAssert|Executed" test.log | head -80
+          tail -20 test.log
+          mkdir -p screenshots
+          xcrun xcresulttool export attachments --path UITests.xcresult --output-path screenshots || true
+          ls screenshots | head -50
+          exit $status
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots
+          if-no-files-found: ignore
+      - name: Test core on macOS (incl. Kobra LAN client against the virtual printer)
+        working-directory: Packages/MakerSliceCore
+        env:
+          KOBRA_HOST: 127.0.0.1
+        run: swift test
+      - name: Kobra simulator log
+        if: failure()
+        run: tail -60 kobra.log || true
