@@ -56,10 +56,6 @@ public enum FEMAdvisor {
         let w0 = settings.wallLoops, i0 = settings.infillDensity
         let quarter = Double.pi / 2
         let rotations: [(Transform3D, String)] = [(.rotationX(quarter), "um 90° um die X-Achse gekippt"), (.rotationY(quarter), "um 90° um die Y-Achse gekippt")]
-        let stronger = FEMMaterial.catalog.filter { !$0.isFlexible && $0.id != material.id && $0.strengthXY * $0.zStrengthFactor > material.strengthXY * material.zStrengthFactor * 1.1 }
-            .sorted { $0.strengthXY * $0.zStrengthFactor < $1.strengthXY * $1.zStrengthFactor }
-        let materialCandidates = Array(stronger.prefix(3))
-
         var out: [FEMSuggestion] = []
         func make(_ goal: FEMSuggestion.Goal, _ v: Variant, _ r: FEMResult, _ title: String, _ detail: String) -> FEMSuggestion {
             FEMSuggestion(goal: goal, title: title, detail: detail, wallLoops: v.walls, infillDensity: v.infill, rotation: v.rotation?.0,
@@ -75,7 +71,6 @@ public enum FEMAdvisor {
         if i0 < 0.95 { strongerVariants.append((Variant(walls: w0, infill: min(denser, 1)), "Dichtere Füllung", "Füllung \(percent(min(denser, 1))) statt \(percent(i0)).")) }
         strongerVariants.append((Variant(walls: w0 + 2, infill: min(max(i0, 0.3), 1)), "Mehr Wände und Füllung", "\(w0 + 2) Wände und mindestens 30 % Füllung."))
         for r in rotations { strongerVariants.append((Variant(walls: w0, infill: i0, rotation: r, material: nil), "Anders drucken", "Teil \(r.1): die Schichten laufen dann anders zur Kraft.")) }
-        for m in materialCandidates { strongerVariants.append((Variant(walls: w0, infill: i0, rotation: nil, material: m), "Material \(m.name)", "\(m.name) statt \(material.name): fester, besonders zwischen den Schichten.")) }
         let lighterWalls = [w0, w0 + 1, w0 + 2], lighterInfill = [0.05, 0.10, 0.20].filter { $0 < i0 - 0.001 }
         total = Double(strongerVariants.count + lighterWalls.count * lighterInfill.count)
 

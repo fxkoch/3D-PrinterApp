@@ -287,7 +287,7 @@ public enum SettingsHelp {
         // MARK: Machine
         .plateType: SettingHelp(
             "Druckplatte", "Bestimmt die Betttemperatur je Filament.",
-            tip: "Strukturiertes PEI: universell, PETG löst sich gut. Glattes PEI: glänzende Unterseite, PETG kann die Beschichtung beschädigen."),
+            tip: "Strukturiertes PEI: universell, PETG löst sich gut. Glattes PEI: glänzende Unterseite, PETG kann die Beschichtung beschädigen. Cool Plate: PLA bei niedriger Temperatur, löst sich leicht. Engineering Plate: für ABS, ASA, PC und Nylon, mit Klebestift. Die Z-Offset-Einstellung des Druckers bleibt unverändert."),
         .enableTimelapse: SettingHelp(
             "Zeitraffer", "Der U1 nimmt pro Schicht ein Kamerabild auf.",
             decrease: "Spart wenige Sekunden pro Schicht."),

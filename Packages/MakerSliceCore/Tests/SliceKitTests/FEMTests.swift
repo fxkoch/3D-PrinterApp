@@ -159,4 +159,63 @@ final class FEMTests: XCTestCase {
         XCTAssertLessThan(lighter.massRatio, 0.97)
         XCTAssertGreaterThanOrEqual(lighter.safetyRatio, 0.95)
     }
+
+    /// Foot, thin neck and head stacked on each other (no overlaps).
+    private func neckPart() -> TriangleMesh {
+        var m = Fixtures.box(24, 24, 8)
+        m.append(Fixtures.box(6, 6, 14, at: Vec3(9, 9, 8)))
+        m.append(Fixtures.box(24, 24, 8, at: Vec3(0, 0, 22)))
+        return m
+    }
+
+    private func edgeUse(_ mesh: TriangleMesh) -> [UInt64: Int] {
+        var use: [UInt64: Int] = [:]
+        for t in 0..<mesh.triangleCount { for e in 0..<3 {
+            let a = mesh.indices[t * 3 + e], b = mesh.indices[t * 3 + (e + 1) % 3]
+            use[UInt64(min(a, b)) << 32 | UInt64(max(a, b)), default: 0] += 1
+        } }
+        return use
+    }
+
+    func testDiscRegionIsRoundPatchWithNormal() {
+        let disc = SurfaceRegion.disc(center: Vec3(5, 5, 10), normal: Vec3(0, 0, 1), radius: 3, name: "Last")
+        XCTAssertEqual(disc.area, Double.pi * 9, accuracy: 1.5)
+        XCTAssertEqual(disc.normal.z, 1, accuracy: 1e-9)
+    }
+
+    func testThickeningKeepsMeshClosedAndShiftsLittle() {
+        let mesh = Fixtures.box(20, 20, 20)
+        let thick = MeshReinforcer.thicken(mesh, spots: [(Vec3(10, 10, 20), 6, 1.0)])
+        XCTAssertGreaterThan(thick.triangleCount, mesh.triangleCount)
+        XCTAssertTrue(edgeUse(thick).values.allSatisfy { $0 == 2 }, "every edge belongs to exactly two triangles")
+        XCTAssertGreaterThan(thick.volume, mesh.volume)
+        let box = thick.boundingBox
+        XCTAssertLessThan(box.max.z, 21.01)
+        XCTAssertGreaterThan(box.max.z, 20.5)
+    }
+
+    func testScanFindsTheThinNeck() throws {
+        let pla = FEMMaterial.matching(filamentType: "PLA")
+        let report = try FEMWeakSpots.scan(mesh: neckPart(), material: pla, setup: FEMPrintSetup(wallThickness: 1.2, topThickness: 1, bottomThickness: 1, infillDensity: 0.2),
+                                           options: FEMOptions(targetElements: 6000))
+        let first = try XCTUnwrap(report.spots.first)
+        XCTAssertGreaterThan(first.location.z, 7.5)
+        XCTAssertLessThan(first.location.z, 22.5, "the neck gives way first")
+        XCTAssertEqual(first.thickness, 6, accuracy: 2)
+        XCTAssertTrue(first.reason.contains("Dünne"))
+    }
+
+    func testReinforcementMakesTheNeckStrongerWithSmallShift() throws {
+        let pla = FEMMaterial.matching(filamentType: "PLA")
+        let setup = FEMPrintSetup(wallThickness: 1.2, topThickness: 1, bottomThickness: 1, infillDensity: 0.2)
+        let fix = try XCTUnwrap(SurfaceRegion.bottomFace(of: neckPart()))
+        let top = try XCTUnwrap(SurfaceRegion.topFace(of: neckPart()))
+        let lc = FEMLoadCase(fixed: [fix], loads: [.init(region: top, force: Vec3(15, 0, 0))])
+        let result = try FEMWeakSpots.reinforce(mesh: neckPart(), material: pla, setup: setup, loadCase: lc, options: FEMOptions(targetElements: 6000))
+        let r = try XCTUnwrap(result, "a thicker neck must be found")
+        XCTAssertGreaterThanOrEqual(r.safetyRatio, 1.05)
+        XCTAssertLessThanOrEqual(r.maxShift, 1.5)
+        XCTAssertGreaterThan(r.massRatio, 1, "material is added")
+        XCTAssertLessThan(r.massRatio, 1.5)
+    }
 }

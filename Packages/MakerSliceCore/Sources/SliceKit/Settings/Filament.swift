@@ -77,7 +77,13 @@ public struct Filament: Codable, Hashable, Sendable, Identifiable {
     public func bedTemp(for plate: PlateType, firstLayer: Bool) -> Int {
         switch plate {
         case .texturedPEI: return firstLayer ? firstLayerBedTemp : bedTemp
-        case .highTemp: return smoothPlateBedTemp
+        case .highTemp, .engineering: return smoothPlateBedTemp
+        case .coolPlate:
+            // Cool plates need less heat for PLA/TPU and PETG; ABS/ASA/PC/PA stick better on the warm plates anyway.
+            let t = type.uppercased()
+            if t.hasPrefix("PLA") || t.hasPrefix("TPU") || t.hasPrefix("PVA") { return max(30, smoothPlateBedTemp - 25) }
+            if t.hasPrefix("PETG") || t.hasPrefix("PET") { return max(40, smoothPlateBedTemp - 10) }
+            return smoothPlateBedTemp
         }
     }
 

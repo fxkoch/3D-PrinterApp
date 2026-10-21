@@ -96,13 +96,14 @@ struct PrinterDetailView: View {
                 }
                 Spacer(minLength: 0)
             }
-            if s.state == .printing || s.state == .paused {
+            if let advice = PrintRecovery.advice(for: s) { recoveryCard(advice) }
+            if s.state == .printing || s.state == .paused || s.state == .error {
                 HStack {
                     if s.state == .printing {
                         Button {
                             Task { await app.printers.perform(on: printer, "Druck pausiert") { try await $0.pause() } }
                         } label: { Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity) }
-                    } else {
+                    } else if s.state == .paused {
                         Button {
                             Task { await app.printers.perform(on: printer, "Druck fortgesetzt") { try await $0.resume() } }
                         } label: { Label("Fortsetzen", systemImage: "play.fill").frame(maxWidth: .infinity) }
@@ -114,6 +115,26 @@ struct PrinterDetailView: View {
                 .buttonStyle(.bordered)
             }
         }
+    }
+
+    /// Whether resuming makes sense after a pause or error, with the steps to take first.
+    private func recoveryCard(_ advice: PrintRecovery) -> some View {
+        let (color, icon): (Color, String) = switch advice.verdict {
+        case .resume: (.green, "play.circle")
+        case .checkFirst: (.orange, "exclamationmark.circle")
+        case .discard: (.red, "xmark.octagon")
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            Label(advice.title, systemImage: icon).font(.headline).foregroundStyle(color)
+            ForEach(advice.reasons, id: \.self) { Text($0).font(.footnote).foregroundStyle(.secondary) }
+            ForEach(Array(advice.steps.enumerated()), id: \.offset) { i, step in
+                Text("\(i + 1). \(step)").font(.footnote)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityIdentifier("recoveryAdvice")
     }
 
     private func temperaturePanel(_ s: PrinterStatus) -> some View {

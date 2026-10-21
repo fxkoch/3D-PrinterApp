@@ -39,11 +39,15 @@ public enum SupportMode: String, Codable, CaseIterable, Sendable, Identifiable {
 public enum PlateType: String, Codable, CaseIterable, Sendable, Identifiable {
     case texturedPEI = "Textured PEI Plate"
     case highTemp = "High Temp Plate"
+    case coolPlate = "Cool Plate"
+    case engineering = "Engineering Plate"
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
         case .texturedPEI: return "Strukturierte PEI-Platte"
         case .highTemp: return "Glatte PEI-Platte"
+        case .coolPlate: return "Cool Plate (glatt, kalt)"
+        case .engineering: return "Engineering Plate"
         }
     }
 }

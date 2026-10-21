@@ -65,7 +65,7 @@ public struct FEMResult: Sendable {
     // Fields for the picture.
     let grid: VoxelGrid
     /// Failure index per cube (0 = empty), index like the grid.
-    let failure: [Float]
+    var failure: [Float]
     /// Stress per solid cube: σx, σy, σz, τxy, τyz, τzx (MPa), same order as `solidIndex`.
     let stress: [Float]
     let solidIndex: [Int32]

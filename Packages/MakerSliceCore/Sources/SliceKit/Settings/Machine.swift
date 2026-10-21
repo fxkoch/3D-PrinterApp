@@ -44,12 +44,12 @@ public struct MachineProfile: Equatable, Sendable {
 
     public static let snapmakerU1 = MachineProfile(
         model: .snapmakerU1, bedSize: 270, maxHeight: 270, toolCount: 4, multiMaterial: .toolChanger,
-        filamentScope: "u1", supportsPlateTypes: [.texturedPEI, .highTemp], slotLabel: "T"
+        filamentScope: "u1", supportsPlateTypes: PlateType.allCases, slotLabel: "T"
     )
 
     public static let kobraS1 = MachineProfile(
         model: .kobraS1, bedSize: 250, maxHeight: 250, toolCount: 4, multiMaterial: .filamentSwitcher,
-        filamentScope: "kobraS1", supportsPlateTypes: [.texturedPEI], slotLabel: "Slot "
+        filamentScope: "kobraS1", supportsPlateTypes: PlateType.allCases, slotLabel: "Slot "
     )
 
     /// Process defaults from "0.20mm Standard" of the respective Orca profile.
