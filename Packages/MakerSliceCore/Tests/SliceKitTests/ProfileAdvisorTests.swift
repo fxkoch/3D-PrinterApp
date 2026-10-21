@@ -68,4 +68,15 @@ final class ProfileAdvisorTests: XCTestCase {
             XCTAssertFalse(option.summary.isEmpty, "\(option.key) has no summary")
         }
     }
+
+    func testZipOfModelsIsUnpacked() throws {
+        let stl = Data("solid x\nendsolid x\n".utf8)
+        let zip = ZipArchive.write([
+            ("Würfel/cube.stl", stl), ("Würfel/readme.txt", Data("hi".utf8)),
+            ("__MACOSX/Würfel/._cube.stl", stl), ("Würfel/part 2.STL", stl),
+        ])
+        let files = try XCTUnwrap(ModelArchive.modelFiles(in: zip))
+        XCTAssertEqual(files.map(\.name), ["cube.stl", "part 2.STL"])
+        XCTAssertNil(ModelArchive.modelFiles(in: ThreeMFWriter.write([ModelObject(name: "a", mesh: Fixtures.box(1, 1, 1))])), "a 3MF is one model")
+    }
 }

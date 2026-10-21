@@ -396,6 +396,12 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         }
     }
 
+    /// Starts the printer's camera so `cameraStreamURL` (FLV over HTTP) delivers video. Does not touch the print.
+    public func startCamera() async throws { try await command(type: "video", action: "startCapture", data: nil) }
+
+    /// Stops the camera again.
+    public func stopCamera() async throws { try await command(type: "video", action: "stopCapture", data: nil) }
+
     /// Latest raw JSON report per message type (info, tempature, fan, light, …) – for diagnosing parser differences.
     public func latestRawReports() -> [String: Data] { locked { rawReports } }
 

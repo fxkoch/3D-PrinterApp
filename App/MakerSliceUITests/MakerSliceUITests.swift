@@ -118,6 +118,19 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("71-Platte-2")
     }
 
+    /// The MakerWorld web view opens and shows the site (no login needed for this check).
+    func testMakerWorldBrowserOpens() {
+        app.launch()
+        app.tabBars.buttons["Entdecken"].tap()
+        app.buttons["portals"].firstMatch.tap()
+        snapshot("79-Portale")
+        app.buttons["MakerWorld"].firstMatch.tap()
+        sleep(12)
+        snapshot("80-MakerWorld-Browser")
+        let signIn = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'Anmelden' OR label CONTAINS[c] 'Sign in' OR label CONTAINS[c] 'Log in'")).firstMatch
+        if signIn.exists { signIn.tap(); sleep(6); snapshot("81-MakerWorld-Login") }
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()

@@ -23,6 +23,7 @@ struct MakerSliceApp: App {
                         model.printers.startPolling()
                     } else {
                         model.printers.stopPolling()
+                        Task { await model.browser.keepSession() }
                     }
                 }
         }

@@ -20,10 +20,17 @@ final class MakerWorldBrowser: NSObject {
 
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
+    /// Portals whose account cookies are present (signed in).
+    private(set) var signedIn: [String] = []
+    /// Set by the app model; errors of the portal API are written here with their status code.
+    @ObservationIgnored weak var log: EventLog?
+
     override init() {
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default() // keeps the MakerWorld login between launches
+        config.websiteDataStore = .default() // keeps the logins between launches
         config.allowsInlineMediaPlayback = true
+        // Present as Safari: Google/Apple sign-in and Cloudflare reject unknown embedded browsers.
+        config.applicationNameForUserAgent = "Version/18.0 Mobile/15E148 Safari/604.1"
         webView = WKWebView(frame: .zero, configuration: config)
         webView.allowsBackForwardNavigationGestures = true
         super.init()
@@ -40,7 +47,26 @@ final class MakerWorldBrowser: NSObject {
                 Task { @MainActor in self?.isLoading = view.isLoading }
             },
         ]
-        webView.load(URLRequest(url: MakerWorld.homeURL))
+        Task { @MainActor in
+            await PortalSession.restore(into: webView.configuration.websiteDataStore.httpCookieStore)
+            webView.load(URLRequest(url: MakerWorld.homeURL))
+            await refreshAccount()
+        }
+    }
+
+    /// Saves the login cookies and updates the "signed in" state.
+    func keepSession() async {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        await PortalSession.keep(store)
+        signedIn = await PortalSession.signedInDomains(store)
+    }
+
+    func refreshAccount() async { await keepSession() }
+
+    func signOut() async {
+        await PortalSession.signOut(of: PortalSession.accountDomains, store: webView.configuration.websiteDataStore.httpCookieStore)
+        signedIn = []
+        webView.reload()
     }
 
     func open(_ url: URL) {
@@ -80,7 +106,12 @@ final class MakerWorldBrowser: NSObject {
         )
         guard let dict = result as? [String: Any] else { throw BrowserError.requestFailed(0) }
         let status = (dict["status"] as? NSNumber)?.intValue ?? 0
-        return (status, dict["body"] as? String ?? "")
+        let body = dict["body"] as? String ?? ""
+        if status != 200 {
+            let hint = body.contains("Just a moment") ? "Cloudflare-Prüfung" : String(body.prefix(120)).replacingOccurrences(of: "\n", with: " ")
+            log?.add(.error, "\(path) → HTTP \(status): \(hint)", source: "MakerWorld")
+        }
+        return (status, body)
     }
 
     /// True once a makerworld.com page is loaded (needed for same-origin API calls).
@@ -130,9 +161,11 @@ final class MakerWorldBrowser: NSObject {
 
     /// Downloads the 3MF of a print profile.
     func download(profile: MakerWorldProfile, of design: MakerWorldDesign) async throws -> (Data, String) {
+        await keepSession()
         let (status, body) = try await fetchText(MakerWorld.downloadPath(instanceID: profile.id))
         guard status == 200 else { throw BrowserError.requestFailed(status) }
         guard case let .redirect(url, name) = MakerWorldDownload(json: Data(body.utf8)) else {
+            log?.add(.error, "Download-Antwort ohne Link: \(String(body.prefix(160)))", source: "MakerWorld")
             throw BrowserError.downloadUnavailable
         }
         var request = URLRequest(url: url)
@@ -142,6 +175,7 @@ final class MakerWorldBrowser: NSObject {
             .forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode ?? 200 < 400, !data.isEmpty else {
+            log?.add(.error, "Datei-Download fehlgeschlagen (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)) von \(url.host ?? "?")", source: "MakerWorld")
             throw BrowserError.downloadUnavailable
         }
         let fileName = name ?? "\(design.title) – \(profile.title).3mf"
@@ -161,6 +195,10 @@ final class MakerWorldBrowser: NSObject {
 }
 
 extension MakerWorldBrowser: WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor in await keepSession() }
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
         if !navigationResponse.canShowMIMEType || Self.looksLikeModelFile(navigationResponse.response) {
             return .download

@@ -61,6 +61,7 @@ final class AppModel {
             }
         }
         printers.log = log
+        browser.log = log
         // UI tests start without printers saved by an earlier test run.
         if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
             for printer in printers.printers { printers.remove(printer) }
@@ -111,6 +112,18 @@ final class AppModel {
 
     func addDownloaded(data: Data, fileName: String, title: String?, source: LibraryItem.Source,
                        sourceID: String? = nil, coverURL: URL? = nil, open shouldOpen: Bool = true) {
+        // Portals often deliver a ZIP of STL/3MF files: unpack and add every model.
+        if let files = ModelArchive.modelFiles(in: data) {
+            var items: [LibraryItem] = []
+            for file in files {
+                if let item = try? library.add(data: file.data, fileName: file.name, name: nil, origin: source,
+                                               makerWorldID: nil, coverURL: coverURL) { items.append(item) }
+            }
+            log.add(.info, "ZIP „\(fileName)“ entpackt: \(items.count) Modelle", source: source.displayName)
+            if let first = items.first, shouldOpen { open(first) }
+            if items.isEmpty { alert = "Im ZIP wurde kein Modell (STL, 3MF, OBJ) gefunden." }
+            return
+        }
         do {
             let item = try library.add(data: data, fileName: fileName, name: title, origin: source,
                                        makerWorldID: source == .makerWorld ? sourceID.flatMap { Int($0) } : nil,
@@ -216,6 +229,7 @@ extension LibraryItem.Source {
         case .file: return "Datei"
         case .makerWorld: return "MakerWorld"
         case .printables: return "Printables"
+        case .web: return "Web-Portal"
         }
     }
 }

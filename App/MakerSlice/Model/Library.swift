@@ -13,7 +13,7 @@ struct LibraryItem: Codable, Identifiable, Hashable {
     var coverURL: URL?
 
     enum Source: String, Codable {
-        case file, makerWorld, printables
+        case file, makerWorld, printables, web
     }
 }
 

@@ -25,7 +25,7 @@ struct DiscoverView: View {
     @State private var searching = false
     @State private var notes: [String] = []
     @State private var selected: ModelSearchResult?
-    @State private var showBrowser = false
+    @State private var portal: Portal?
     @State private var searchTask: Task<Void, Never>?
 
     private let columns = [GridItem(.adaptive(minimum: 160), spacing: 12)]
@@ -79,7 +79,12 @@ struct DiscoverView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showBrowser = true } label: { Label("MakerWorld öffnen", systemImage: "safari") }
+                    Menu {
+                        ForEach(Portal.all) { portal in
+                            Button { self.portal = portal } label: { Label(portal.name, systemImage: portal.symbol) }
+                        }
+                    } label: { Label("Portale", systemImage: "safari") }
+                        .accessibilityIdentifier("portals")
                 }
             }
             .onChange(of: filter) { _, _ in runSearch() }
@@ -88,8 +93,8 @@ struct DiscoverView: View {
             .sheet(item: $selected) { result in
                 ModelDetailView(result: result)
             }
-            .fullScreenCover(isPresented: $showBrowser) {
-                BrowserView()
+            .fullScreenCover(item: $portal) { portal in
+                BrowserView(portal: portal)
             }
         }
     }
@@ -133,7 +138,7 @@ struct DiscoverView: View {
             }
             guard !Task.isCancelled else { return }
             if problems.contains(where: { $0.hasPrefix("MakerWorld") }) {
-                notes.append("Tipp: Öffne oben rechts MakerWorld und melde dich an – danach funktioniert die Suche dort.")
+                notes.append("Tipp: Öffne oben rechts unter „Portale“ MakerWorld und melde dich an – danach funktioniert die Suche dort.")
             }
             searching = false
         }
@@ -196,13 +201,19 @@ private struct ResultCard: View {
     }
 }
 
-/// Full MakerWorld website (login, browsing) with a "print" bar on model pages.
+/// A model portal in the app's browser (the login stays saved). On MakerWorld model pages a "print" bar appears;
+/// downloads of STL/3MF/OBJ/ZIP files from any portal go into the library.
 struct BrowserView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
+    @State var portal: Portal
     @State private var design: MakerWorldDesign?
     @State private var busy = false
     @State private var error: String?
+
+    init(portal: Portal) {
+        _portal = State(initialValue: portal)
+    }
 
     var body: some View {
         let browser = app.browser
@@ -227,14 +238,34 @@ struct BrowserView: View {
                         .background(.bar)
                     }
                 }
-                .navigationTitle("MakerWorld")
+                .navigationTitle(portal.name)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Fertig") { dismiss() } }
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         if browser.isLoading { ProgressView() }
                         Button { browser.goBack() } label: { Image(systemName: "chevron.backward") }.disabled(!browser.canGoBack)
-                        Button { browser.goHome() } label: { Image(systemName: "house") }
+                        Menu {
+                            Section("Portal wechseln") {
+                                ForEach(Portal.all) { p in
+                                    Button { portal = p; browser.open(p.url) } label: { Label(p.name, systemImage: p.symbol) }
+                                }
+                            }
+                            Section("Konto") {
+                                if browser.signedIn.isEmpty {
+                                    Text("Nicht angemeldet")
+                                } else {
+                                    Text("Angemeldet: \(browser.signedIn.joined(separator: ", "))")
+                                    Button(role: .destructive) { Task { await browser.signOut() } } label: {
+                                        Label("Überall abmelden", systemImage: "rectangle.portrait.and.arrow.right")
+                                    }
+                                }
+                            }
+                            Button { browser.open(portal.url) } label: { Label("Startseite von \(portal.name)", systemImage: "house") }
+                        } label: {
+                            Image(systemName: browser.signedIn.isEmpty ? "person.crop.circle" : "person.crop.circle.badge.checkmark")
+                        }
+                        .accessibilityIdentifier("portalMenu")
                     }
                 }
                 .sheet(item: $design) { d in
@@ -246,10 +277,15 @@ struct BrowserView: View {
         }
         .onAppear {
             browser.onDownload = { data, name, _ in
-                app.addDownloaded(data: data, fileName: name, title: nil, source: .makerWorld,
+                let fromMakerWorld = browser.isOnMakerWorld
+                app.addDownloaded(data: data, fileName: name, title: nil, source: fromMakerWorld ? .makerWorld : .web,
                                   sourceID: browser.model.map { String($0.designID) })
                 dismiss()
             }
+            if browser.currentURL?.host?.contains(portal.url.host?.replacingOccurrences(of: "www.", with: "") ?? "-") != true {
+                browser.open(portal.url)
+            }
+            Task { await browser.refreshAccount() }
         }
     }
 
