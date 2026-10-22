@@ -389,10 +389,15 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
                 log(.warning, "print/start: Antwortcode \(answer.code)\(answer.message.isEmpty ? "" : " (\(answer.message))") – prüfe, ob der Druck trotzdem läuft")
                 accepted = await startedPrinting(name)
             }
-            // The printer can accept the start, heat up and then drop the job again (SD still busy).
-            if accepted, await jobSurvives() { break }
+            // The printer can accept the start, heat up and then drop the job again (SD still busy, filament problem).
+            // Starting again at once would repeat the filament loading and unloading, so that is not done blindly.
+            if accepted {
+                if await jobSurvives() { break }
+                log(.error, "Der Drucker hat den Auftrag nach dem Start wieder verworfen")
+                throw PrinterError.http(0, "Der Drucker hat den Auftrag nach dem Start wieder verworfen (Datei hochgeladen). Meist ist die Datei noch nicht fertig gespeichert (Code 11535 „SD busy“) oder das Filament lässt sich nicht einziehen. Meldung am Drucker-Display lesen, ggf. Filament prüfen, dann erneut „Drucken“ tippen.")
+            }
             attempt += 1
-            let busy = accepted || Self.isBusyCode(answer.code, answer.message)
+            let busy = Self.isBusyCode(answer.code, answer.message)
             guard busy, attempt < 4 else {
                 log(.error, "print/start abgelehnt (Code \(answer.code))")
                 throw PrinterError.http(answer.code, busy
@@ -416,7 +421,33 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
 
     public func pause() async throws { try await command(type: "print", action: "pause", data: taskData()) }
     public func resume() async throws { try await command(type: "print", action: "resume", data: taskData()) }
-    public func cancel() async throws { try await command(type: "print", action: "stop", data: ["taskid": "-1"]) }
+    /// Stops the job. "stop" is the Kobra 3/S1 command; while a job is still starting the printer can refuse it, then the
+    /// older "cancel" is tried. Afterwards the status is checked, so the app never pretends something was stopped.
+    public func cancel() async throws {
+        try await ensureConnected()
+        let tasks = [taskData()["taskid"] as? String ?? "-1", "-1"].reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        var lastAnswer: (code: Int, message: String) = (-1, "")
+        for action in ["stop", "cancel"] {
+            for task in tasks {
+                lastAnswer = try await commandResult(type: "print", action: action, data: ["taskid": task])
+                if lastAnswer.code == 0 || lastAnswer.code == 200 {
+                    // Wait for the printer to leave the job.
+                    for _ in 0..<10 {
+                        queryAll()
+                        try await Task.sleep(nanoseconds: 800_000_000)
+                        let s = locked { cachedStatus }
+                        if s.isIdle || ![.printing, .paused].contains(s.state) { return }
+                    }
+                    log(.warning, "Abbrechen: Der Drucker hat den Befehl angenommen, arbeitet aber weiter")
+                }
+            }
+        }
+        log(.error, "Abbrechen abgelehnt (Code \(lastAnswer.code)\(lastAnswer.message.isEmpty ? "" : ": \(lastAnswer.message)"))")
+        let idle = locked { cachedStatus.isIdle }
+        throw PrinterError.http(lastAnswer.code, idle
+            ? "Es läuft kein Auftrag, der Drucker ist im Leerlauf – der Hinweis „Fehler“ ist nur das Ergebnis des letzten Drucks."
+            : "Der Drucker hat das Abbrechen nicht angenommen (Code \(lastAnswer.code)). Bitte am Drucker-Display abbrechen.")
+    }
 
     public func setBedTemperature(_ t: Int) async throws {
         try await preheat(bed: t, nozzle: nil)
@@ -500,6 +531,10 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
 
     /// Latest raw JSON report per message type (info, tempature, fan, light, …) – for diagnosing parser differences.
     public func latestRawReports() -> [String: Data] { locked { rawReports } }
+
+    public var filamentControl: FilamentControlSupport {
+        FilamentControlSupport(note: "Das ACE Pro lässt sich im LAN-Modus nicht vom Handy aus bedienen: Anycubic gibt dafür keine Befehle frei, und die Düse heizt im Leerlauf nicht auf. Bitte am Drucker-Display Filament laden oder entladen (Werkzeug → Filament). Mit der Community-Firmware Rinkhals (Moonraker) geht Vorschieben und Zurückziehen.")
+    }
 
     public func recentEvents() async throws -> [PrinterEvent] {
         locked { events }

@@ -6,9 +6,19 @@ import SwiftUI
 struct PrinterDetailView: View {
     @Environment(AppModel.self) private var app
     let printer: PrinterConnection
-    @State private var confirmCancel = false
-    @State private var confirmDry = false
+    private enum Pending { case cancel, dry }
+    /// One confirmation at a time: several confirmation dialogs in one view hierarchy block each other.
+    @State private var pending: Pending?
+    private var confirmCancel: Bool {
+        get { pending == .cancel }
+        nonmutating set { pending = newValue ? .cancel : nil }
+    }
+    private var confirmDry: Bool {
+        get { pending == .dry }
+        nonmutating set { pending = newValue ? .dry : nil }
+    }
     @State private var showFilamentCheck = false
+    @State private var showFilamentControl = false
     @State private var editing = false
     @State private var showLive = false
 
@@ -48,12 +58,37 @@ struct PrinterDetailView: View {
         }
         .sheet(isPresented: $editing) { PrinterEditView(existing: printer) }
         .sheet(isPresented: $showFilamentCheck) { FilamentCheckView(printer: printer) }
+        .sheet(isPresented: $showFilamentControl) { FilamentControlView(printer: printer) }
         .fullScreenCover(isPresented: $showLive) { LivePrintView(printer: printer) }
-        .confirmationDialog("Druck wirklich abbrechen?", isPresented: $confirmCancel, titleVisibility: .visible) {
-            Button("Druck abbrechen", role: .destructive) {
-                Task { await app.printers.perform(on: printer, "Druck abgebrochen") { try await $0.cancel() } }
+        .confirmationDialog(pending == .dry ? "Trocknen starten?" : "Druck wirklich abbrechen?",
+                            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }), titleVisibility: .visible) {
+            switch pending {
+            case .cancel:
+                Button("Druck abbrechen", role: .destructive) {
+                    Task { await app.printers.perform(on: printer, "Druck abgebrochen") { try await $0.cancel() } }
+                }
+            case .dry:
+                if let lan = app.printers.driver(for: printer) as? AnycubicLANClient,
+                   let plan = DryingAdvice.plan(types: (status?.filaments ?? []).filter(\.present).compactMap(\.type)) {
+                    Button("Starten: \(plan.summary)") {
+                        Task { await app.printers.perform(on: printer, "Trocknen gestartet (\(plan.summary))") { _ in
+                            try await lan.setDrying(true, temperature: plan.temperature, minutes: plan.minutes)
+                        } }
+                    }
+                }
+            case nil:
+                EmptyView()
+            }
+        } message: {
+            if pending == .dry, let plan = DryingAdvice.plan(types: (status?.filaments ?? []).filter(\.present).compactMap(\.type)) {
+                Text(plan.explanation + " Der ACE heizt dabei auf. Spulen dürfen im Fach bleiben.")
             }
         }
+        .alert(app.printers.actionFailure?.title ?? "", isPresented: Binding(
+            get: { app.printers.actionFailure?.printerID == printer.id },
+            set: { if !$0 { app.printers.actionFailure = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(app.printers.actionFailure?.message ?? "") }
         .refreshable { await app.printers.refresh(printer) }
         .onAppear { app.printers.selectedID = printer.id }
     }
@@ -100,7 +135,21 @@ struct PrinterDetailView: View {
                 Spacer(minLength: 0)
             }
             if let advice = PrintRecovery.advice(for: s) { recoveryCard(advice) }
-            if s.state == .printing || s.state == .paused || s.state == .error {
+            if s.isIdle, s.state == .error || s.state == .cancelled {
+                // The printer is idle again: this is the result of the last job, there is nothing left to cancel.
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(s.state == .error ? "Der letzte Auftrag ist fehlgeschlagen." : "Der letzte Auftrag wurde abgebrochen.", systemImage: "info.circle")
+                        .font(.footnote)
+                    if s.state == .error {
+                        Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
+                            .buttonStyle(.bordered).font(.footnote)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            }
+            if (s.state == .printing || s.state == .paused || s.state == .error) && !s.isIdle {
                 HStack {
                     if s.state == .printing {
                         Button {
@@ -222,6 +271,9 @@ struct PrinterDetailView: View {
             Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
                 .font(.subheadline)
                 .accessibilityIdentifier("filamentCheckButton")
+            Button { showFilamentControl = true } label: { Label("Filament bedienen (laden, entladen, extrudieren)", systemImage: "arrow.up.and.down.circle") }
+                .font(.subheadline)
+                .accessibilityIdentifier("filamentControlButton")
             if let box = s.filamentBox {
                 Divider()
                 HStack {
@@ -246,18 +298,6 @@ struct PrinterDetailView: View {
                     if !box.drying, let plan {
                         Text(plan.explanation).font(.caption).foregroundStyle(.secondary)
                     }
-                    Color.clear.frame(height: 0)
-                        .confirmationDialog("Trocknen starten?", isPresented: $confirmDry, titleVisibility: .visible) {
-                            if let plan {
-                                Button("Starten: \(plan.summary)") {
-                                    Task { await app.printers.perform(on: printer, "Trocknen gestartet (\(plan.summary))") { _ in
-                                        try await lan.setDrying(true, temperature: plan.temperature, minutes: plan.minutes)
-                                    } }
-                                }
-                            }
-                        } message: {
-                            Text((plan?.explanation ?? "") + " Der ACE heizt dabei auf. Spulen dürfen im Fach bleiben.")
-                        }
                 }
                 #endif
             }

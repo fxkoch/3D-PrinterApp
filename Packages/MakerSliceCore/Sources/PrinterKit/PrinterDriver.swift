@@ -118,6 +118,14 @@ public protocol PrinterDriver: AnyObject, Sendable {
     func setToolTemperature(tool: Int, _ t: Int) async throws
     /// Heats bed and (first) nozzle together.
     func preheat(bed: Int, nozzle: Int) async throws
+    /// What this printer lets the app do with the filament (extrude, load a slot, unload).
+    var filamentControl: FilamentControlSupport { get }
+    /// Pushes (positive) or pulls back (negative) filament by `millimetres` with the hot nozzle.
+    func extrude(millimetres: Double) async throws
+    /// AMS/ACE: feeds the filament of `slot` (0-based) to the nozzle.
+    func loadSlot(_ slot: Int) async throws
+    /// Pulls the filament out completely.
+    func unloadFilament() async throws
     func setLight(_ on: Bool) async throws
     func calibration() async throws -> CalibrationData
     /// Recent messages from the printer (console, errors).
@@ -125,10 +133,59 @@ public protocol PrinterDriver: AnyObject, Sendable {
     func disconnect()
 }
 
+/// What the app may do with the filament on a printer.
+public struct FilamentControlSupport: Sendable, Equatable {
+    public var extrude = false
+    public var loadSlot = false
+    public var unload = false
+    /// Explanation when something is not possible, or a hint.
+    public var note: String?
+
+    public init(extrude: Bool = false, loadSlot: Bool = false, unload: Bool = false, note: String? = nil) {
+        self.extrude = extrude
+        self.loadSlot = loadSlot
+        self.unload = unload
+        self.note = note
+    }
+
+    public var any: Bool { extrude || loadSlot || unload }
+}
+
+/// G-code for a filament move: relative extruder, slow enough for a hot nozzle to melt it (pushing 3 mm/s, pulling 5 mm/s).
+public enum FilamentMove {
+    /// Longest single move the app sends.
+    public static let maxMillimetres = 100.0
+    /// Below this temperature filament must not be pushed through the nozzle.
+    public static let minimumNozzleTemperature = 170.0
+
+    public static func script(millimetres mm: Double) -> String {
+        let clamped = max(-maxMillimetres, min(maxMillimetres, mm))
+        let speed = clamped >= 0 ? 180 : 300   // mm/min
+        return "M83\nG1 E\(String(format: "%.1f", clamped)) F\(speed)"
+    }
+}
+
 extension PrinterDriver {
     public func preheat(bed: Int, nozzle: Int) async throws {
         try await setBedTemperature(bed)
         try await setToolTemperature(tool: 0, nozzle)
+    }
+
+    public var filamentControl: FilamentControlSupport {
+        FilamentControlSupport(note: "Dieser Drucker lässt sich vom Handy aus nicht beim Filament bedienen.")
+    }
+
+    public func extrude(millimetres: Double) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+    public func loadSlot(_ slot: Int) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+    public func unloadFilament() async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+
+    /// Refuses to move filament through a cold nozzle (it would grind the filament or clog the extruder).
+    func requireHotNozzle() async throws {
+        let s = try await status()
+        let hot = s.tools.map(\.temperature).max() ?? 0
+        guard hot >= FilamentMove.minimumNozzleTemperature else {
+            throw PrinterError.unsupported("Die Düse ist nur \(Int(hot)) °C warm. Zum Vorschieben oder Zurückziehen muss sie mindestens \(Int(FilamentMove.minimumNozzleTemperature)) °C haben – erst aufheizen.")
+        }
     }
 }
 

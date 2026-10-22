@@ -143,6 +143,21 @@ final class KobraVirtualPrintTests: XCTestCase {
         XCTAssertEqual(cold.tools.first?.target, 0)
     }
 
+    /// Cancelling an idle printer says so (the old app stayed silent and looked frozen).
+    func testCancelOnAnIdlePrinterExplainsInsteadOfStayingSilent() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        let status = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
+        XCTAssertTrue(status.isIdle, "the printer reports `free`")
+        do {
+            try await client.cancel()
+            XCTFail("nothing to cancel")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Leerlauf"), "\(error)")
+        }
+    }
+
     /// Drying settings from the plan for the loaded filaments reach the dryer box.
     func testDryingUsesTheTemperatureOfThePlan() async throws {
         let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,

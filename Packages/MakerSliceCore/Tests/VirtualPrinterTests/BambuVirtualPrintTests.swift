@@ -107,4 +107,22 @@ final class BambuVirtualPrintTests: XCTestCase {
         let hot = try await c.status()
         XCTAssertEqual(hot.bed.target, 55)
     }
+
+    func testAMSLoadAndUnloadAndColdNozzleProtection() async throws {
+        let c = try client()
+        defer { c.disconnect() }
+        _ = try await c.status()
+        XCTAssertTrue(c.filamentControl.loadSlot)
+        try await c.loadSlot(1)
+        try await c.unloadFilament()
+        let state = try await simState()
+        let sent = (state["received"] as? [[String: Any]] ?? []).compactMap { $0["print"] as? [String: Any] }.filter { $0["command"] as? String == "ams_change_filament" }
+        XCTAssertEqual(sent.suffix(2).compactMap { $0["target"] as? Int }, [1, 255], "load slot 2, then unload")
+        do {
+            try await c.extrude(millimetres: 10)
+            XCTFail("a cold nozzle must be refused")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("aufheizen"), "\(error)")
+        }
+    }
 }

@@ -36,7 +36,8 @@ public struct PrintRecovery: Equatable, Sendable {
 
     /// Advice for the current status; nil when nothing is paused or failed.
     public static func advice(for s: PrinterStatus) -> PrintRecovery? {
-        guard s.state == .paused || s.state == .error else { return nil }
+        // A failed job of a printer that is idle again is history, not something to resume or cancel.
+        guard s.state == .paused || s.state == .error, !s.isIdle else { return nil }
         let percent = Int((s.progress * 100).rounded())
         let layerText = s.currentLayer.flatMap { l in s.totalLayers.map { "Schicht \(l) von \($0)" } }
         let cause = Self.cause(of: s.stateMessage)

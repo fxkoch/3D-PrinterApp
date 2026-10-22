@@ -8,6 +8,7 @@ public enum PrinterError: Error, LocalizedError, Equatable {
     case http(Int, String)
     case unreachable(String)
     case badResponse
+    case unsupported(String)
 
     public var errorDescription: String? {
         switch self {
@@ -15,6 +16,7 @@ public enum PrinterError: Error, LocalizedError, Equatable {
         case .http(let code, let message): return "Drucker meldet Fehler \(code): \(message)"
         case .unreachable(let reason): return "Drucker nicht erreichbar: \(reason)"
         case .badResponse: return "Unerwartete Antwort vom Drucker."
+        case .unsupported(let why): return why
         }
     }
 }
@@ -158,6 +160,15 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public func runGCode(_ script: String) async throws {
         let encoded = script.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? script
         _ = try await postJSON("/printer/gcode/script?script=\(encoded)")
+    }
+
+    public var filamentControl: FilamentControlSupport {
+        FilamentControlSupport(extrude: true, note: "Laden und Entladen ganzer Spulen geht an diesem Drucker am Display; die App kann Filament bei heißer Düse vorschieben und zurückziehen.")
+    }
+
+    public func extrude(millimetres: Double) async throws {
+        try await requireHotNozzle()
+        try await runGCode(FilamentMove.script(millimetres: millimetres))
     }
 
     public func setBedTemperature(_ t: Int) async throws { try await runGCode("M140 S\(t)") }

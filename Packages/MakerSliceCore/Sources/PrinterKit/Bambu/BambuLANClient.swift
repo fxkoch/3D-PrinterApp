@@ -270,6 +270,31 @@ public final class BambuLANClient: PrinterDriver, @unchecked Sendable {
     public func setBedTemperature(_ t: Int) async throws { try await gcodeLine("M140 S\(t)") }
     public func setToolTemperature(tool: Int, _ t: Int) async throws { try await gcodeLine("M104 S\(t)") }
 
+    public var filamentControl: FilamentControlSupport {
+        FilamentControlSupport(extrude: true, loadSlot: true, unload: true,
+                               note: "Laden und Entladen heizt die Düse selbst auf. Das AMS muss angeschlossen sein; ohne AMS geht nur Vorschieben und Zurückziehen.")
+    }
+
+    public func extrude(millimetres: Double) async throws {
+        try await requireHotNozzle()
+        try await gcodeLine(FilamentMove.script(millimetres: millimetres))
+    }
+
+    /// "ams_change_filament": the printer heats the nozzle, unloads the old filament and feeds the slot (255 = unload only).
+    private func changeFilament(target: Int) async throws {
+        let s = try await status()
+        guard s.state != .printing && s.state != .paused else { throw PrinterError.unsupported("Während eines Drucks lässt sich das Filament nicht wechseln.") }
+        let temp = Int(max(s.tools.first?.target ?? 0, 220))
+        try await printCommand("ams_change_filament", extra: ["target": target, "curr_temp": Int(s.tools.first?.temperature ?? 0), "tar_temp": temp])
+    }
+
+    public func loadSlot(_ slot: Int) async throws {
+        guard (0..<4).contains(slot) else { throw PrinterError.unsupported("Ungültiger Slot.") }
+        try await changeFilament(target: slot)
+    }
+
+    public func unloadFilament() async throws { try await changeFilament(target: 255) }
+
     public func setLight(_ on: Bool) async throws {
         try await ensureConnected()
         publish(["system": ["sequence_id": nextSequence(), "command": "ledctrl", "led_node": "chamber_light", "led_mode": on ? "on" : "off",

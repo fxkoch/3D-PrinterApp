@@ -49,6 +49,7 @@ class Printer:
         self.nozzle_target, self.bed_target = 0.0, 0.0
         self.light = True
         self.error = 0
+        self.tray_now = 0
         self.received: list[dict] = []
         self.uploads: dict[str, dict] = {}
         self.dir = Path(tempfile.mkdtemp(prefix="p1s_sim_"))
@@ -61,7 +62,7 @@ class Printer:
             {"id": "2", "tray_type": "", "tray_color": "00000000", "tray_uuid": "0" * 32},
             {"id": "3", "tray_type": "PLA", "tray_sub_brands": "PLA Matte", "tray_color": "E5483CFF", "tray_uuid": "C3" * 16},
         ]
-        return {"ams": [{"id": "0", "humidity": "4", "humidity_raw": "31", "tray": trays}], "tray_now": "0"}
+        return {"ams": [{"id": "0", "humidity": "4", "humidity_raw": "31", "tray": trays}], "tray_now": str(self.tray_now)}
 
     def report(self, full: bool) -> dict:
         p = {
@@ -112,6 +113,11 @@ class Printer:
                 self.state = "RUNNING"; self.ack(cmd, seq)
             elif cmd == "stop" and self.state in ("RUNNING", "PAUSE"):
                 self.state, self.error, self.nozzle_target, self.bed_target = "FAILED", 50348044, 0.0, 0.0
+                self.ack(cmd, seq)
+            elif cmd == "ams_change_filament":
+                if self.state in ("RUNNING", "PAUSE"):
+                    return self.ack(cmd, seq, False, "printing")
+                self.tray_now = int(p.get("target", 255))
                 self.ack(cmd, seq)
             elif cmd == "gcode_line":
                 line = str(p.get("param", ""))

@@ -519,6 +519,14 @@ final class MakerSliceUITests: XCTestCase {
         sleep(2)
         snapshot("34-Filament-pruefen")
         app.buttons["Fertig"].tap()
+        // Filament control: the Kobra explains why the ACE cannot be operated from the app.
+        let control = app.buttons["filamentControlButton"]
+        for _ in 0..<4 where !control.isHittable { app.swipeUp() }
+        control.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Display'")).firstMatch.waitForExistence(timeout: 10), "honest note for the ACE")
+        XCTAssertFalse(app.buttons["loadSlot"].exists, "no fake load button")
+        snapshot("34b-Filament-bedienen")
+        app.buttons["Fertig"].tap()
         app.tabBars.buttons["Einstellungen"].tap()
         let toggle = app.switches["notifyToggle"]
         for _ in 0..<4 where !toggle.exists { app.swipeUp() }

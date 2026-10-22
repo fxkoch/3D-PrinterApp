@@ -58,6 +58,9 @@ public struct PrinterStatus: Sendable, Equatable {
     }
 
     public var state: JobState = .unknown
+    /// True when the printer itself says it is idle: a "failed" or "finished" state is then only the result of the last job
+    /// (there is nothing to cancel).
+    public var isIdle = false
     public var stateMessage: String?
     public var fileName: String?
     /// 0...1
@@ -206,6 +209,8 @@ extension PrinterStatus {
             if let v = num(data["print_speed_mode"]) { speedMode = Int(v) }
             if let v = num(data["fan_speed_pct"]) { fanPercent = v }
             if let v = num(data["aux_fan_speed_pct"]) { auxFanPercent = v }
+            let top = data["state"] as? String
+            isIdle = top == "free"
             if let project = data["project"] as? [String: Any], !project.isEmpty {
                 applyProject(project)
                 // While a job starts (heating, leveling) the printer reports `project.state: null` and only the
@@ -213,7 +218,10 @@ extension PrinterStatus {
                 if project["state"] == nil || project["state"] is NSNull, let top = data["state"] as? String {
                     state = Self.anycubicState(top, pause: num(project["pause"]))
                 }
-            } else if (data["state"] as? String) == "free" {
+            } else if top == "busy", state != .paused {
+                // Heating, leveling or loading before the job reports anything of its own.
+                state = .printing
+            } else if top == "free" {
                 if state == .printing || state == .paused || state == .unknown { state = .standby }
                 if let last = data["last_project"] as? [String: Any], let st = last["state"] as? String {
                     let s = Self.anycubicState(st, pause: nil)

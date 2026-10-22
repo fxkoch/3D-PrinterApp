@@ -15,6 +15,14 @@ final class PrinterManager {
     private(set) var statuses: [UUID: PrinterStatus] = [:]
     private(set) var errors: [UUID: String] = [:]
     private(set) var calibration: [UUID: CalibrationData] = [:]
+    /// The last command the printer refused or could not carry out – shown to the user (a failed command must never be silent).
+    struct ActionFailure: Identifiable, Equatable {
+        let id = UUID()
+        let printerID: UUID
+        let title: String
+        let message: String
+    }
+    var actionFailure: ActionFailure?
 
     @ObservationIgnored private var drivers: [UUID: PrinterDriver] = [:]
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -170,7 +178,7 @@ final class PrinterManager {
             log?.add(.info, name, source: printer.name)
         } catch {
             log?.add(.error, "\(name) fehlgeschlagen: \(error.localizedDescription)", source: printer.name)
-            errors[printer.id] = error.localizedDescription
+            actionFailure = ActionFailure(printerID: printer.id, title: "\(name) fehlgeschlagen", message: error.localizedDescription)
         }
         await refresh(printer)
     }
