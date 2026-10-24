@@ -61,6 +61,7 @@ final class AppModel {
         if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
             for model in PrinterModel.allCases { UserDefaults.standard.removeObject(forKey: "settings-\(model.rawValue)") }
             UserDefaults.standard.removeObject(forKey: "expertMode")
+            for key in ["levelingLog", "alertLastState", "alertPosted"] { UserDefaults.standard.removeObject(forKey: key) }
         }
         expertMode = UserDefaults.standard.bool(forKey: "expertMode")
         for model in PrinterModel.allCases {
