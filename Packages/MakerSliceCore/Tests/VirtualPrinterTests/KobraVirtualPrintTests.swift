@@ -143,6 +143,24 @@ final class KobraVirtualPrintTests: XCTestCase {
         XCTAssertEqual(cold.tools.first?.target, 0)
     }
 
+    /// Load, pull back and unload from the app reach the ACE as "feedFilament" with the right type.
+    func testAceFeedCommands() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        _ = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
+        try await client.loadSlot(2)
+        let loaded = try await waitFor(client, "slot loaded") { $0.filamentBox?.activeSlot == 2 }
+        XCTAssertEqual(loaded.filamentBox?.activeSlot, 2)
+        try await client.unloadFilament()
+        try await client.retractSlot(1)
+        let (data, _) = try await URLSession.shared.data(from: URL(string: "http://\(host!):18910/sim/state")!)
+        let state = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let sent = (state["commands"] as? [[String: Any]] ?? []).filter { $0["action"] as? String == "feedFilament" }
+        let types = sent.compactMap { (((($0["data"] as? [String: Any])?["multi_color_box"] as? [[String: Any]])?.first)?["feed_status"] as? [String: Any])?["type"] as? Int }
+        XCTAssertEqual(Array(types.suffix(3)), [1, 2, 3], "load, unload, retract")
+    }
+
     /// Cancelling an idle printer says so (the old app stayed silent and looked frozen).
     func testCancelOnAnIdlePrinterExplainsInsteadOfStayingSilent() async throws {
         let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,

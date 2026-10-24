@@ -26,6 +26,13 @@ struct ProjectProfileView: View {
                             .font(.footnote).foregroundStyle(.orange)
                     }
                 }
+                if !report.materialNotes.isEmpty {
+                    Section {
+                        ForEach(report.materialNotes, id: \.self) { Label($0, systemImage: "arrow.triangle.2.circlepath").font(.footnote) }
+                    } header: {
+                        Text("Automatisch an dein Filament angepasst")
+                    }
+                }
                 if !report.important.isEmpty {
                     Section("Besonderheiten des Profils") {
                         ForEach(report.important) { row($0) }
@@ -48,11 +55,11 @@ struct ProjectProfileView: View {
                     Button("Nicht übernehmen") { project.dismissProfile(); dismiss() }.accessibilityIdentifier("profileDismiss")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Übernehmen (\(selected.count))") {
+                    Button(report.changes.isEmpty ? "Verstanden" : "Übernehmen (\(selected.count))") {
                         project.applyProfile(report.changes.filter { selected.contains($0.id) })
                         dismiss()
                     }
-                    .disabled(selected.isEmpty)
+                    .disabled(selected.isEmpty && !report.changes.isEmpty)
                     .accessibilityIdentifier("profileApply")
                 }
             }

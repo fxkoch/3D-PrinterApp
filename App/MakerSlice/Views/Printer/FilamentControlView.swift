@@ -8,10 +8,11 @@ struct FilamentControlView: View {
     let printer: PrinterConnection
 
     private enum Action: Identifiable {
-        case load(Int), unload, push(Double), pull(Double)
+        case load(Int), retract(Int), unload, push(Double), pull(Double)
         var id: String {
             switch self {
             case .load(let s): return "load\(s)"
+            case .retract(let s): return "retract\(s)"
             case .unload: return "unload"
             case .push(let mm): return "push\(mm)"
             case .pull(let mm): return "pull\(mm)"
@@ -75,12 +76,17 @@ struct FilamentControlView: View {
                     .buttonStyle(.borderedProminent).disabled(busy)
                     .accessibilityIdentifier("loadSlot")
             }
+            if support.retract {
+                Button { pendingAction = .retract(slot) } label: { Label("Slot \(slot + 1) zurück in die Box ziehen", systemImage: "arrow.uturn.up").frame(maxWidth: .infinity) }
+                    .buttonStyle(.bordered).disabled(busy)
+                    .accessibilityIdentifier("retractSlot")
+            }
             if support.unload {
                 Button { pendingAction = .unload } label: { Label("Filament komplett entladen", systemImage: "arrow.up.to.line").frame(maxWidth: .infinity) }
                     .buttonStyle(.bordered).disabled(busy)
                     .accessibilityIdentifier("unloadFilament")
             }
-            Text("Der Drucker heizt die Düse dafür selbst auf.").font(.caption).foregroundStyle(.secondary)
+            Text("Laden, Zurückziehen und Entladen steuert der Drucker selbst – die Düse heizt er bei Bedarf auf.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -130,6 +136,7 @@ struct FilamentControlView: View {
     private func title(for a: Action?) -> String {
         switch a {
         case .load(let s): return "Slot \(s + 1) laden?"
+        case .retract(let s): return "Slot \(s + 1) zurückziehen?"
         case .unload: return "Filament entladen?"
         case .push(let mm): return "\(Int(mm)) mm vorschieben?"
         case .pull(let mm): return "\(Int(mm)) mm zurückziehen?"
@@ -139,7 +146,7 @@ struct FilamentControlView: View {
 
     private func message(for a: Action?) -> String {
         switch a {
-        case .load, .unload: return "Der Drucker heizt die Düse auf, zieht das alte Filament zurück und bewegt das Filament. Das dauert einige Minuten. Düse und Bett nicht anfassen."
+        case .load, .unload, .retract: return "Der Drucker heizt die Düse auf, zieht das alte Filament zurück und bewegt das Filament. Das dauert einige Minuten. Düse und Bett nicht anfassen."
         case .push, .pull: return "Der Extruder bewegt das Filament bei heißer Düse. Nicht in die Düse fassen."
         case nil: return ""
         }
@@ -148,6 +155,7 @@ struct FilamentControlView: View {
     private func buttonTitle(_ a: Action) -> String {
         switch a {
         case .load(let s): return "Slot \(s + 1) laden"
+        case .retract(let s): return "Slot \(s + 1) zurückziehen"
         case .unload: return "Entladen"
         case .push(let mm): return "\(Int(mm)) mm vorschieben"
         case .pull(let mm): return "\(Int(mm)) mm zurückziehen"
@@ -159,6 +167,7 @@ struct FilamentControlView: View {
             await app.printers.perform(on: printer, buttonTitle(a)) { d in
                 switch a {
                 case .load(let s): try await d.loadSlot(s)
+                case .retract(let s): try await d.retractSlot(s)
                 case .unload: try await d.unloadFilament()
                 case .push(let mm): try await d.extrude(millimetres: mm)
                 case .pull(let mm): try await d.extrude(millimetres: -mm)

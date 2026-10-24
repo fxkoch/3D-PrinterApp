@@ -228,7 +228,8 @@ final class AppModel {
             isLoadingModel = false
             switch result {
             case .success(let model):
-                let p = PrintProject(name: name, imported: model, settings: settings)
+                // What is loaded in the printer decides the material; a PLA file is then printed in the PETG that is in the machine.
+                let p = PrintProject(name: name, imported: model, settings: settings, useModelMaterials: loaded.allSatisfy { ($0 ?? "").isEmpty || $0 == "NONE" })
                 p.loadedTypes = loaded
                 p.dryerHumidity = humidity
                 p.refreshRecommendations()

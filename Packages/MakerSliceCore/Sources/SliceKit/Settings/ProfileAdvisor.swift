@@ -31,10 +31,12 @@ public struct ProfileReport: Sendable, Equatable {
     /// The file was made for another printer than the one selected.
     public var foreignPrinter: Bool
     public var changes: [ProfileChange]
+    /// What was adapted automatically because the selected material differs from the model's ("Slot 1: PLA → PETG …").
+    public var materialNotes: [String] = []
 
     public var important: [ProfileChange] { changes.filter { $0.group == .important } }
     public var other: [ProfileChange] { changes.filter { $0.group == .other } }
-    public var isEmpty: Bool { changes.isEmpty }
+    public var isEmpty: Bool { changes.isEmpty && materialNotes.isEmpty }
 }
 
 /// Finds out what is special in the profile a downloaded model brings along (temperature towers, flow tests, ironing …)
@@ -71,22 +73,39 @@ public enum ProfileAdvisor {
                 explanation: shortExplanation(option), payload: .process(key: option.key, value: projectValue)))
         }
 
+        // The selected material wins: a PLA model printed in PETG keeps PETG's temperatures, fan and flow.
+        var notes: [String] = []
         for slot in settings.filaments.indices {
-            changes += filamentChanges(project: project, settings: settings, slot: slot)
+            let projectType = slot < project.filamentTypes.count ? project.filamentTypes[slot] : nil
+            if MaterialAdapter.mismatch(projectType: projectType, filament: settings.filaments[slot]) {
+                let f = settings.filaments[slot]
+                notes.append("Slot \(slot + 1): Das Modell ist für \(projectType ?? "?") eingestellt, gedruckt wird mit \(f.type). Es gelten die Werte von „\(f.name)“ (Düse \(f.nozzleTemp) °C, Bett \(f.bedTemp) °C, Lüfter und Fluss) – die Materialwerte des Modells werden nicht übernommen.")
+            } else {
+                changes += filamentChanges(project: project, settings: settings, slot: slot)
+            }
         }
 
+        let adapted = settings.filaments.indices.contains(0)
+            && MaterialAdapter.mismatch(projectType: project.filamentTypes.first, filament: settings.filaments[0])
         for code in project.layerGCodes {
-            let lines = code.lines.filter(LayerGCode.isAllowed)
+            var lines = code.lines.filter(LayerGCode.isAllowed)
             guard !lines.isEmpty else { continue }
+            if adapted {
+                lines = MaterialAdapter.translate(lines, projectNozzle: project.nozzleTemperature(slot: 0), projectBed: project.bedTemperature(slot: 0),
+                                                  filament: settings.filaments[0], plate: settings.plateType)
+                notes.append("Befehle ab \(formatDecimal(code.z, digits: 2)) mm (Temperaturstufen) wurden auf \(settings.filaments[0].type) umgerechnet: dieselben Abstände, aber um \(settings.filaments[0].name) herum.")
+            }
             changes.append(ProfileChange(
                 id: "g-\(code.z)", group: .important, title: "Befehl ab Höhe \(formatDecimal(code.z, digits: 2)) mm",
                 projectValue: lines.joined(separator: "; "), currentValue: "keiner",
                 explanation: "Das Modell fügt ab dieser Höhe einen Befehl ein – bei Temperatur-Türmen ändert er die Düsentemperatur in Stufen, damit man die beste Temperatur am Teil ablesen kann.",
-                payload: .layerGCode(code)))
+                payload: .layerGCode(LayerGCode(z: code.z, lines: lines))))
         }
 
         let foreign = project.printerModel.map { !isSameModel($0, model) } ?? false
-        return ProfileReport(profileName: project.profileName, printerName: project.printerModel, foreignPrinter: foreign, changes: changes)
+        var seen = Set<String>()
+        return ProfileReport(profileName: project.profileName, printerName: project.printerModel, foreignPrinter: foreign, changes: changes,
+                             materialNotes: notes.filter { seen.insert($0).inserted })
     }
 
     /// Applies the chosen changes. Returns the settings with them taken over.

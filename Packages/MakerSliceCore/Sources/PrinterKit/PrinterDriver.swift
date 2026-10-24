@@ -126,6 +126,8 @@ public protocol PrinterDriver: AnyObject, Sendable {
     func loadSlot(_ slot: Int) async throws
     /// Pulls the filament out completely.
     func unloadFilament() async throws
+    /// ACE: pulls the filament of `slot` back into the box.
+    func retractSlot(_ slot: Int) async throws
     func setLight(_ on: Bool) async throws
     func calibration() async throws -> CalibrationData
     /// Recent messages from the printer (console, errors).
@@ -138,17 +140,20 @@ public struct FilamentControlSupport: Sendable, Equatable {
     public var extrude = false
     public var loadSlot = false
     public var unload = false
+    /// Pull the filament back into the box without unloading it completely (ACE).
+    public var retract = false
     /// Explanation when something is not possible, or a hint.
     public var note: String?
 
-    public init(extrude: Bool = false, loadSlot: Bool = false, unload: Bool = false, note: String? = nil) {
+    public init(extrude: Bool = false, loadSlot: Bool = false, unload: Bool = false, retract: Bool = false, note: String? = nil) {
+        self.retract = retract
         self.extrude = extrude
         self.loadSlot = loadSlot
         self.unload = unload
         self.note = note
     }
 
-    public var any: Bool { extrude || loadSlot || unload }
+    public var any: Bool { extrude || loadSlot || unload || retract }
 }
 
 /// G-code for a filament move: relative extruder, slow enough for a hot nozzle to melt it (pushing 3 mm/s, pulling 5 mm/s).
@@ -178,6 +183,7 @@ extension PrinterDriver {
     public func extrude(millimetres: Double) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
     public func loadSlot(_ slot: Int) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
     public func unloadFilament() async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+    public func retractSlot(_ slot: Int) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
 
     /// Refuses to move filament through a cold nozzle (it would grind the filament or clog the extruder).
     func requireHotNozzle() async throws {

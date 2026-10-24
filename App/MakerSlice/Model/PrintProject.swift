@@ -69,12 +69,13 @@ final class PrintProject: Identifiable {
     /// Humidity in the ACE Pro dryer, if the printer reports it.
     @ObservationIgnored var dryerHumidity: Double?
 
-    init(name: String, imported: ImportedModel, settings base: PrintSettings) {
+    /// `useModelMaterials`: take the filaments the file names (PLA …). Without it the filaments already in `base` stay – the ones loaded in the printer.
+    init(name: String, imported: ImportedModel, settings base: PrintSettings, useModelMaterials: Bool = true) {
         self.name = name
         self.imported = imported
         var s = base
         if let project = imported.projectSettings {
-            s.applyMaterials(project)
+            if useModelMaterials { s.applyMaterials(project) }
             let report = ProfileAdvisor.analyze(project: project, settings: s)
             if !report.isEmpty { profileReport = report }
         }
@@ -441,7 +442,8 @@ final class PrintProject: Identifiable {
             return
         }
         sliceTasks[plate]?.cancel()
-        let job = SliceJob(name: plateName(plate), objects: plates[plate - 1], settings: settings)
+        // The model's temperature steps follow the selected material (a PLA tower printed in PETG).
+        let job = SliceJob(name: plateName(plate), objects: plates[plate - 1], settings: settings.adaptingMaterial(of: imported.projectSettings))
         plateStates[plate] = .slicing(phase: "Vorbereiten", fraction: 0)
         let cancelFlag = CancelFlag()
         sliceTasks[plate] = Task { [weak self] in

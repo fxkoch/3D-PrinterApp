@@ -533,7 +533,26 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     public func latestRawReports() -> [String: Data] { locked { rawReports } }
 
     public var filamentControl: FilamentControlSupport {
-        FilamentControlSupport(note: "Das ACE Pro lässt sich im LAN-Modus nicht vom Handy aus bedienen: Anycubic gibt dafür keine Befehle frei, und die Düse heizt im Leerlauf nicht auf. Bitte am Drucker-Display Filament laden oder entladen (Werkzeug → Filament). Mit der Community-Firmware Rinkhals (Moonraker) geht Vorschieben und Zurückziehen.")
+        FilamentControlSupport(loadSlot: true, unload: true, retract: true,
+                               note: "Laden, Zurückziehen und Entladen steuert das ACE Pro selbst. Der Befehl stammt aus einem Community-Projekt und ist noch nicht von Anycubic bestätigt: beim ersten Mal am Drucker zusehen. Von Hand Vorschieben mit heißer Düse geht im LAN-Modus nicht (die Düse heizt im Leerlauf nicht auf).")
+    }
+
+    /// ACE Pro "feedFilament": type 1 = load the slot to the nozzle, 2 = unload, 3 = pull back into the box.
+    private func feed(slot: Int, type: Int) async throws {
+        guard (0..<4).contains(slot) else { throw PrinterError.unsupported("Ungültiger Slot.") }
+        let s = try await status()
+        guard s.state != .printing && s.state != .paused else { throw PrinterError.unsupported("Während eines Drucks lässt sich das Filament nicht bewegen.") }
+        try await command(type: "multiColorBox", action: "feedFilament",
+                          data: ["multi_color_box": [["id": 0, "feed_status": ["slot_index": slot, "type": type]]]])
+        queryAll()
+    }
+
+    public func loadSlot(_ slot: Int) async throws { try await feed(slot: slot, type: 1) }
+    public func retractSlot(_ slot: Int) async throws { try await feed(slot: slot, type: 3) }
+    /// Unloads the slot that is currently loaded (the box reports it), slot 1 if nothing is known.
+    public func unloadFilament() async throws {
+        let active = locked { cachedStatus.filamentBox?.activeSlot } ?? 0
+        try await feed(slot: active, type: 2)
     }
 
     public func recentEvents() async throws -> [PrinterEvent] {

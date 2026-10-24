@@ -69,6 +69,10 @@ struct StrengthView: View {
     @State private var comparing = false
     @State private var orientations: [OrientationOption] = []
     @State private var orienting = false
+    /// A tap on the model waiting for the answer "Halterung or Last?".
+    @State private var tapped: (triangle: Int, point: Vec3)?
+    @State private var autoNote: String?
+    @State private var showMore = false
 
     private var filament: Filament? { ctx.filament }
     private var material: FEMMaterial { ctx.material }
@@ -76,36 +80,99 @@ struct StrengthView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                if let object {
-                    VStack(spacing: Theme.spacing) {
-                        scene(object)
-                        pointsPanel(object)
-                        setupPanel(object)
-                        weakSpotPanel(object)
-                        if running || searching || scanning || comparing || orienting { progressPanel }
-                        if let error { Panel(title: "Hinweis", systemImage: "exclamationmark.triangle") { Text(error).foregroundStyle(.red) } }
-                        if let result { resultPanel(result) }
-                        if !suggestions.isEmpty || searching { suggestionsPanel(object) }
-                        if let result { orientationPanel(object, base: result) }
-                        if let result { comparePanel(object, base: result) }
-                        if result != nil || scanReport != nil { reinforcePanel(object) }
-                        if ctx.standalone { handOverPanel(object) }
-                        if let applied { Text(applied).font(.footnote).foregroundStyle(.green).padding(.horizontal) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    if let object {
+                        VStack(spacing: Theme.spacing) {
+                            if running || searching || scanning || comparing || orienting { progressPanel }
+                            if let error { Panel(title: "Hinweis", systemImage: "exclamationmark.triangle") { Text(error).foregroundStyle(.red) } }
+                            if let result { resultPanel(result).id("result") }
+                            if !suggestions.isEmpty || searching { suggestionsPanel(object) }
+                            scene(object)
+                            pointsPanel(object)
+                            DisclosureGroup(isExpanded: $showMore) {
+                                VStack(spacing: Theme.spacing) {
+                                    setupPanel(object)
+                                    weakSpotPanel(object)
+                                    if let result { orientationPanel(object, base: result) }
+                                    if let result { comparePanel(object, base: result) }
+                                    if result != nil || scanReport != nil { reinforcePanel(object) }
+                                    if ctx.standalone { handOverPanel(object) }
+                                }
+                                .padding(.top, 8)
+                            } label: {
+                                Label("Mehr: Material, Lage, Schwachstellen, Verstärken", systemImage: "ellipsis.circle").font(.subheadline.weight(.semibold))
+                            }
+                            .padding(14)
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
+                            if let applied { Text(applied).font(.footnote).foregroundStyle(.green).padding(.horizontal) }
+                        }
+                        .padding()
+                    } else {
+                        Text("Das Objekt gibt es nicht mehr.").padding()
                     }
-                    .padding()
-                } else {
-                    Text("Das Objekt gibt es nicht mehr.").padding()
                 }
+                .onChange(of: result == nil) { _, _ in if result != nil { withAnimation { proxy.scrollTo("result", anchor: .top) } } }
             }
             .background(Color(.systemGroupedBackground))
+            .safeAreaInset(edge: .bottom) { if let object { bottomBar(object) } }
             .navigationTitle("Festigkeit prüfen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button { task?.cancel(); dismiss() } label: { Label("Zurück", systemImage: "chevron.left") }.accessibilityIdentifier("backButton") }
                 ToolbarItem(placement: .confirmationAction) { Button("Fertig") { task?.cancel(); dismiss() } }
             }
+            .confirmationDialog("Was ist diese Stelle?", isPresented: Binding(get: { tapped != nil }, set: { if !$0 { tapped = nil } }), titleVisibility: .visible) {
+                Button("Hier wird es festgehalten (Halterung)") { addTapped(as: .fixed) }
+                Button("Hier wirkt eine Kraft (Last)") { addTapped(as: .load) }
+                Button("Abbrechen", role: .cancel) {}
+            } message: { Text("Tippe auf eine Fläche, ein Schraubenloch oder – mit „Eine Stelle“ – auf einen Punkt.") }
+            .onAppear { if supports.isEmpty && loads.isEmpty { autoSetup() } }
         }
+    }
+
+    /// Fixed bar at the bottom: the one thing to do next.
+    private func bottomBar(_ object: ModelObject) -> some View {
+        VStack(spacing: 6) {
+            if supports.isEmpty || loads.isEmpty {
+                Text(supports.isEmpty ? "Tippe aufs Modell: wo wird es festgehalten?" : "Tippe aufs Modell: wo wirkt die Kraft?")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Button { run(object) } label: {
+                Label(running ? "Rechnet …" : (result == nil ? "Festigkeit berechnen" : "Neu berechnen"), systemImage: "function").frame(maxWidth: .infinity).padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(supports.isEmpty || loads.isEmpty || running || searching || scanning)
+            .accessibilityIdentifier("strengthRun")
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func addTapped(as kind: Pick) {
+        guard let tap = tapped, let object else { return }
+        tapped = nil
+        let normal = object.mesh.faceNormal(tap.triangle)
+        let region = shape == .spot
+            ? SurfaceRegion.disc(center: tap.point, normal: normal, radius: spotRadius, name: kind.rawValue)
+            : SurfaceRegion.pick(from: tap.triangle, in: object.mesh, name: kind.rawValue)
+        let label = shape == .spot ? "Stelle" : (region.isCurved ? "Loch/Rundung" : "Fläche")
+        if kind == .fixed {
+            supports.append(Support(region: region, title: "Halterung \(supports.count + 1) · \(label)"))
+        } else {
+            loads.append(LoadItem(region: region, title: "Last \(loads.count + 1) · \(label)", direction: region.isCurved ? .down : .into))
+        }
+        result = nil; suggestions = []; error = nil; reinforcement = nil; comparison = []; orientations = []; autoNote = nil
+    }
+
+    /// Screw holes or the bottom face as supports, the farthest top face as load – the user only corrects.
+    private func autoSetup() {
+        guard let object, let setup = FEMAutoSetup.suggest(mesh: object.mesh) else { return }
+        supports = setup.supports.enumerated().map { Support(region: $1.region, title: "Halterung \($0 + 1) · \($1.label)") }
+        loads = setup.loads.enumerated().map { LoadItem(region: $1.region, title: "Last \($0 + 1) · \($1.label)", kilograms: 2, direction: $1.region.normal.z > 0.5 ? .down : .into) }
+        autoNote = setup.note
+        resetResults()
     }
 
     // MARK: Parts
@@ -115,21 +182,9 @@ struct StrengthView: View {
             StrengthSceneView(mesh: object.mesh, fixed: supports.map(\.region), loads: loads.map(\.region),
                               arrows: loads.map { ($0.region, force(of: $0)) },
                               result: showHeat ? (result ?? scanReport?.result) : nil) { triangle, point in
-                let normal = object.mesh.faceNormal(triangle)
-                let region = shape == .spot
-                    ? SurfaceRegion.disc(center: point, normal: normal, radius: spotRadius, name: pick.rawValue)
-                    : SurfaceRegion.pick(from: triangle, in: object.mesh, name: pick.rawValue)
-                let kind = shape == .spot ? "Stelle" : (region.isCurved ? "Loch/Rundung" : "Fläche")
-                if pick == .fixed {
-                    supports.append(Support(region: region, title: "Halterung \(supports.count + 1) · \(kind)"))
-                    if loads.isEmpty { pick = .load }
-                } else {
-                    loads.append(LoadItem(region: region, title: "Last \(loads.count + 1) · \(kind)",
-                                          direction: region.isCurved ? .down : .into))
-                }
-                result = nil; suggestions = []; error = nil; reinforcement = nil; comparison = []; orientations = []
+                tapped = (triangle, point)
             }
-            .frame(height: 280)
+            .frame(height: 360)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .accessibilityIdentifier("strengthScene")
             Text((result != nil || scanReport != nil) && showHeat ? "Farbe = Beanspruchung: grün entspannt, rot an der Grenze." : guidance)
@@ -138,9 +193,9 @@ struct StrengthView: View {
     }
 
     private var guidance: String {
-        if supports.isEmpty { return "Schritt 1: Tippe dort aufs Modell, wo es festgehalten wird – eine Auflage oder ein Schraubenloch (blau)." }
-        if loads.isEmpty { return "Schritt 2: Tippe die Fläche an, auf die die Kraft wirkt (rot). Der Pfeil zeigt die Kraftrichtung." }
-        return "Du kannst weitere Halterungen (mehrere Schrauben) und weitere Lasten (mehrere Flächen) antippen. Dann „Berechnen“."
+        if supports.isEmpty { return "Blau = hier wird das Teil festgehalten, rot = hier wirkt die Kraft (der Pfeil zeigt die Richtung). Tippe aufs Modell, um etwas hinzuzufügen." }
+        if loads.isEmpty { return "Tippe die Fläche an, auf die die Kraft wirkt (rot)." }
+        return "Blau = Halterung, rot = Last. Tippe aufs Modell für weitere Halterungen (mehrere Schrauben) oder Lasten (mehrere Flächen)."
     }
 
     private func force(of item: LoadItem) -> Vec3 {
@@ -160,11 +215,10 @@ struct StrengthView: View {
     /// Supports and loads as lists: tap the model to add, change the force per load, remove with the minus.
     private func pointsPanel(_ object: ModelObject) -> some View {
         Panel(title: "Halterungen und Lasten", systemImage: "arrow.down.to.line") {
-            Picker("Antippen setzt", selection: $pick) {
-                ForEach(Pick.allCases) { Text($0.rawValue + ($0 == .fixed ? " (\(supports.count))" : " (\(loads.count))")).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("pickMode")
+            Button { autoSetup() } label: { Label("Automatisch vorschlagen", systemImage: "wand.and.stars").frame(maxWidth: .infinity) }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("autoSetup")
+            if let autoNote { Text(autoNote).font(.footnote).foregroundStyle(.secondary) }
             Picker("Form", selection: $shape) {
                 ForEach(Shape.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -196,7 +250,16 @@ struct StrengthView: View {
                         Button { loads.removeAll { $0.id == item.id }; resetResults() } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.red) }
                             .accessibilityLabel("Last entfernen")
                     }
-                    Text("\(item.kilograms.formatted(.number.precision(.fractionLength(1)))) kg (\(Int(item.newtons.rounded())) N)").font(.footnote)
+                    Text("\(item.kilograms.formatted(.number.precision(.fractionLength(1)))) kg (\(Int(item.newtons.rounded())) N)").font(.subheadline.weight(.semibold))
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach([0.5, 1, 2, 5, 10, 20], id: \.self) { kg in
+                                Button("\(kg.formatted()) kg") { item.kilograms = kg; resetResults() }
+                                    .buttonStyle(.bordered).font(.footnote)
+                                    .tint(item.kilograms == kg ? .accentColor : .gray)
+                            }
+                        }
+                    }
                     Slider(value: $item.kilograms, in: 0.1...50, step: 0.1) { _ in resetResults() }
                     Picker("Richtung", selection: $item.direction) {
                         ForEach(Direction.allCases.filter { !($0.needsFlatSurface && item.region.isCurved) }) { Text($0.rawValue).tag($0) }
@@ -371,11 +434,12 @@ struct StrengthView: View {
         let sf = longTerm ? r.safetyFactorLongTerm : r.safetyFactor
         let (color, verdict) = Self.verdict(sf)
         return Panel(title: "Ergebnis", systemImage: "checkmark.shield") {
-            HStack(spacing: 12) {
-                Circle().fill(color).frame(width: 18, height: 18)
-                VStack(alignment: .leading) {
-                    Text(verdict).font(.headline)
-                    Text("Sicherheitsfaktor \(sf >= 50 ? "über 50" : sf.formatted(.number.precision(.fractionLength(1)))) – die Last könnte etwa so oft größer sein, bevor es bricht.")
+            HStack(spacing: 14) {
+                Image(systemName: sf >= 2 ? "checkmark.circle.fill" : (sf >= 1 ? "exclamationmark.triangle.fill" : "xmark.octagon.fill"))
+                    .font(.system(size: 44)).foregroundStyle(color)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verdict).font(.title3.weight(.bold))
+                    Text("Sicherheitsfaktor \(sf >= 50 ? "über 50" : sf.formatted(.number.precision(.fractionLength(1)))): die Last dürfte etwa so oft größer sein, bevor es bricht.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

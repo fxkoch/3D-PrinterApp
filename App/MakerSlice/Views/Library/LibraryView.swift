@@ -9,6 +9,7 @@ struct LibraryView: View {
     @State private var filter = ""
     @State private var workshopItem: LibraryItem?
     @State private var showScan = false
+    @State private var showPhotoShape = false
 
     private static let modelTypes: [UTType] = [
         UTType(filenameExtension: "3mf") ?? .data,
@@ -69,7 +70,9 @@ struct LibraryView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button { showImporter = true } label: { Label("Datei importieren", systemImage: "doc.badge.plus") }
-                        Button { showScan = true } label: { Label("3D-Scan (Fotos / Video)", systemImage: "camera.viewfinder") }
+                        Button { showPhotoShape = true } label: { Label("Foto → Form (Sekunden)", systemImage: "photo.badge.plus") }
+                            .accessibilityIdentifier("libraryPhotoShape")
+                        Button { showScan = true } label: { Label("3D-Scan (genau, dauert Minuten)", systemImage: "camera.viewfinder") }
                             .accessibilityIdentifier("libraryScan")
                         Button { app.loadSample() } label: { Label("Testwürfel", systemImage: "cube") }
                     } label: {
@@ -92,6 +95,7 @@ struct LibraryView: View {
             }
             .sheet(item: $workshopItem) { WorkbenchView(item: $0) }
             .sheet(isPresented: $showScan) { ScanView() }
+            .sheet(isPresented: $showPhotoShape) { PhotoShapeView() }
             .alert("Umbenennen", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("Name", text: $newName)
                 Button("Sichern") { if let r = renaming { app.library.rename(r, to: newName) } }

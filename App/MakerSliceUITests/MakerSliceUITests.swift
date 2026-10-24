@@ -318,6 +318,26 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertTrue(done.waitForExistence(timeout: 5))
     }
 
+    /// Photo → shape: a drawn star becomes a printable plate that opens in the prepare screen.
+    func testPhotoShapeFromAPhoto() throws {
+        app.launchArguments += ["-uiTestPhotoShape"]
+        app.launch()
+        app.tabBars.buttons["Bibliothek"].tap()
+        let add = app.buttons["libraryAdd"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        add.tap()
+        let entry = app.buttons["libraryPhotoShape"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        entry.tap()
+        XCTAssertTrue(app.otherElements["photoShapePreview"].waitForExistence(timeout: 30), "the 3D preview of the star")
+        snapshot("B1-Foto-Form")
+        let save = app.buttons["photoShapeSave"]
+        for _ in 0..<4 where !save.isHittable { app.swipeUp() }
+        save.tap()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 30), "the shape opens for printing")
+        snapshot("B2-Foto-Form-Druck")
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()
@@ -483,13 +503,13 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertTrue(scene.waitForExistence(timeout: 10))
         sleep(2)
         snapshot("97-Festigkeit-leer")
-        scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.62)).tap()   // front face = fixed
-        scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38)).tap()   // top face = load
-        sleep(1)
-        // A second support and a second load can be added by tapping again.
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Halterung ('")).firstMatch.tap()
+        // The app suggests supports and a load by itself; tapping the model asks what the spot is.
+        XCTAssertTrue(app.buttons["strengthRun"].isEnabled, "automatic suggestion makes the check ready")
         scene.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.66)).tap()
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Halterung (2)'")).firstMatch.waitForExistence(timeout: 5), "two supports")
+        let asSupport = app.buttons["Hier wird es festgehalten (Halterung)"]
+        XCTAssertTrue(asSupport.waitForExistence(timeout: 5), "tap opens the question")
+        asSupport.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Halterung 2'")).firstMatch.waitForExistence(timeout: 5), "second support added")
         snapshot("98-Festigkeit-Flaechen")
         app.buttons["strengthRun"].tap()
         XCTAssertTrue(app.staticTexts["Ergebnis"].waitForExistence(timeout: 120) || app.staticTexts["ERGEBNIS"].waitForExistence(timeout: 5),
@@ -524,6 +544,9 @@ final class MakerSliceUITests: XCTestCase {
         }
         XCTAssertTrue(opened)
         entry.tap()
+        let more = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Mehr:'")).firstMatch
+        for _ in 0..<6 where !more.isHittable { app.swipeUp() }
+        more.tap()
         let scan = app.buttons["weakSpotScan"]
         for _ in 0..<4 where !scan.isHittable { app.swipeUp() }
         XCTAssertTrue(scan.waitForExistence(timeout: 10))
@@ -554,8 +577,9 @@ final class MakerSliceUITests: XCTestCase {
         let control = app.buttons["filamentControlButton"]
         for _ in 0..<4 where !control.isHittable { app.swipeUp() }
         control.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Display'")).firstMatch.waitForExistence(timeout: 10), "honest note for the ACE")
-        XCTAssertFalse(app.buttons["loadSlot"].exists, "no fake load button")
+        XCTAssertTrue(app.buttons["loadSlot"].waitForExistence(timeout: 10), "the ACE can be loaded from the app")
+        XCTAssertTrue(app.buttons["unloadFilament"].exists)
+        XCTAssertTrue(app.buttons["retractSlot"].exists)
         snapshot("34b-Filament-bedienen")
         app.buttons["Fertig"].tap()
         app.tabBars.buttons["Einstellungen"].tap()

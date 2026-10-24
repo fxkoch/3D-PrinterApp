@@ -132,6 +132,8 @@ class Printer:
         self.lock = threading.Lock()
         self.files: dict[str, dict] = {}
         self.commands: list[dict] = []
+        self.feed_log: list[dict] = []
+        self.loaded_slot = None
         self.state = "free"  # free | printing | paused | finished | stoped
         self.task: dict | None = None
         self.last_project: dict | None = None
@@ -192,7 +194,7 @@ class Printer:
 
     def box(self) -> dict:
         return {"multi_color_box": [{"id": 0, "status": 1, "temp": 31, "humidity": self.humidity,
-                                     "loaded_slot": 0 if self.task else -1,
+                                     "loaded_slot": self.loaded_slot if self.loaded_slot is not None else (0 if self.task else -1),
                                      "drying_status": dict(self.dry, humidity=self.humidity), "slots": self.slots}]}
 
     # Commands ----------------------------------------------------------------
@@ -214,6 +216,10 @@ class Printer:
                     self.light = bool(data.get("status"))
                 self.report("light", {"lights": [{"type": 2, "status": 1 if self.light else 0, "brightness": 100}]})
             elif rtype == "multiColorBox":
+                if action == "feedFilament":
+                    feed = ((data.get("multi_color_box") or [{}])[0].get("feed_status") or {})
+                    self.feed_log.append(feed)
+                    self.loaded_slot = feed.get("slot_index", 0) if feed.get("type") == 1 else -1
                 if action == "setDry":
                     want = ((data.get("multi_color_box") or [{}])[0].get("drying_status") or {})
                     on = bool(want.get("status"))

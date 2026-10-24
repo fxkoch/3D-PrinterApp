@@ -340,4 +340,37 @@ final class FEMTests: XCTestCase {
         XCTAssertEqual(both.maxDisplacement, a.maxDisplacement + b.maxDisplacement, accuracy: (a.maxDisplacement + b.maxDisplacement) * 0.08, "linear: effects add")
         XCTAssertLessThan(both.safetyFactor, min(a.safetyFactor, b.safetyFactor))
     }
+
+    func testAutoSetupFindsTheScrewHoleAndALoadFarAway() throws {
+        // A plate with a washer-like hole is easier built from the tube: its bore is the screw hole.
+        let setup = try XCTUnwrap(FEMAutoSetup.suggest(mesh: tube()))
+        XCTAssertEqual(setup.supports.count, 1)
+        XCTAssertTrue(setup.supports[0].label.contains("Schraubenloch"), setup.supports[0].label)
+        XCTAssertEqual(setup.supports[0].region.triangles.count, 64)
+        XCTAssertFalse(setup.loads.isEmpty)
+        XCTAssertGreaterThan(setup.loads[0].region.normal.z, 0.5, "the weight acts on the top")
+    }
+
+    func testAutoSetupFallsBackToTheBottomFaceAndFindsTwoHoles() throws {
+        let box = try XCTUnwrap(FEMAutoSetup.suggest(mesh: Fixtures.box(40, 20, 10)))
+        XCTAssertEqual(box.supports.count, 1)
+        XCTAssertTrue(box.supports[0].label.contains("Auflage"))
+        XCTAssertEqual(box.loads.first?.region.normal.z ?? 0, 1, accuracy: 1e-6)
+        var two = tube()
+        var second = tube()
+        second = second.transformed(.translation(Vec3(40, 0, 0)))
+        two.append(second)
+        let both = try XCTUnwrap(FEMAutoSetup.suggest(mesh: two))
+        XCTAssertEqual(both.supports.count, 2, "both screw holes")
+    }
+
+    func testAutoSetupRunsThroughTheAnalysis() throws {
+        let mesh = tube()
+        let setup = try XCTUnwrap(FEMAutoSetup.suggest(mesh: mesh))
+        let load = FEMLoadCase.Load(region: setup.loads[0].region, force: Vec3(0, 0, -10))
+        let r = try FEMAnalysis.run(mesh: mesh, material: FEMMaterial.matching(filamentType: "PLA"), setup: solid,
+                                    loadCase: FEMLoadCase(fixed: setup.supports.map(\.region), loads: [load]), options: FEMOptions(targetElements: 3000))
+        XCTAssertTrue(r.converged)
+        XCTAssertGreaterThan(r.safetyFactor, 0)
+    }
 }
