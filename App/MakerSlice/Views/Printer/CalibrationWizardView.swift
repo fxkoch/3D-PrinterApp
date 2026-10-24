@@ -54,6 +54,15 @@ struct CalibrationHomeView: View {
                 Text("Kalibriert wird immer ein bestimmtes Filament an diesem Drucker. Die Werte gelten danach für jeden Druck mit diesem Filamentprofil.")
             }
 
+            Section {
+                NavigationLink {
+                    CalibrationOverviewView(filament: filament, settings: settings)
+                } label: {
+                    Label("Komplett-Kalibrierung – alle Tests und alle Werte auf einmal speichern", systemImage: "list.bullet.clipboard")
+                }
+                .accessibilityIdentifier("calibrationOverview")
+            }
+
             Section("Kalibrierdrucke") {
                 ForEach(CalibrationKind.allCases) { kind in
                     NavigationLink {

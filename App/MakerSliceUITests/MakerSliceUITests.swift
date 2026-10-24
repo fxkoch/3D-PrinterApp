@@ -287,6 +287,37 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("A5-Keine-Stufe-gut")
     }
 
+    /// The complete calibration: all tests listed, results entered in one place and saved with one tap.
+    func testCompleteCalibrationSavesAllChosenValues() throws {
+        app.launchArguments += ["-uiTestVirtualKobra"]
+        app.launch()
+        app.tabBars.buttons["Drucker"].tap()
+        let link = app.buttons["calibrateLink"]
+        for _ in 0..<5 where !link.exists { app.swipeUp() }
+        XCTAssertTrue(link.waitForExistence(timeout: 20))
+        link.tap()
+        let overview = app.buttons["calibrationOverview"]
+        XCTAssertTrue(overview.waitForExistence(timeout: 10))
+        overview.tap()
+        let step = app.buttons["overviewStep-temperature"]
+        for _ in 0..<4 where !step.exists { app.swipeUp() }
+        XCTAssertTrue(step.waitForExistence(timeout: 10), "result picker for the temperature tower")
+        step.tap()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS '°C'")).element(boundBy: 2).tap()
+        let retraction = app.buttons["overviewStep-retraction"]
+        for _ in 0..<6 where !retraction.exists { app.swipeUp() }
+        retraction.tap()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS ' mm'")).element(boundBy: 1).tap()
+        let save = app.buttons["overviewSaveAll"]
+        for _ in 0..<8 where !save.isHittable { app.swipeUp() }
+        XCTAssertTrue(save.label.contains("2 gewählte"), save.label)
+        snapshot("A6-Komplett-Kalibrierung")
+        save.tap()
+        let done = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '2 Werte gespeichert'")).firstMatch
+        for _ in 0..<4 where !done.exists { app.swipeUp() }
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments += ["-uiTestSampleModel"]
         app.launch()
