@@ -1,19 +1,16 @@
 # Schwerkraft-Klemmhalter (Zahnbürste / Rasierer)
 
 Eigene, parametrische Nachkonstruktion des Prinzips aus
-[diesem Video](https://youtu.be/sRcxLJ-Aem0): Das Gerät steht in einem Fußring,
-sein Gewicht zieht einen Schlitten nach unten und der Schlitten klappt zwei
-seitliche Backen gegen das Gerät. Hebt man das Gerät heraus, öffnen die Backen
-wieder.
+[diesem Video](https://youtu.be/sRcxLJ-Aem0). Das Gerät steht in einer
+Fußmulde. Sein Gewicht zieht einen Schlitten nach unten, und der Schlitten
+klappt zwei Backen mit Haltekrallen um das Gerät. Hebt man das Gerät an,
+klappen Gegengewichte die Backen von selbst wieder auf. Das Ganze kommt ohne
+Feder aus und arbeitet nur mit Schwerkraft.
 
 ![Montage](assembly.png)
 
-Moderne Optik: rundum abgerundete Formen, angefaste Sichtkanten, weiche
-Backen mit großen Radien und bündig versenkte Schrauben in Abdeckscheiben.
-Farbvorschlag: Wandplatte weiß, Schlitten hellgrau, Arme und Scheiben
-anthrazit (matt), z. B. PETG oder PLA Matte.
-
-Links: offen (Schlitten oben). Rechts: leer/geschlossen (Schlitten unten).
+Links: leer, die Backen stehen offen. Rechts: mit Gerät, die Backen sind
+geschlossen und die Krallen halten das Gerät vorne fest.
 
 ![Mechanik](mechanism_open_vs_closed.png)
 
@@ -27,44 +24,62 @@ Links: offen (Schlitten oben). Rechts: leer/geschlossen (Schlitten unten).
 | Philips OneBlade Pro 360 (QP6541) | 34,7 × 33,2 mm, abgerundet-eckig | 36,8 × 35,3 mm, Eckradius 9 mm | ca. 30–50 mm | `stl/oneblade/` |
 
 In jedem Ordner liegen alle Einzelteile und eine komplette Druckplatte
-(`print_plate_all.stl`). In OpenSCAD wählst du die Variante mit
-`preset = "mijia"` oder `preset = "oneblade"` aus. Mit `preset = "custom"`
-gelten die eigenen Werte `c_dev_w`, `c_dev_d`, `c_foot_w`, `c_foot_d` und
-`c_foot_r`. Die STLs direkt in `stl/` sind die alte 30-mm-Standardvariante.
+(`print_plate_all.stl`, max. 200 × 144 mm). In OpenSCAD wählst du die Variante
+mit `preset = "mijia"` oder `preset = "oneblade"`. Bei `preset = "custom"`
+gelten die eigenen `c_…`-Werte. Die STLs direkt in `stl/` sind die
+30-mm-Standardvariante.
 
-Die Öffnung im Boden der Fußmulde bleibt frei: Ladebuchse bzw. Ladekontakte
+Die Öffnung im Boden der Fußmulde bleibt frei. Ladebuchse bzw. Ladekontakte
 sind erreichbar, und Wasser läuft ab.
 
 ## So funktioniert's
 
-- Jeder Arm dreht sich um eine M3-Schraube in der Wandplatte.
-- Ein kurzer Hebel (12 mm) zeigt zur Mitte. Sein Zapfen steckt in einem
-  waagrechten Langloch im Schlitten.
-- Wenn der Schlitten nach unten geht, zieht er die Hebel mit. Die Arme drehen
-  sich dadurch und die Backen (ca. 20–35 mm über dem Drehpunkt) schwenken
-  nach innen. Übersetzung etwa 1 : 2,5.
-- Beim Einsetzen drückt das Gerät die oben angefasten Backen auseinander. Das
-  hebt den Schlitten, bis das Gerät im Fußring steht. Dann zieht das Gewicht
-  die Backen zu.
+1. **Leer:** Jeder Arm trägt außen ein rundes Gegengewicht mit 2 M8-Muttern.
+   Es kippt die Backen auf und drückt dabei über die Hebel den Schlitten nach
+   oben. Der Halter steht offen bereit.
+2. **Einsetzen:** Das Gerät von oben in die Fußmulde stellen. Sein Gewicht
+   zieht den Schlitten nach unten. Die Hebel (12 mm) ziehen die Arme herum,
+   und die Backen schließen sich ums Gerät. Die Übersetzung ist etwa 1 : 2,5.
+3. **Festhalten:** Vorne an jeder Backe sitzt eine Kralle, die 4 mm um die
+   Vorderseite des Geräts greift. Nach vorne kann es nicht herausfallen.
+4. **Herausnehmen:** Gerät anheben. Sobald sein Gewicht vom Fuß weg ist,
+   klappen die Gegengewichte die Backen auf. Das Gerät kommt nach oben frei,
+   im offenen Zustand sogar nach vorne.
 
-## Teile
+Nachgerechnet aus den Bauteilvolumen (PETG, ~75 % effektive Füllung,
+M8-Mutter ≈ 5,3 g):
+
+| | Mijia | OneBlade |
+|---|---|---|
+| Arm / Schlitten | 7,0 g / 6,3 g | 7,0 g / 8,4 g |
+| Öffnendes Moment pro Arm (2 Muttern) | 179 g·mm | 180 g·mm |
+| Schlitten schließt mit | 38 g·mm | 50 g·mm |
+| Gerät schließt den Halter ab | ca. 23 g | ca. 22 g |
+
+Beide Geräte sind deutlich schwerer. Je schwerer das Gerät, desto fester
+greifen die Backen.
+
+## Teile und Material
 
 | Datei | Anzahl | Druckhinweis |
 |---|---|---|
-| `stl/backplate.stl` | 1 | Rückseite auf dem Druckbett |
-| `stl/slider.stl` | 1 | steht auf dem Boden des Fußrings |
-| `stl/arm_right.stl` | 1 | flach, Backe zeigt nach oben |
-| `stl/arm_left.stl` | 1 | gespiegelt |
-| `stl/washer.stl` | 4 | Abdeckscheibe mit Senkung, Senkkopf sitzt bündig |
-| `stl/print_plate_all.stl` | – | alles zusammen auf einer Platte (154 × 138 mm) |
+| `backplate.stl` | 1 | Rückseite auf dem Druckbett |
+| `slider.stl` | 1 | steht auf dem Boden der Fußmulde |
+| `arm_right.stl` / `arm_left.stl` | je 1 | flach, Backe und Gegengewicht zeigen nach oben |
+| `washer.stl` | 4 | Abdeckscheibe, Senkkopf sitzt bündig |
 
 Keine Stützstrukturen nötig. Empfehlung: PETG (Bad), 0,2 mm Schichthöhe,
-4 Wände, 25 % Infill.
+4 Wände, 25 % Infill. Farbvorschlag: Wandplatte weiß, Schlitten hellgrau, Arme
+anthrazit matt.
 
-**Schrauben:** M3-Senkkopf (DIN 7991 / ISO 10642): 2 × M3×8 (Drehpunkte
-der Arme), 2 × M3×12 (Führung des Schlittens). Sie werden direkt in die 2,6-mm-Bohrungen der Dome geschraubt
-(selbstschneidend). Nur so fest anziehen, dass Arme und Schlitten noch leicht
-laufen.
+**Zukaufteile:**
+- 2 × M3×8 Senkkopf (DIN 7991): Drehpunkte der Arme
+- 2 × M3×12 Senkkopf: Führung des Schlittens
+- 4 × Mutter M8 (DIN 934): Gegengewichte, je 2 pro Arm
+
+Die Schrauben werden direkt in die 2,6-mm-Bohrungen der Dome geschraubt
+(selbstschneidend). Die Muttern mit einem Tropfen Kleber oder Heißkleber in
+der Tasche sichern.
 
 **Wand:** doppelseitiges Klebeband (z. B. 3M VHB) auf der Rückseite, oder
 `wall_screws = true` setzen. Dann gibt es zwei Senkbohrungen.
@@ -73,34 +88,38 @@ laufen.
 
 1. Schlitten auf die beiden unteren Dome stecken (die Langlöcher zeigen nach
    unten) und mit Abdeckscheibe + M3×12 sichern.
-2. Arme auf die Drehpunkt-Dome stecken, sodass die Zapfen in den waagrechten
+2. Je 2 M8-Muttern in die Gegengewichte der Arme drücken.
+3. Arme auf die Drehpunkt-Dome stecken, sodass die Zapfen in den waagrechten
    Langlöchern des Schlittens sitzen. Mit Abdeckscheibe + M3×8 sichern.
-3. Prüfen: Schlitten hochschieben → Backen öffnen; loslassen → Backen schließen.
+4. Die Schrauben nur so fest anziehen, dass alles leichtgängig bleibt.
+   Leer müssen die Backen von selbst aufklappen.
+
+## Feinabstimmung
+
+- **Backen gehen leer nicht auf:** Schrauben etwas lösen. Falls das nicht
+  reicht, `cw_x` vergrößern (Gegengewicht weiter außen).
+- **Backen greifen mit Gerät zu schwach:** pro Arm nur 1 Mutter einsetzen
+  (`nuts = 1` macht die Tasche kürzer) oder die Backen mit TPU/Gummi bekleben.
+- **Gerät sitzt zu stramm hinter den Krallen:** `lip` verkleinern oder
+  `lip_clr` vergrößern.
 
 ## Anpassen (OpenSCAD)
-
-Die Parameter oben in `gravity_clamp_holder.scad` sind auch im Customizer
-einstellbar:
 
 | Parameter | Standard | Bedeutung |
 |---|---|---|
 | `preset` | custom | `mijia`, `oneblade` oder `custom` |
-| `c_dev_w` | 30 | Breite des Geräts auf Klemmhöhe |
-| `c_dev_d` | 30 | Tiefe des Geräts |
-| `c_foot_w` / `c_foot_d` | 32 / 32 | Innenmaß der Fußmulde |
-| `c_foot_r` | 16 | Eckradius der Fußmulde (halbe Breite = rund) |
+| `c_dev_w` / `c_dev_d` / `c_dev_r` | 30 / 30 / 15 | Gerät: Breite, Tiefe, Eckradius |
+| `c_foot_w` / `c_foot_d` / `c_foot_r` | 32 / 32 / 16 | Fußmulde: innen Breite, Tiefe, Eckradius |
+| `lip` / `lip_clr` | 4 / 0,6 | Krallen: Übergriff und Spiel |
+| `nuts` / `cw_x` | 2 / 15 | Gegengewicht: Muttern pro Arm, Abstand zum Drehpunkt |
 | `pad_h` | 30 | Höhe der Backen |
 | `edge` | 1,2 | Fase an den Sichtkanten |
 | `travel_up` / `travel_down` | 4 / 3 | Schlittenweg (öffnen / schließen) |
 
-Mit den Standardwerten klemmt der Halter Geräte mit 26–40 mm Breite. Am besten
-vor dem Drucken die eigene Bürste bzw. den OneBlade messen: Breite auf ca.
-4–6 cm Höhe und den Durchmesser des Fußes.
-
 Einzelteil exportieren:
 
 ```sh
-openscad -D 'part="slider"' -D dev_w=32 -o slider.stl gravity_clamp_holder.scad
+openscad -D 'preset="mijia"' -D 'part="slider"' -o slider.stl gravity_clamp_holder.scad
 ```
 
 Für die Ansicht `part="assembly"` wählen. Mit `s` (−4 … 3) bewegt man den
@@ -108,12 +127,17 @@ Schlitten.
 
 ## Geprüft
 
-Alle Teile wurden in drei Schlittenstellungen (offen, neutral, geschlossen) auf
-Überschneidungen geprüft. Dabei waren die Abdeckscheiben und ein
-eingesetztes Gerät mit drin, für die Standardvariante sowie für Mijia und
-OneBlade: keine Kollisionen. Alle STLs sind
-geschlossen (watertight) und liegen flach auf dem Druckbett.
+- **Keine Kollisionen:** Alle Teile wurden für Standard, Mijia und OneBlade in
+  drei Schlittenstellungen (offen, neutral, geschlossen) geprüft. Dabei waren
+  die Abdeckscheiben und das eingesetzte Gerät mit drin.
+- **Krallen:** Im geschlossenen Zustand stößt das Gerät schon nach 1 mm vorne
+  an die Krallen. Nach oben kommt es frei. Im offenen Zustand lässt es sich
+  auch nach vorne ohne Berührung herausziehen.
+- **STLs:** Alle sind geschlossen (watertight) und liegen flach auf dem
+  Druckbett. Die Druckplatten enthalten 8 getrennte Teile.
 
-Nicht geprüft ist ein echter Druck. Die Klemmkraft hängt von Reibung und
-Spiel ab. Wenn die Backen zu schwach greifen, `lever` verkleinern oder die
-Backen mit einem Streifen TPU/Gummi bekleben.
+Nicht geprüft ist ein echter Druck. Reibung in den Gelenken und das tatsächliche
+Druckgewicht beeinflussen die Balance. Dafür gibt es die Feinabstimmung oben.
+Die Krallenunterseite folgt der Geräteform. Beim OneBlade mit seinen engeren
+Ecken entsteht dort geschätzt bis zu etwa 60° Überhang (nicht nachgemessen). Das druckt normalerweise ohne Stützen, kann aber leicht unsauber
+werden.

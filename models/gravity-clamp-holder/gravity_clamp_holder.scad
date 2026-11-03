@@ -22,23 +22,37 @@ c_dev_d  = 30;  // custom: depth of the device (front to back, mm)
 c_foot_w = 32;  // custom: inner width of the foot pocket (device bottom + ~2 mm)
 c_foot_d = 32;  // custom: inner depth of the foot pocket
 c_foot_r = 16;  // custom: corner radius of the foot pocket (= half width -> round)
+c_dev_r  = 15;  // custom: corner radius of the device cross-section (for the front claws)
 
 // measured: Xiaomi Mijia toothbrush, bottom 28.4 x 29.2 mm, round
 // measured: Philips OneBlade Pro 360 (QP6541), bottom 34.7 x 33.2 mm, rounded square
-P = preset == "mijia"    ? [28.4, 29.2, 30.6, 31.4, 15.3]
-  : preset == "oneblade" ? [34.7, 33.2, 36.8, 35.3, 9]
-  : [c_dev_w, c_dev_d, c_foot_w, c_foot_d, c_foot_r];
+P = preset == "mijia"    ? [28.4, 29.2, 30.6, 31.4, 15.3, 14.2]
+  : preset == "oneblade" ? [34.7, 33.2, 36.8, 35.3, 9, 8]
+  : [c_dev_w, c_dev_d, c_foot_w, c_foot_d, c_foot_r, c_dev_r];
 dev_w  = P[0];
 dev_d  = P[1];
 foot_w = P[2];
 foot_d = P[3];
 foot_r = min(P[4], foot_w/2, foot_d/2);
+dev_r  = min(P[5], dev_w/2, dev_d/2);
 
 /* [Mechanism] */
 lever   = 12;   // distance pivot -> lever pin
 pad_h   = 30;   // grip pad height
 travel_up   = 4;   // slider travel above neutral (opens pads)
 travel_down = 3;   // slider travel below neutral (closes pads)
+lip     = 4;    // front claw: how far it reaches around the front of the device
+lip_clr = 0.6;  // clearance between claw and device
+
+/* [Self-opening counterweight] */
+// Each arm carries a round counterweight outboard of its pivot. Without a
+// device the counterweights tip the pads open (and push the slider up);
+// the device's weight on the foot overrides them and closes the pads.
+// Lift the device and the holder opens by itself.
+nut_af  = 13;   // hex nut across flats (M8 = 13)
+nut_h   = 6.5;  // hex nut height (M8 = 6.5)
+nuts    = 2;    // nuts per arm (pocket depth)
+cw_x    = 15;   // counterweight centre: distance outboard of the pivot
 
 /* [Plates] */
 bt   = 4;     // back plate thickness
@@ -68,13 +82,15 @@ cap_h = 2.5;              // cap washer height (countersunk screw sits flush)
 yb  = S1 + 0.3 + cap_h + 1; // back of device (clears the cap washers)
 cy  = yb + dev_d/2;       // device centre (y)
 Fw  = foot_w/2; Fd = foot_d/2;
-pad_front = cy + 9;       // pads reach past the device centre
+pad_front = cy + dev_d/2 - 2; // pads + claws reach around the front of the device
 pin_d = 5;
 boss_d = 6;               // arm pivot boss
 gx  = 7; gz = 16;         // slider guide bosses (±gx, gz)
 gboss_d = 5;              // guide pin diameter
 gshoulder_d = 9;
-bp_w = 2*(px + 7);        // back plate width
+cw_r = (nut_af + 0.4)/sqrt(3) + 1.8;   // counterweight boss radius
+cw_len = nuts*(nut_h + 0.1) + 1.2;      // counterweight boss length (y)
+bp_w = 2*(px + cw_x + cw_r + 2);        // back plate width
 bp_z0 = -3 - travel_down - 1;
 bp_z1 = pz + H + 2;
 phi_max = asin(travel_down/lever);
@@ -132,6 +148,21 @@ module arm_local() {
             xzc(bt, bt + at) {
                 hull() { circle(r=6.5); translate([-lever, 0]) circle(r=4); }     // lever
                 hull() { circle(r=6.5); translate([0, H - 3]) circle(r=3); }    // upright, rounded top
+                hull() { circle(r=6.5); translate([cw_x, 0]) circle(r=cw_r); } // counterweight arm
+            }
+            // counterweight boss (pocket for hex nuts, open to the front)
+            translate([cw_x, bt, 0]) rotate([-90,0,0]) hull() {
+                cylinder(r=cw_r, h=cw_len - 1);
+                cylinder(r=cw_r - 1, h=cw_len);
+            }
+            // front claw: wraps around the front of the device so it cannot fall forward
+            difference() {
+                intersection() {
+                    xz(cy - 2, pad_front) polygon([[-3 + 0.01, 8], [-3 - lip, 8 + lip],
+                                                  [-3 - lip, 8 + pad_h - lip - 2], [-3 + 0.01, 8 + pad_h - 2]]);
+                    pad_profile(-3 - lip - 1, 0, 0);
+                }
+                translate([-px, cy, -50]) linear_extrude(200) dev2d(lip_clr);
             }
             // pin into the slider
             translate([-lever, bt + at - 0.01, 0]) rotate([-90,0,0])
@@ -139,19 +170,34 @@ module arm_local() {
             // grip pad: vertical fin facing the device
             difference() {
                 // soft rounded fin with chamfered edges: big radius at the front corners
-                hull() for (c=[[bt + 1, 8 + 1, 1], [bt + 1, 8 + pad_h - 1, 1],
-                               [pad_front - 8, 8 + 8, 8], [pad_front - 8, 8 + pad_h - 8, 8]])
-                    translate([-3, c[0], c[1]]) rotate([0,90,0]) {
-                        translate([0,0,0.8]) cylinder(r=c[2], h=1.4);
-                        cylinder(r=c[2] - 0.8, h=3);
-                    }
+                pad_profile(-3, 0, 0.8);
                 // lead-in chamfer at the top inner edge
                 translate([-3, bt - 1, 8 + pad_h]) rotate([0, 45, 0]) cube([3, 60, 3], center=false);
             }
         }
         translate([0, bt - 1, 0]) rotate([-90,0,0]) cylinder(d=boss_d + 2*clr, h=at + 2);
+        // nut pocket
+        translate([cw_x, bt + 1.2, 0]) rotate([-90,0,0])
+            cylinder(d=(nut_af + 0.4)*2/sqrt(3), h=cw_len, $fn=6);
     }
 }
+// side profile of the grip pad (y-z), extruded along x from x0 to x1, edges chamfered by c
+module pad_profile(x0, x1, c) {
+    hull() for (k=[[bt + 1, 8 + 1, 1], [bt + 1, 8 + pad_h - 1, 1],
+                   [pad_front - 8, 8 + 8, 8], [pad_front - 8, 8 + pad_h - 8, 8]])
+        translate([x0, k[0], k[1]]) rotate([0,90,0]) {
+            translate([0,0,c]) cylinder(r=k[2], h=x1 - x0 - 2*c);
+            cylinder(r=k[2] - c, h=x1 - x0);
+        }
+}
+// cross-section of the device (rounded rectangle), grown by o
+module dev2d(o=0) {
+    offset(r=o) hull() for (mx=[-1,1], my=[-1,1])
+        translate([mx*(dev_w/2 - dev_r), my*(dev_d/2 - dev_r)]) circle(r=dev_r);
+}
+// hex nuts in their pockets (for the assembly view)
+module nuts_in_arm() for (i=[0:nuts-1])
+    translate([cw_x, bt + 1.2 + i*(nut_h + 0.1), 0]) rotate([-90,0,0]) cylinder(d=nut_af*2/sqrt(3), h=nut_h, $fn=6);
 module arm_right(phi=0) {
     translate([px, 0, pz]) rotate([0, -phi, 0]) translate([0,0,0]) arm_local();
 }
@@ -210,7 +256,7 @@ module hardware() for (m=[0,1]) mirror([m,0,0]) {
     translate([px, bt + at + 0.3, pz]) rotate([-90,0,0]) washer();
     translate([gx, S1 + 0.3, gz]) rotate([-90,0,0]) washer();
 }
-module device() translate([0, cy, 0]) scale([dev_w/dev_d, 1, 1]) cylinder(d=dev_d, h=120);
+module device() translate([0, cy, 0]) linear_extrude(120) dev2d(0);
 
 echo(str("preset=", preset, " device ", dev_w, "x", dev_d, " foot ", foot_w, "x", foot_d, " r", foot_r));
 
@@ -220,6 +266,7 @@ module assembly(s=0) {
     color("#EDEDEA") backplate();
     color("#C9CCD1") translate([0,0,-s]) slider();
     color("#2E3136") { arm_right(phi); arm_left(phi); }
+    color("#8A8F96") for (m=[0,1]) mirror([m,0,0]) translate([px,0,pz]) rotate([0,-phi,0]) nuts_in_arm();
     color("#2E3136") hardware();
     if (show_device) %device();
 }
@@ -237,9 +284,9 @@ else if (part == "slider")    print_slider();
 else if (part == "washer")    washer();
 else if (part == "print_plate") {
     print_backplate();
-    translate([bp_w/2 + 30, 0, 0]) print_arm(0);
-    translate([bp_w/2 + 30, -50, 0]) print_arm(1);
-    translate([-bp_w/2 - 30, 0, 0]) print_slider();
+    translate([bp_w/2 + 12, 0, 0]) print_arm(0);
+    translate([bp_w/2 + 12 + px + cw_x + cw_r + 6.5, -52, 0]) print_arm(1);
+    translate([-bp_w/2 - 26, 0, 0]) print_slider();
     for (i=[0:3]) translate([-20 + i*13, 20, 0]) washer();
 }
 // assembled single parts (used by the collision check)
