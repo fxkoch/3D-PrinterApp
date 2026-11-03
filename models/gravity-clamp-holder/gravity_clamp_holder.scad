@@ -45,11 +45,13 @@ lip     = 7;    // front claw: how far it reaches around the front of the device
 lip_clr = 0.6;  // clearance between claw and device
 
 /* [Brush head caddy] */
-// Spare brush heads stand on pegs in a small shelf clipped to a wing of the back plate.
+// Spare brush heads hang upside down (foot up) in a fork, so water runs out of them
+// into the drip tray. The caddy is clipped to a wing of the back plate.
 // -1 = automatic (2 for the Mijia toothbrush, none otherwise), 0 = no caddy.
 head_slots  = -1;
 head_base_d = 18.43; // widest diameter of the brush head's foot (measured)
-head_hole_d = 4.88;  // hole in the brush head for the drive pin (measured)
+head_neck_d = 9;     // shaft right below the foot (measured)
+head_len    = 85;    // whole brush head, foot to bristle tips (estimate - please measure)
 
 /* [Toothpaste and drip tray] */
 // Compartment for toothpaste tubes (standing cap down) next to the brush heads.
@@ -123,7 +125,8 @@ cad_wh  = heads * hs + 8;             // width of the brush head part
 cad_w   = cad_wh + (tubes ? tube_box[0] + 4 : 0);
 tb_x0   = cad_x0 + cad_wh + 2;        // tube compartment inner x
 tb_y0   = bt + at;                    // tube compartment inner y (front face of the caddy back plate)
-cad_z1  = tubes ? 44 : 30;            // top of the caddy back plate
+fork_z  = bp_z0 - 2.5 + 6 + head_len;  // top of the fork: bristles hang 6 mm above the drip tray rim
+cad_z1  = fork_z + 2;                 // top of the caddy back plate
 cad_yc  = bt + at + hr + 0.4;         // head axis (y)
 cad_pins = concat([[cad_x0 + 6, 22], [cad_x0 + cad_wh - 6, 22]],
                   tubes ? [[tb_x0 + tube_box[0]/2, 38]] : []);
@@ -340,17 +343,17 @@ module hardware() {
 // ---------------- brush head caddy ----------------
 // Back plate on the two wing pins, a drained shelf with a ring and a peg per head.
 module caddy() if (heads > 0) {
-    sh = 3;                       // shelf thickness
-    top = bp_z0 + sh;             // shelf top
+    sh = 3;                       // floor of the tube compartment
+    slot = head_neck_d + 0.6;     // slot the shaft slides into
+    mouth = head_neck_d - 0.6;    // narrower mouth: the head clicks in and cannot slide out
+    fy1 = cad_yc + hr + 3;        // front edge of the fork
     difference() {
         union() {
             // back plate
-            xzc(bt, bt + at, 0.8) rrect(cad_x0, cad_x0 + cad_w, bp_z0, cad_z1, 6);
-            // shelf with rounded front
-            translate([0, 0, bp_z0]) linear_extrude(sh) hull() {
-                translate([cad_x0, bt]) square([cad_w, 1]);
-                for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc]) circle(r=hr + 2.2);
-            }
+            xzc(bt, bt + at, 0.8) rrect(cad_x0, cad_x0 + cad_wh + (tubes ? tube_box[0] + 4 : 0), bp_z0, cad_z1, 6);
+            // fork: 4 mm plate on top, 45 degree underside (prints without support)
+            translate([cad_x0, 0, 0]) rotate([90, 0, 90]) linear_extrude(cad_wh)
+                polygon([[bt + 1, fork_z], [fy1, fork_z], [fy1, fork_z - 4], [bt + 1, fork_z - 4 - (fy1 - bt - 1)]]);
             // compartment for toothpaste tubes standing cap down
             // (starts inside the back plate so both merge cleanly)
             if (tubes) translate([tb_x0 - 2, bt + 1, bp_z0]) difference() {
@@ -358,20 +361,17 @@ module caddy() if (heads > 0) {
                     translate([x, y, 0]) cylinder(r=3, h=sh + tube_box[2]);
                 translate([2, tb_y0 - bt - 1, sh + 0.4]) cube([tube_box[0], tube_box[1], tube_box[2] + 1]);
             }
-            for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, 0]) {
-                // ring that centres the foot
-                translate([0, 0, top - 0.01]) difference() {
-                    hull() { cylinder(r=hr + 1.8, h=2.5); cylinder(r=hr + 1.2, h=3.2); }
-                    translate([0, 0, -1]) cylinder(r=hr, h=10);
-                }
-                // peg for the drive-pin hole, tapered
-                translate([0, 0, top - 0.01]) cylinder(d1=head_hole_d - 0.5, d2=head_hole_d - 1.3, h=10);
-            }
         }
         for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, 0]) {
-            // drain holes around the peg and a gap at the front of the ring
-            for (a=[45:90:315]) rotate([0, 0, a]) translate([5.5, 0, bp_z0 - 1]) cylinder(d=3, h=sh + 2, $fn=20);
-            translate([-3, hr - 1, top]) cube([6, 4, 5]);
+            // slot from the front to the head axis, with a narrower mouth and a lead-in
+            translate([0, 0, fork_z - 40]) linear_extrude(41) {
+                circle(d=slot);
+                translate([-slot/2, 0]) square([slot, fy1 - cad_yc - 4]);
+                translate([-mouth/2, 0]) square([mouth, fy1 - cad_yc + 1]);
+                translate([0, fy1 - cad_yc + 0.01]) polygon([[-mouth/2, -2.5], [mouth/2, -2.5], [mouth/2 + 3, 0.5], [-mouth/2 - 3, 0.5]]);
+            }
+            // small countersink so the foot centres itself
+            translate([0, 0, fork_z - 1.2]) cylinder(d1=slot, d2=slot + 2.4, h=1.21);
         }
         // drain slots in the tube compartment floor
         if (tubes) for (i=[0:4]) translate([tb_x0 + 6 + i*(tube_box[0] - 12)/4 - 1.5, tb_y0 + 6, bp_z0 - 1])
@@ -402,13 +402,12 @@ module tubes_dummy() if (tubes) for (i=[0:1])
     }
 // a brush head standing in the caddy (for checks and pictures)
 module brush_heads() if (heads > 0) for (i=[0:heads-1])
-    translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, bp_z0 + 3 + 0.2]) difference() {
-        union() {
-            cylinder(d1=head_base_d, d2=8, h=12);
-            cylinder(d=8, h=60);
-            translate([0, 0, 60]) hull() { cylinder(d=8, h=1); translate([0, 0, 20]) cylinder(d=12, h=1); }
+    translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, fork_z + 0.2]) {
+        cylinder(d1=head_neck_d + 1.2, d2=head_base_d, h=8);           // foot, wide end up
+        translate([0, 0, -(head_len - 8)]) cylinder(d=head_neck_d, h=head_len - 8 + 0.01);   // shaft
+        translate([0, 0, -(head_len - 8)]) hull() {                       // bristle head
+            translate([-6, -6, 0]) cube([12, 12, 1]); translate([-6, -6, 20]) cube([12, 12, 1]);
         }
-        translate([0, 0, -1]) cylinder(d=head_hole_d, h=15); // hole for the drive pin
     }
 module device() translate([0, cy, 0]) linear_extrude(120) dev2d(0);
 

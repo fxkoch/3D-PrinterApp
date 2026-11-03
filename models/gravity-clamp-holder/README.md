@@ -36,19 +36,27 @@ gelten die eigenen `c_…`-Werte. Die STLs direkt in `stl/` sind die
 Die Öffnung im Boden der Fußmulde bleibt frei. Ladebuchse bzw. Ladekontakte
 sind erreichbar, und Wasser läuft ab.
 
-### Ablage für Bürstenköpfe (Mijia)
+### Hängende Bürstenköpfe (Mijia)
 
-![Mijia mit Bürstenkopf-Ablage](mijia_with_heads.png)
+![Mijia mit hängenden Bürstenköpfen](mijia_with_heads.png)
 
-Die Mijia-Variante hat rechts einen Flügel an der Wandplatte mit einer Ablage für
-**2 Ersatz-Bürstenköpfe** (`stl/mijia/caddy.stl`). Jeder Kopf steckt aufrecht auf
-einem leicht konischen Zapfen (passend zum gemessenen Loch von 4,88 mm) und steht
-in einem Ring für den Fuß (gemessen 18,43 mm). Ablauflöcher und eine Lücke vorne
-im Ring lassen Wasser abfließen. Die Ablage wird wie die Arme auf zwei Zapfen
-gesteckt und mit zwei großen Clips gesichert, also auch ohne Schrauben.
+Die Mijia-Variante hat rechts einen Flügel an der Wandplatte mit einer Ablage
+(`stl/mijia/caddy.stl`). Oben hängen **2 Ersatz-Bürstenköpfe kopfüber** in einer
+Gabel: Der breite Fuß (gemessen 18,43 mm) liegt oben auf, der Schaft (9 mm) steckt
+im Schlitz. So läuft das Wasser aus Kopf und Borsten nach unten in die
+Abtropfschale, und die Borsten berühren nichts.
 
-Anzahl der Plätze: `head_slots` (−1 = automatisch, 0 = keine Ablage, 1–4).
-Andere Bürstenköpfe: `head_base_d` und `head_hole_d` anpassen.
+- **Einhängen:** Kopf mit dem Fuß nach oben von vorne in den Schlitz schieben. Die
+  Öffnung ist etwas enger (8,4 mm), der Kopf rastet spürbar ein und kann nicht
+  von selbst herausrutschen. Eine kleine Senkung oben zentriert den Fuß.
+- **Gedruckt** wird die Gabel ohne Stützen: Ihre Unterseite ist um 45° abgeschrägt.
+- **Höhe:** Die Gabel sitzt so hoch, dass die Borsten 6 mm über dem Rand der
+  Abtropfschale hängen. Angenommen ist ein 85 mm langer Bürstenkopf
+  (`head_len`) – **bitte nachmessen** und den Wert anpassen.
+
+Die Ablage wird wie die Arme auf Zapfen gesteckt und mit Clips gesichert, also
+ohne Schrauben. Anzahl der Plätze: `head_slots` (−1 = automatisch, 0 = keine
+Ablage, 1–4). Andere Bürstenköpfe: `head_base_d`, `head_neck_d`, `head_len`.
 
 ### Fach für Zahnpastatuben und Abtropfschale (Mijia)
 
@@ -103,11 +111,11 @@ greifen die Backen.
 | `arm_right.stl` / `arm_left.stl` | je 1 | flach, Backe und Gegengewicht zeigen nach oben |
 | `clip_pivot.stl` | 2 | Sicherungsclip für die Arm-Drehpunkte (flach drucken) |
 | `clip_guide.stl` | 2 | Sicherungsclip für die Schlittenführung (flach drucken) |
-| `mijia/caddy.stl` | 1 | Ablage für Bürstenköpfe und Tuben, steht auf dem Boden (nur Mijia) |
+| `mijia/caddy.stl` | 1 | Ablage mit Gabel für die Bürstenköpfe und Tubenfach, steht auf dem Boden (nur Mijia) |
 | `mijia/drip_tray.stl` | 1 | Abtropfschale (nur Mijia) |
 
 Die Mijia-Variante ist auf **zwei Druckplatten** verteilt, weil die Wandplatte breiter ist:
-`mijia/print_plate_1.stl` (Wandplatte, Schlitten, 7 Clips; 204 × 160 mm) und
+`mijia/print_plate_1.stl` (Wandplatte, Schlitten, 7 Clips; 204 × 177 mm) und
 `mijia/print_plate_2.stl` (Abtropfschale, Arme, Ablage; 198 × 163 mm).
 
 Keine Stützstrukturen nötig. Empfehlung: PETG (Bad), 0,2 mm Schichthöhe,
