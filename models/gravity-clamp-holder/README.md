@@ -66,38 +66,47 @@ greifen die Backen.
 | `backplate.stl` | 1 | Rückseite auf dem Druckbett |
 | `slider.stl` | 1 | steht auf dem Boden der Fußmulde |
 | `arm_right.stl` / `arm_left.stl` | je 1 | flach, Backe und Gegengewicht zeigen nach oben |
-| `washer.stl` | 4 | Abdeckscheibe, Senkkopf sitzt bündig |
+| `clip_pivot.stl` | 2 | Sicherungsclip für die Arm-Drehpunkte (flach drucken) |
+| `clip_guide.stl` | 2 | Sicherungsclip für die Schlittenführung (flach drucken) |
 
 Keine Stützstrukturen nötig. Empfehlung: PETG (Bad), 0,2 mm Schichthöhe,
 4 Wände, 25 % Infill. Farbvorschlag: Wandplatte weiß, Schlitten hellgrau, Arme
 anthrazit matt.
 
-**Zukaufteile:**
-- 2 × M3×8 Senkkopf (DIN 7991): Drehpunkte der Arme
-- 2 × M3×12 Senkkopf: Führung des Schlittens
-- 4 × Mutter M8 (DIN 934): Gegengewichte, je 2 pro Arm
+**Ohne Schrauben – nur Steckverbindungen:** Die Zapfen für Arme und Schlitten
+sind an die Wandplatte angedruckt. Jeder Zapfen hat vorne eine Nut, in die ein
+gedruckter Sicherungsclip seitlich einrastet (wie ein E-Clip). Die Clips werden
+flach gedruckt und federn deshalb in der Druckebene, statt an Schichtgrenzen zu
+brechen. Lösen: mit einem kleinen Schraubendreher an der Öffnung heraushebeln.
 
-Die Schrauben werden direkt in die 2,6-mm-Bohrungen der Dome geschraubt
-(selbstschneidend). Die Muttern mit einem Tropfen Kleber oder Heißkleber in
-der Tasche sichern.
+![Steckzapfen mit Clip](snap_clip.png)
+
+**Zukaufteile:** nur 4 × Mutter M8 (DIN 934) als Gegengewichte, je 2 pro Arm.
+Sie halten nichts zusammen, sie sind nur Gewicht. Mit einem Tropfen Kleber in der
+Tasche sichern.
 
 **Wand:** doppelseitiges Klebeband (z. B. 3M VHB) auf der Rückseite, oder
 `wall_screws = true` setzen. Dann gibt es zwei Senkbohrungen.
 
 ## Zusammenbau
 
-1. Schlitten auf die beiden unteren Dome stecken (die Langlöcher zeigen nach
-   unten) und mit Abdeckscheibe + M3×12 sichern.
-2. Je 2 M8-Muttern in die Gegengewichte der Arme drücken.
-3. Arme auf die Drehpunkt-Dome stecken, sodass die Zapfen in den waagrechten
-   Langlöchern des Schlittens sitzen. Mit Abdeckscheibe + M3×8 sichern.
-4. Die Schrauben nur so fest anziehen, dass alles leichtgängig bleibt.
-   Leer müssen die Backen von selbst aufklappen.
+1. Je 2 M8-Muttern in die Gegengewichte der Arme drücken.
+2. Arme auf die äußeren Zapfen der Wandplatte stecken und mit den großen Clips
+   (`clip_pivot`) seitlich sichern – sie rasten hörbar ein.
+3. Schlitten auf die beiden unteren Zapfen stecken. Dabei müssen die Zapfen der
+   Arme in die waagrechten Langlöcher des Schlittens greifen. Mit den kleinen
+   Clips (`clip_guide`) sichern.
+4. Prüfen: Leer klappen die Backen von selbst auf. Mit Gerät schließen sie.
+   Etwas Spiel (0,4 mm) ist gewollt, damit nichts klemmt.
 
 ## Feinabstimmung
 
-- **Backen gehen leer nicht auf:** Schrauben etwas lösen. Falls das nicht
-  reicht, `cw_x` vergrößern (Gegengewicht weiter außen).
+- **Backen gehen leer nicht auf:** Zapfen und Löcher auf Grate prüfen, ggf. mit
+  etwas Trockenschmiermittel (PTFE) gängig machen. Falls das nicht reicht,
+  `cw_x` vergrößern (Gegengewicht weiter außen).
+- **Clip zu stramm oder zu locker:** Der Clip muss sich 0,7–0,9 mm aufbiegen.
+  Bricht er, PETG statt PLA nehmen; sitzt er locker, `groove_d` bzw.
+  `ggroove_d` um 0,2 mm verkleinern.
 - **Backen greifen mit Gerät zu schwach:** pro Arm nur 1 Mutter einsetzen
   (`nuts = 1` macht die Tasche kürzer) oder die Backen mit TPU/Gummi bekleben.
 - **Gerät sitzt zu stramm hinter den Krallen:** `lip` verkleinern oder
@@ -129,7 +138,9 @@ Schlitten.
 
 - **Keine Kollisionen:** Alle Teile wurden für Standard, Mijia und OneBlade in
   drei Schlittenstellungen (offen, neutral, geschlossen) geprüft. Dabei waren
-  die Abdeckscheiben und das eingesetzte Gerät mit drin.
+  die Clips und das eingesetzte Gerät mit drin.
+- **Steckverbindung:** Ein Clip lässt sich nicht vom Zapfen schieben, und Arme
+  bzw. Schlitten stoßen beim Abziehen nach vorn gegen die Clips, halten also.
 - **Krallen:** Im geschlossenen Zustand stößt das Gerät schon nach 1 mm vorne
   an die Krallen. Nach oben kommt es frei. Im offenen Zustand lässt es sich
   auch nach vorne ohne Berührung herausziehen.

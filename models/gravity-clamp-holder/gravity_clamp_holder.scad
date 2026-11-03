@@ -7,9 +7,9 @@
 // open again (pushing the pads apart lifts the slider).
 //
 // Coordinates: x = right, y = away from the wall, z = up.
-// Hardware: 4x M3 countersunk screw (DIN 7991 / ISO 10642: 2x M3x8 for the
-// arm pivots, 2x M3x12 for the slider guides), self-tapping into the printed
-// bosses. They sit flush in the printed cap washers. Mount the back
+// No screws: arms and slider sit on pins printed onto the back plate and are
+// held by printed snap clips (like E-clips) that click sideways into a groove
+// on each pin. The clips are printed flat, so they flex within the layers. Mount the back
 // plate with double-sided foam tape (or the optional screw holes).
 //
 // Render a single part with:  openscad -D 'part="arm_right"' -o x.stl this.scad
@@ -64,7 +64,7 @@ wall_screws = false; // add 2 countersunk holes for wall screws
 edge = 1.2;   // chamfer on visible front edges (modern look)
 
 /* [View] */
-part = "assembly"; // [assembly, backplate, arm_right, arm_left, slider, washer, print_plate]
+part = "assembly"; // [assembly, backplate, arm_right, arm_left, slider, clip_pivot, clip_guide, print_plate]
 s    = 0;          // slider position for assembly view (+ = down / closed)
 show_device = true;
 
@@ -78,16 +78,21 @@ lx  = px - lever;         // lever pin x (neutral)
 H   = 8 + pad_h;          // upright height above pivot
 S0  = bt + at + gap;      // slider back face
 S1  = S0 + st;            // slider front face
-cap_h = 2.5;              // cap washer height (countersunk screw sits flush)
-yb  = S1 + 0.3 + cap_h + 1; // back of device (clears the cap washers)
+clip_t = 1.6;             // snap clip thickness
+groove = clip_t + 0.2;    // groove length on the pins
+pin_tip = 1.2;            // pin length beyond the groove
+cap_h = groove + pin_tip; // how far a pin sticks out in front of the part it holds
+yb  = S1 + 0.3 + cap_h + 0.7; // back of device (clears the guide pins and clips)
 cy  = yb + dev_d/2;       // device centre (y)
 Fw  = foot_w/2; Fd = foot_d/2;
 pad_front = cy + dev_d/2 - 2; // pads + claws reach around the front of the device
 pin_d = 5;
-boss_d = 6;               // arm pivot boss
+boss_d = 6;               // arm pivot pin
+groove_d  = 4.4;          // pivot pin diameter in the clip groove
 gx  = 7; gz = 16;         // slider guide bosses (±gx, gz)
 gboss_d = 5;              // guide pin diameter
 gshoulder_d = 9;
+ggroove_d = 3.6;          // guide pin diameter in the clip groove
 cw_r = (nut_af + 0.4)/sqrt(3) + 1.8;   // counterweight boss radius
 cw_len = nuts*(nut_h + 0.1) + 1.2;      // counterweight boss length (y)
 bp_w = 2*(px + cw_x + cw_r + 2);        // back plate width
@@ -114,24 +119,43 @@ module xzc(y0, y1, c=edge, n=6) {
         offset(delta=-(i+1)*c/n) children();
 }
 
+// ---------------- snap pins and clips ----------------
+// Pin along +z: full diameter up to z0, groove for the clip, short chamfered tip.
+module snap_pin(d, gd, z0) {
+    cylinder(d=d, h=z0);
+    translate([0, 0, z0 - 0.01]) cylinder(d=gd, h=groove + 0.02);
+    translate([0, 0, z0 + groove]) hull() {
+        cylinder(d=d, h=pin_tip - 0.5);
+        cylinder(d=d - 1, h=pin_tip);
+    }
+}
+// Snap clip for a groove of diameter gd: a domed ring with an opening narrower than the groove,
+// so it clicks on sideways. Opening points along +x.
+module snap_clip(gd, od=10) {
+    open = gd * 0.8;
+    difference() {
+        hull() { cylinder(d=od, h=clip_t - 0.5); cylinder(d=od - 1, h=clip_t); }
+        translate([0, 0, -1]) cylinder(d=gd + 0.2, h=clip_t + 2);
+        translate([0, -open/2, -1]) cube([od, open, clip_t + 2]);
+        // lead-in: the mouth widens towards the outside
+        translate([0, 0, -1]) linear_extrude(clip_t + 2)
+            polygon([[gd/2 + 0.4, -open/2], [od/2 + 0.5, -open/2 - 1.4], [od/2 + 0.5, open/2 + 1.4], [gd/2 + 0.4, open/2]]);
+    }
+}
+
 // ---------------- back plate ----------------
 module backplate() {
     difference() {
         union() {
             xzc(0, bt, 1.5) rrect(-bp_w/2, bp_w/2, bp_z0, bp_z1, 10);
-            // arm pivot bosses
+            // arm pivot pins
             for (m=[0,1]) mirror([m,0,0]) translate([px, 0, pz]) rotate([-90,0,0])
-                cylinder(d=boss_d, h=bt + at + 0.3);
-            // slider guide bosses: shoulder through the arm layer, pin through the slider
+                snap_pin(boss_d, groove_d, bt + at + 0.3);
+            // slider guide pins: shoulder through the arm layer, pin through the slider
             for (m=[0,1]) mirror([m,0,0]) translate([gx, 0, gz]) rotate([-90,0,0]) {
                 cylinder(d=gshoulder_d, h=S0);
-                cylinder(d=gboss_d, h=S1 + 0.3);
+                snap_pin(gboss_d, ggroove_d, S1 + 0.3);
             }
-        }
-        // M3 pilot holes (self-tapping)
-        for (m=[0,1]) mirror([m,0,0]) {
-            translate([px, 1.2, pz]) rotate([-90,0,0]) cylinder(d=2.6, h=20, $fn=24);
-            translate([gx, 1.2, gz]) rotate([-90,0,0]) cylinder(d=2.6, h=20, $fn=24);
         }
         if (wall_screws) for (z=[bp_z1-8, bp_z0+6]) translate([0, -0.01, z]) rotate([-90,0,0]) {
             cylinder(d=4, h=bt+1, $fn=24);
@@ -175,7 +199,7 @@ module arm_local() {
                 translate([-3, bt - 1, 8 + pad_h]) rotate([0, 45, 0]) cube([3, 60, 3], center=false);
             }
         }
-        translate([0, bt - 1, 0]) rotate([-90,0,0]) cylinder(d=boss_d + 2*clr, h=at + 2);
+        translate([0, bt - 1, 0]) rotate([-90,0,0]) cylinder(d=boss_d + 2*clr, h=at + 2); // pivot hole
         // nut pocket
         translate([cw_x, bt + 1.2, 0]) rotate([-90,0,0])
             cylinder(d=(nut_af + 0.4)*2/sqrt(3), h=cw_len, $fn=6);
@@ -242,19 +266,13 @@ module slider() {
     }
 }
 
-// cap washer: domed, with a 90 deg countersink so an M3 countersunk head sits flush
-module washer() {
-    difference() {
-        hull() { cylinder(d=10, h=cap_h - 0.8); cylinder(d=8.4, h=cap_h); }
-        translate([0,0,-1]) cylinder(d=3.4, h=cap_h + 2, $fn=24);
-        translate([0,0,cap_h - 1.75]) cylinder(d1=3.4, d2=6.9, h=1.76, $fn=32);
-    }
-}
+module clip_pivot() snap_clip(groove_d, 10);
+module clip_guide() snap_clip(ggroove_d, 9);
 
-// cap washers in place (countersunk screws sit flush inside them)
+// clips in place (in the middle of each groove, opening pointing up)
 module hardware() for (m=[0,1]) mirror([m,0,0]) {
-    translate([px, bt + at + 0.3, pz]) rotate([-90,0,0]) washer();
-    translate([gx, S1 + 0.3, gz]) rotate([-90,0,0]) washer();
+    translate([px, bt + at + 0.4, pz]) rotate([-90,0,0]) rotate([0,0,90]) clip_pivot();
+    translate([gx, S1 + 0.4, gz]) rotate([-90,0,0]) rotate([0,0,90]) clip_guide();
 }
 module device() translate([0, cy, 0]) linear_extrude(120) dev2d(0);
 
@@ -281,13 +299,15 @@ else if (part == "backplate") print_backplate();
 else if (part == "arm_right") print_arm(0);
 else if (part == "arm_left")  print_arm(1);
 else if (part == "slider")    print_slider();
-else if (part == "washer")    washer();
+else if (part == "clip_pivot") clip_pivot();
+else if (part == "clip_guide") clip_guide();
 else if (part == "print_plate") {
     print_backplate();
     translate([bp_w/2 + 12, 0, 0]) print_arm(0);
     translate([bp_w/2 + 12 + px + cw_x + cw_r + 6.5, -52, 0]) print_arm(1);
     translate([-bp_w/2 - 26, 0, 0]) print_slider();
-    for (i=[0:3]) translate([-20 + i*13, 20, 0]) washer();
+    for (i=[0:1]) translate([-20 + i*13, 20, 0]) clip_pivot();
+    for (i=[0:1]) translate([6 + i*12, 20, 0]) clip_guide();
 }
 // assembled single parts (used by the collision check)
 else if (part == "asm_backplate") backplate();
@@ -296,3 +316,9 @@ else if (part == "asm_arm_right") arm_right(asin(s/lever));
 else if (part == "asm_arm_left")  arm_left(asin(s/lever));
 else if (part == "asm_hardware") hardware();
 else if (part == "asm_device") device();
+// explanation view: a pivot pin and its clip just before it clicks into the groove
+else if (part == "snap_demo") {
+    color("#EDEDEA") { translate([-8, -8, 0]) cube([16, 16, 2]); translate([0, 0, 2]) snap_pin(boss_d, groove_d, at + 0.3 + 2 - 2); }
+    color("#2E3136") translate([0, 0, 2]) difference() { cylinder(r=6.5, h=at); translate([0,0,-1]) cylinder(d=boss_d + 2*clr, h=at + 2); }
+    color("#8A8F96") translate([-7, 0, 2 + at + 0.4]) rotate([0, 0, 180]) clip_pivot();
+}
