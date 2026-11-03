@@ -28,13 +28,27 @@ Draufsicht: Die Krallen greifen vorne um das Gerät (links Mijia, rechts OneBlad
 | Philips OneBlade Pro 360 (QP6541) | 34,7 × 33,2 mm, abgerundet-eckig | 36,8 × 35,3 mm, Eckradius 9 mm | ca. 30–50 mm | `stl/oneblade/` |
 
 In jedem Ordner liegen alle Einzelteile und eine komplette Druckplatte
-(`print_plate_all.stl`, max. 200 × 144 mm). In OpenSCAD wählst du die Variante
+(`print_plate_all.stl`, max. 225 × 144 mm). In OpenSCAD wählst du die Variante
 mit `preset = "mijia"` oder `preset = "oneblade"`. Bei `preset = "custom"`
 gelten die eigenen `c_…`-Werte. Die STLs direkt in `stl/` sind die
 30-mm-Standardvariante.
 
 Die Öffnung im Boden der Fußmulde bleibt frei. Ladebuchse bzw. Ladekontakte
 sind erreichbar, und Wasser läuft ab.
+
+### Ablage für Bürstenköpfe (Mijia)
+
+![Mijia mit Bürstenkopf-Ablage](mijia_with_heads.png)
+
+Die Mijia-Variante hat rechts einen Flügel an der Wandplatte mit einer Ablage für
+**2 Ersatz-Bürstenköpfe** (`stl/mijia/caddy.stl`). Jeder Kopf steckt aufrecht auf
+einem leicht konischen Zapfen (passend zum gemessenen Loch von 4,88 mm) und steht
+in einem Ring für den Fuß (gemessen 18,43 mm). Ablauflöcher und eine Lücke vorne
+im Ring lassen Wasser abfließen. Die Ablage wird wie die Arme auf zwei Zapfen
+gesteckt und mit zwei großen Clips gesichert, also auch ohne Schrauben.
+
+Anzahl der Plätze: `head_slots` (−1 = automatisch, 0 = keine Ablage, 1–4).
+Andere Bürstenköpfe: `head_base_d` und `head_hole_d` anpassen.
 
 ## So funktioniert's
 
@@ -72,6 +86,10 @@ greifen die Backen.
 | `arm_right.stl` / `arm_left.stl` | je 1 | flach, Backe und Gegengewicht zeigen nach oben |
 | `clip_pivot.stl` | 2 | Sicherungsclip für die Arm-Drehpunkte (flach drucken) |
 | `clip_guide.stl` | 2 | Sicherungsclip für die Schlittenführung (flach drucken) |
+| `mijia/caddy.stl` | 1 | Bürstenkopf-Ablage, steht auf dem Boden (nur Mijia) |
+
+Die Mijia-Druckplatte enthält zusätzlich die Ablage und 2 weitere große Clips
+(11 Teile, 225 × 126 mm).
 
 Keine Stützstrukturen nötig. Empfehlung: PETG (Bad), 0,2 mm Schichthöhe,
 4 Wände, 25 % Infill. Farbvorschlag: Wandplatte weiß, Schlitten hellgrau, Arme

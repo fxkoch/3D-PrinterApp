@@ -44,6 +44,13 @@ travel_down = 3;   // slider travel below neutral (closes pads)
 lip     = 7;    // front claw: how far it reaches around the front of the device
 lip_clr = 0.6;  // clearance between claw and device
 
+/* [Brush head caddy] */
+// Spare brush heads stand on pegs in a small shelf clipped to a wing of the back plate.
+// -1 = automatic (2 for the Mijia toothbrush, none otherwise), 0 = no caddy.
+head_slots  = -1;
+head_base_d = 18.43; // widest diameter of the brush head's foot (measured)
+head_hole_d = 4.88;  // hole in the brush head for the drive pin (measured)
+
 /* [Self-opening counterweight] */
 // Each arm carries a round counterweight outboard of its pivot. Without a
 // device the counterweights tip the pads open (and push the slider up);
@@ -64,7 +71,7 @@ wall_screws = false; // add 2 countersunk holes for wall screws
 edge = 1.2;   // chamfer on visible front edges (modern look)
 
 /* [View] */
-part = "assembly"; // [assembly, backplate, arm_right, arm_left, slider, clip_pivot, clip_guide, print_plate]
+part = "assembly"; // [assembly, backplate, arm_right, arm_left, slider, clip_pivot, clip_guide, caddy, print_plate]
 s    = 0;          // slider position for assembly view (+ = down / closed)
 show_device = true;
 
@@ -97,6 +104,16 @@ cw_r = (nut_af + 0.4)/sqrt(3) + 1.8;   // counterweight boss radius
 cw_len = nuts*(nut_h + 0.1) + 1.2;      // counterweight boss length (y)
 bp_w = 2*(px + cw_x + cw_r + 2);        // back plate width
 bp_z0 = -3 - travel_down - 1;
+// brush head caddy
+heads   = head_slots >= 0 ? head_slots : (preset == "mijia" ? 2 : 0);
+hs      = head_base_d + 4;            // spacing of the heads
+hr      = head_base_d/2 + 0.6;        // ring inner radius
+cad_x0  = bp_w/2 + 2;                 // caddy starts right of the main plate
+cad_w   = heads * hs + 8;
+cad_z1  = 30;                         // top of the caddy back plate
+cad_yc  = bt + at + hr + 0.4;         // head axis (y)
+cad_pins = [[cad_x0 + 6, 22], [cad_x0 + cad_w - 6, 22]];
+bp_xr   = heads > 0 ? cad_x0 + cad_w : bp_w/2; // right edge of the back plate
 bp_z1 = pz + H + 2;
 phi_max = asin(travel_down/lever);
 phi_min = -asin(travel_up/lever);
@@ -147,7 +164,13 @@ module snap_clip(gd, od=10) {
 module backplate() {
     difference() {
         union() {
-            xzc(0, bt, 1.5) rrect(-bp_w/2, bp_w/2, bp_z0, bp_z1, 10);
+            xzc(0, bt, 1.5) hull() {
+                rrect(-bp_w/2, bp_w/2, bp_z0, bp_z1, 10);
+                if (heads > 0) rrect(bp_w/2 - 20, bp_xr, bp_z0, cad_z1 + 4, 8);  // wing for the caddy
+            }
+            // pins for the brush head caddy (same snap pins and clips as the arms)
+            if (heads > 0) for (pp = cad_pins) translate([pp[0], 0, pp[1]]) rotate([-90,0,0])
+                snap_pin(boss_d, groove_d, bt + at + 0.3);
             // arm pivot pins
             for (m=[0,1]) mirror([m,0,0]) translate([px, 0, pz]) rotate([-90,0,0])
                 snap_pin(boss_d, groove_d, bt + at + 0.3);
@@ -270,10 +293,58 @@ module clip_pivot() snap_clip(groove_d, 10);
 module clip_guide() snap_clip(ggroove_d, 9);
 
 // clips in place (in the middle of each groove, opening pointing up)
-module hardware() for (m=[0,1]) mirror([m,0,0]) {
-    translate([px, bt + at + 0.4, pz]) rotate([-90,0,0]) rotate([0,0,90]) clip_pivot();
-    translate([gx, S1 + 0.4, gz]) rotate([-90,0,0]) rotate([0,0,90]) clip_guide();
+module hardware() {
+    for (m=[0,1]) mirror([m,0,0]) {
+        translate([px, bt + at + 0.4, pz]) rotate([-90,0,0]) rotate([0,0,90]) clip_pivot();
+        translate([gx, S1 + 0.4, gz]) rotate([-90,0,0]) rotate([0,0,90]) clip_guide();
+    }
+    if (heads > 0) for (pp = cad_pins)
+        translate([pp[0], bt + at + 0.4, pp[1]]) rotate([-90,0,0]) rotate([0,0,90]) clip_pivot();
 }
+
+// ---------------- brush head caddy ----------------
+// Back plate on the two wing pins, a drained shelf with a ring and a peg per head.
+module caddy() if (heads > 0) {
+    sh = 3;                       // shelf thickness
+    top = bp_z0 + sh;             // shelf top
+    difference() {
+        union() {
+            // back plate
+            xzc(bt, bt + at, 0.8) rrect(cad_x0, cad_x0 + cad_w, bp_z0, cad_z1, 6);
+            // shelf with rounded front
+            translate([0, 0, bp_z0]) linear_extrude(sh) hull() {
+                translate([cad_x0, bt]) square([cad_w, 1]);
+                for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc]) circle(r=hr + 1.8);
+            }
+            for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, 0]) {
+                // ring that centres the foot
+                translate([0, 0, top - 0.01]) difference() {
+                    hull() { cylinder(r=hr + 1.8, h=2.5); cylinder(r=hr + 1.2, h=3.2); }
+                    translate([0, 0, -1]) cylinder(r=hr, h=10);
+                }
+                // peg for the drive-pin hole, tapered
+                translate([0, 0, top - 0.01]) cylinder(d1=head_hole_d - 0.5, d2=head_hole_d - 1.3, h=10);
+            }
+        }
+        for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, 0]) {
+            // drain holes around the peg and a gap at the front of the ring
+            for (a=[45:90:315]) rotate([0, 0, a]) translate([5.5, 0, bp_z0 - 1]) cylinder(d=3, h=sh + 2, $fn=20);
+            translate([-3, hr - 1, top]) cube([6, 4, 5]);
+        }
+        // holes for the wing pins
+        for (pp = cad_pins) translate([pp[0], bt - 1, pp[1]]) rotate([-90,0,0]) cylinder(d=boss_d + 2*clr, h=at + 2);
+    }
+}
+// a brush head standing in the caddy (for checks and pictures)
+module brush_heads() if (heads > 0) for (i=[0:heads-1])
+    translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, bp_z0 + 3 + 0.2]) difference() {
+        union() {
+            cylinder(d1=head_base_d, d2=8, h=12);
+            cylinder(d=8, h=60);
+            translate([0, 0, 60]) hull() { cylinder(d=8, h=1); translate([0, 0, 20]) cylinder(d=12, h=1); }
+        }
+        translate([0, 0, -1]) cylinder(d=head_hole_d, h=15); // hole for the drive pin
+    }
 module device() translate([0, cy, 0]) linear_extrude(120) dev2d(0);
 
 echo(str("preset=", preset, " device ", dev_w, "x", dev_d, " foot ", foot_w, "x", foot_d, " r", foot_r));
@@ -286,6 +357,7 @@ module assembly(s=0) {
     color("#2E3136") { arm_right(phi); arm_left(phi); }
     color("#8A8F96") for (m=[0,1]) mirror([m,0,0]) translate([px,0,pz]) rotate([0,-phi,0]) nuts_in_arm();
     color("#2E3136") hardware();
+    if (heads > 0) { color("#C9CCD1") caddy(); %brush_heads(); }
     if (show_device) %device();
 }
 
@@ -293,6 +365,7 @@ module assembly(s=0) {
 module print_backplate() rotate([90,0,0]) translate([0,0,0]) backplate();
 module print_arm(m)  rotate([90,0,0]) translate([0,-bt,-pz]) mirror([m,0,0]) arm_right(0);
 module print_slider() translate([0,0,3]) slider();
+module print_caddy() translate([-cad_x0 - cad_w/2, 0, -bp_z0]) caddy();
 
 if (part == "assembly") assembly(s);
 else if (part == "backplate") print_backplate();
@@ -301,13 +374,24 @@ else if (part == "arm_left")  print_arm(1);
 else if (part == "slider")    print_slider();
 else if (part == "clip_pivot") clip_pivot();
 else if (part == "clip_guide") clip_guide();
+else if (part == "caddy")      print_caddy();
 else if (part == "print_plate") {
     print_backplate();
-    translate([bp_w/2 + 12, 0, 0]) print_arm(0);
-    translate([bp_w/2 + 12 + px + cw_x + cw_r + 6.5, -52, 0]) print_arm(1);
+    if (heads > 0) {
+        // wide back plate: arms above it, caddy between clips and arms
+        translate([52, 46, 0]) print_arm(0);
+        translate([138, 46, 0]) print_arm(1);
+    } else {
+        translate([bp_xr + 12, 0, 0]) print_arm(0);
+        translate([bp_xr + 12 + px + cw_x + cw_r + 6.5, -52, 0]) print_arm(1);
+    }
     translate([-bp_w/2 - 26, 0, 0]) print_slider();
     for (i=[0:1]) translate([-20 + i*13, 20, 0]) clip_pivot();
     for (i=[0:1]) translate([6 + i*12, 20, 0]) clip_guide();
+    if (heads > 0) {
+        for (i=[0:1]) translate([32 + i*13, 20, 0]) clip_pivot();
+        translate([16, 24, 0]) print_caddy();
+    }
 }
 // assembled single parts (used by the collision check)
 else if (part == "asm_backplate") backplate();
@@ -316,6 +400,8 @@ else if (part == "asm_arm_right") arm_right(asin(s/lever));
 else if (part == "asm_arm_left")  arm_left(asin(s/lever));
 else if (part == "asm_hardware") hardware();
 else if (part == "asm_device") device();
+else if (part == "asm_caddy") { if (heads > 0) caddy(); }
+else if (part == "asm_heads") brush_heads();
 // explanation view: a pivot pin and its clip just before it clicks into the groove
 else if (part == "snap_demo") {
     color("#EDEDEA") { translate([-8, -8, 0]) cube([16, 16, 2]); translate([0, 0, 2]) snap_pin(boss_d, groove_d, at + 0.3 + 2 - 2); }
