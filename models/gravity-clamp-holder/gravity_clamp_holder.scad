@@ -51,6 +51,14 @@ head_slots  = -1;
 head_base_d = 18.43; // widest diameter of the brush head's foot (measured)
 head_hole_d = 4.88;  // hole in the brush head for the drive pin (measured)
 
+/* [Toothpaste and drip tray] */
+// Compartment for toothpaste tubes (standing cap down) next to the brush heads.
+// -1 = automatic (with the brush head caddy), 0 = none.
+tube_slots = -1;
+tube_box   = [58, 36, 40]; // inner width, depth, height (two tubes side by side)
+// Removable drip tray under toothbrush, heads and tubes. -1 = automatic (Mijia), 0 = none, 1 = always.
+drip_tray  = -1;
+
 /* [Self-opening counterweight] */
 // Each arm carries a round counterweight outboard of its pivot. Without a
 // device the counterweights tip the pads open (and push the slider up);
@@ -71,9 +79,10 @@ wall_screws = false; // add 2 countersunk holes for wall screws
 edge = 1.2;   // chamfer on visible front edges (modern look)
 
 /* [View] */
-part = "assembly"; // [assembly, backplate, arm_right, arm_left, slider, clip_pivot, clip_guide, caddy, print_plate]
+part = "assembly"; // [assembly, backplate, arm_right, arm_left, slider, clip_pivot, clip_guide, caddy, drip_tray, print_plate, print_plate_2]
 s    = 0;          // slider position for assembly view (+ = down / closed)
 show_device = true;
+tray_out = 0;      // pull the drip tray out in the assembly view (mm)
 
 $fn = 64;
 
@@ -109,11 +118,28 @@ heads   = head_slots >= 0 ? head_slots : (preset == "mijia" ? 2 : 0);
 hs      = head_base_d + 4;            // spacing of the heads
 hr      = head_base_d/2 + 0.6;        // ring inner radius
 cad_x0  = bp_w/2 + 2;                 // caddy starts right of the main plate
-cad_w   = heads * hs + 8;
-cad_z1  = 30;                         // top of the caddy back plate
+tubes   = heads > 0 && tube_slots != 0;
+cad_wh  = heads * hs + 8;             // width of the brush head part
+cad_w   = cad_wh + (tubes ? tube_box[0] + 4 : 0);
+tb_x0   = cad_x0 + cad_wh + 2;        // tube compartment inner x
+tb_y0   = bt + at;                    // tube compartment inner y (front face of the caddy back plate)
+cad_z1  = tubes ? 44 : 30;            // top of the caddy back plate
 cad_yc  = bt + at + hr + 0.4;         // head axis (y)
-cad_pins = [[cad_x0 + 6, 22], [cad_x0 + cad_w - 6, 22]];
+cad_pins = concat([[cad_x0 + 6, 22], [cad_x0 + cad_wh - 6, 22]],
+                  tubes ? [[tb_x0 + tube_box[0]/2, 38]] : []);
 bp_xr   = heads > 0 ? cad_x0 + cad_w : bp_w/2; // right edge of the back plate
+// drip tray: rests on ribs of the back plate, below the foot ring, the heads and the tubes
+drip    = drip_tray > 0 || (drip_tray < 0 && preset == "mijia");
+tr_x0   = -bp_w/2 + 3;
+tr_x1   = bp_xr - 3;
+tr_y0   = bt + 0.5;
+tr_y1   = max(cy + Fd + 3 + 4, heads > 0 ? cad_yc + hr + 6 : 0, tubes ? tb_y0 + tube_box[1] + 6 : 0);
+tr_top  = bp_z0 - 2.5;                // rim below the lowest part (room to lift it over the rib stops)
+tr_h    = 12;
+tr_z0   = tr_top - tr_h;              // tray bottom
+rib_t   = 3;
+rib_xs  = [for (i=[0:3]) tr_x0 + 12 + i*(tr_x1 - tr_x0 - 24)/3];
+bp_bot  = drip ? tr_z0 - 10 : bp_z0;  // bottom edge of the back plate
 bp_z1 = pz + H + 2;
 phi_max = asin(travel_down/lever);
 phi_min = -asin(travel_up/lever);
@@ -165,8 +191,17 @@ module backplate() {
     difference() {
         union() {
             xzc(0, bt, 1.5) hull() {
-                rrect(-bp_w/2, bp_w/2, bp_z0, bp_z1, 10);
-                if (heads > 0) rrect(bp_w/2 - 20, bp_xr, bp_z0, cad_z1 + 4, 8);  // wing for the caddy
+                rrect(-bp_w/2, bp_w/2, bp_bot, bp_z1, 10);
+                if (heads > 0) rrect(bp_w/2 - 20, bp_xr, bp_bot, cad_z1 + 4, 8);  // wing for the caddy
+            }
+            // ribs carrying the drip tray, with a small stop at the front
+            if (drip) for (x = rib_xs) translate([x - rib_t/2, 0, 0]) rotate([90, 0, 90]) linear_extrude(rib_t) {
+                // tapered rib
+                polygon([[bt - 0.01, tr_z0 - 9], [bt - 0.01, tr_z0], [tr_y1 + 2.5, tr_z0], [tr_y1 + 2.5, tr_z0 - 3]]);
+                // ridge that sits in the groove under the tray (keeps it from sliding sideways)
+                translate([tr_y0 + 1, tr_z0 - 0.01]) square([tr_y1 - tr_y0 - 2, 1.01]);
+                // stop in front of the tray (lift the tray 2 mm to pull it out)
+                translate([tr_y1 + 0.5, tr_z0 - 0.01]) square([2, 1.61]);
             }
             // pins for the brush head caddy (same snap pins and clips as the arms)
             if (heads > 0) for (pp = cad_pins) translate([pp[0], 0, pp[1]]) rotate([-90,0,0])
@@ -314,7 +349,14 @@ module caddy() if (heads > 0) {
             // shelf with rounded front
             translate([0, 0, bp_z0]) linear_extrude(sh) hull() {
                 translate([cad_x0, bt]) square([cad_w, 1]);
-                for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc]) circle(r=hr + 1.8);
+                for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc]) circle(r=hr + 2.2);
+            }
+            // compartment for toothpaste tubes standing cap down
+            // (starts inside the back plate so both merge cleanly)
+            if (tubes) translate([tb_x0 - 2, bt + 1, bp_z0]) difference() {
+                hull() for (x=[3, tube_box[0] + 1], y=[3, tb_y0 - bt - 1 + tube_box[1] + 1])
+                    translate([x, y, 0]) cylinder(r=3, h=sh + tube_box[2]);
+                translate([2, tb_y0 - bt - 1, sh + 0.4]) cube([tube_box[0], tube_box[1], tube_box[2] + 1]);
             }
             for (i=[0:heads-1]) translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, 0]) {
                 // ring that centres the foot
@@ -331,10 +373,33 @@ module caddy() if (heads > 0) {
             for (a=[45:90:315]) rotate([0, 0, a]) translate([5.5, 0, bp_z0 - 1]) cylinder(d=3, h=sh + 2, $fn=20);
             translate([-3, hr - 1, top]) cube([6, 4, 5]);
         }
+        // drain slots in the tube compartment floor
+        if (tubes) for (i=[0:4]) translate([tb_x0 + 6 + i*(tube_box[0] - 12)/4 - 1.5, tb_y0 + 6, bp_z0 - 1])
+            cube([3, tube_box[1] - 12, sh + 2]);
         // holes for the wing pins
         for (pp = cad_pins) translate([pp[0], bt - 1, pp[1]]) rotate([-90,0,0]) cylinder(d=boss_d + 2*clr, h=at + 2);
     }
 }
+// removable drip tray: lift slightly and pull forward to empty and rinse
+module drip_tray_part() if (drip) {
+    w = 1.8;
+    difference() {
+        translate([0, 0, tr_z0]) hull() for (x=[tr_x0 + 5, tr_x1 - 5], y=[tr_y0 + 5, tr_y1 - 5])
+            translate([x, y, 0]) { cylinder(r=5, h=tr_h - 1); cylinder(r=4.2, h=tr_h); }
+        translate([0, 0, tr_z0 + w]) hull() for (x=[tr_x0 + 5, tr_x1 - 5], y=[tr_y0 + 5, tr_y1 - 5])
+            translate([x, y, 0]) cylinder(r=5 - w, h=tr_h);
+        // grooves underneath that sit on the ribs
+        for (x = rib_xs) translate([x - rib_t/2 - 0.4, tr_y0 - 1, tr_z0 - 0.01]) cube([rib_t + 0.8, tr_y1 - tr_y0 + 2, 1.2]);
+        // finger grip in the front wall
+        translate([(tr_x0 + tr_x1)/2, tr_y1 + 1, tr_top + 1]) rotate([90, 0, 0]) scale([2.5, 1, 1]) cylinder(r=4, h=4);
+    }
+}
+// two toothpaste tubes standing cap down (for checks and pictures)
+module tubes_dummy() if (tubes) for (i=[0:1])
+    translate([tb_x0 + 2 + i*(tube_box[0]/2), tb_y0 + 3, bp_z0 + 3.6]) {
+        translate([12, 15, 0]) cylinder(d=24, h=12);                        // cap
+        translate([0, 3, 12]) hull() { translate([1, 1, 0]) cube([22, 24, 1]); translate([0, 10, 90]) cube([25, 4, 1]); }
+    }
 // a brush head standing in the caddy (for checks and pictures)
 module brush_heads() if (heads > 0) for (i=[0:heads-1])
     translate([cad_x0 + 4 + hs*(i + 0.5), cad_yc, bp_z0 + 3 + 0.2]) difference() {
@@ -357,7 +422,8 @@ module assembly(s=0) {
     color("#2E3136") { arm_right(phi); arm_left(phi); }
     color("#8A8F96") for (m=[0,1]) mirror([m,0,0]) translate([px,0,pz]) rotate([0,-phi,0]) nuts_in_arm();
     color("#2E3136") hardware();
-    if (heads > 0) { color("#C9CCD1") caddy(); %brush_heads(); }
+    if (heads > 0) { color("#C9CCD1") caddy(); %brush_heads(); %tubes_dummy(); }
+    if (drip) color("#9FB8C8") translate([0, tray_out, tray_out > 0 ? 2 : 0]) drip_tray_part();
     if (show_device) %device();
 }
 
@@ -366,6 +432,7 @@ module print_backplate() rotate([90,0,0]) translate([0,0,0]) backplate();
 module print_arm(m)  rotate([90,0,0]) translate([0,-bt,-pz]) mirror([m,0,0]) arm_right(0);
 module print_slider() translate([0,0,3]) slider();
 module print_caddy() translate([-cad_x0 - cad_w/2, 0, -bp_z0]) caddy();
+module print_tray() translate([-(tr_x0 + tr_x1)/2, -(tr_y0 + tr_y1)/2, -tr_z0]) drip_tray_part();
 
 if (part == "assembly") assembly(s);
 else if (part == "backplate") print_backplate();
@@ -375,6 +442,21 @@ else if (part == "slider")    print_slider();
 else if (part == "clip_pivot") clip_pivot();
 else if (part == "clip_guide") clip_guide();
 else if (part == "caddy")      print_caddy();
+else if (part == "drip_tray")  print_tray();
+else if (part == "print_plate" && drip) {
+    // plate 1 of 2: back plate, slider and all clips
+    print_backplate();
+    translate([-10, 40, 0]) print_slider();
+    for (i=[0:len(cad_pins) + 1]) translate([30 + i*13, 48, 0]) clip_pivot();
+    for (i=[0:1]) translate([30 + (len(cad_pins) + 2)*13 + i*12, 48, 0]) clip_guide();
+}
+else if (part == "print_plate_2") {
+    // plate 2 of 2 (only with the drip tray): arms, caddy, drip tray
+    translate([0, -40, 0]) print_tray();
+    translate([-60, 40, 0]) print_arm(0);
+    translate([30, 40, 0]) print_arm(1);
+    if (heads > 0) translate([0, 50, 0]) print_caddy();
+}
 else if (part == "print_plate") {
     print_backplate();
     if (heads > 0) {
@@ -402,6 +484,8 @@ else if (part == "asm_hardware") hardware();
 else if (part == "asm_device") device();
 else if (part == "asm_caddy") { if (heads > 0) caddy(); }
 else if (part == "asm_heads") brush_heads();
+else if (part == "asm_tubes") tubes_dummy();
+else if (part == "asm_tray") drip_tray_part();
 // explanation view: a pivot pin and its clip just before it clicks into the groove
 else if (part == "snap_demo") {
     color("#EDEDEA") { translate([-8, -8, 0]) cube([16, 16, 2]); translate([0, 0, 2]) snap_pin(boss_d, groove_d, at + 0.3 + 2 - 2); }

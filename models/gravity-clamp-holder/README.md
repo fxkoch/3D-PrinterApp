@@ -28,7 +28,7 @@ Draufsicht: Die Krallen greifen vorne um das Gerät (links Mijia, rechts OneBlad
 | Philips OneBlade Pro 360 (QP6541) | 34,7 × 33,2 mm, abgerundet-eckig | 36,8 × 35,3 mm, Eckradius 9 mm | ca. 30–50 mm | `stl/oneblade/` |
 
 In jedem Ordner liegen alle Einzelteile und eine komplette Druckplatte
-(`print_plate_all.stl`, max. 225 × 144 mm). In OpenSCAD wählst du die Variante
+(`print_plate_all.stl`, max. 200 × 144 mm; Mijia: zwei Platten, siehe unten). In OpenSCAD wählst du die Variante
 mit `preset = "mijia"` oder `preset = "oneblade"`. Bei `preset = "custom"`
 gelten die eigenen `c_…`-Werte. Die STLs direkt in `stl/` sind die
 30-mm-Standardvariante.
@@ -49,6 +49,23 @@ gesteckt und mit zwei großen Clips gesichert, also auch ohne Schrauben.
 
 Anzahl der Plätze: `head_slots` (−1 = automatisch, 0 = keine Ablage, 1–4).
 Andere Bürstenköpfe: `head_base_d` und `head_hole_d` anpassen.
+
+### Fach für Zahnpastatuben und Abtropfschale (Mijia)
+
+Direkt neben den Bürstenköpfen sitzt ein **Fach für 2 Zahnpastatuben**, die mit dem
+Deckel nach unten stehen (innen 58 × 36 mm, 40 mm hoch, Ablaufschlitze im Boden).
+Es ist Teil der Ablage und wird zusätzlich mit einem dritten Clip gehalten.
+
+Unter Zahnbürste, Bürstenköpfen und Tuben liegt eine **herausnehmbare
+Abtropfschale**. Sie liegt lose auf vier Rippen der Wandplatte. Führungsleisten
+und kleine Stopper verhindern, dass sie verrutscht. **Zum Reinigen:** Schale vorne
+etwa 2 mm anheben und nach vorne herausziehen, ausspülen, wieder einlegen.
+
+![Abtropfschale herausgezogen](drip_tray_out.png)
+
+Tubenfach: `tube_slots` (−1 = automatisch, 0 = aus), Größe mit `tube_box`.
+Abtropfschale: `drip_tray` (−1 = automatisch bei Mijia, 0 = aus, 1 = auch bei den
+anderen Varianten).
 
 ## So funktioniert's
 
@@ -86,10 +103,12 @@ greifen die Backen.
 | `arm_right.stl` / `arm_left.stl` | je 1 | flach, Backe und Gegengewicht zeigen nach oben |
 | `clip_pivot.stl` | 2 | Sicherungsclip für die Arm-Drehpunkte (flach drucken) |
 | `clip_guide.stl` | 2 | Sicherungsclip für die Schlittenführung (flach drucken) |
-| `mijia/caddy.stl` | 1 | Bürstenkopf-Ablage, steht auf dem Boden (nur Mijia) |
+| `mijia/caddy.stl` | 1 | Ablage für Bürstenköpfe und Tuben, steht auf dem Boden (nur Mijia) |
+| `mijia/drip_tray.stl` | 1 | Abtropfschale (nur Mijia) |
 
-Die Mijia-Druckplatte enthält zusätzlich die Ablage und 2 weitere große Clips
-(11 Teile, 225 × 126 mm).
+Die Mijia-Variante ist auf **zwei Druckplatten** verteilt, weil die Wandplatte breiter ist:
+`mijia/print_plate_1.stl` (Wandplatte, Schlitten, 7 Clips; 204 × 160 mm) und
+`mijia/print_plate_2.stl` (Abtropfschale, Arme, Ablage; 198 × 163 mm).
 
 Keine Stützstrukturen nötig. Empfehlung: PETG (Bad), 0,2 mm Schichthöhe,
 4 Wände, 25 % Infill. Farbvorschlag: Wandplatte weiß, Schlitten hellgrau, Arme
