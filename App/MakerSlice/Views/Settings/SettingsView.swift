@@ -1,3 +1,4 @@
+import ClaudeKit
 import SliceKit
 import SwiftUI
 
@@ -13,6 +14,17 @@ struct SettingsView: View {
                         .accessibilityIdentifier("expertToggle")
                 } footer: {
                     Text("Zeigt alle Slicer-Parameter und erlaubt, Filament-Werte im Detail anzupassen. Empfohlene Werte werden immer je Filament vorgeladen.")
+                }
+                Section {
+                    NavigationLink {
+                        ClaudeSetupView()
+                    } label: {
+                        LabeledContent("Claude-Assistent", value: app.assistant.isConfigured ? app.assistant.config.model.displayName : "Aus")
+                    }
+                } header: {
+                    Text("KI-Assistent")
+                } footer: {
+                    Text("Claude sieht deine Drucker und Projekte live und gestaltet mit – Druckerbefehle nur nach deiner Bestätigung.")
                 }
                 Section {
                     NavigationLink {

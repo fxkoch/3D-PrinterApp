@@ -24,6 +24,10 @@ targets:
         product: PrinterKit
       - package: MakerSliceCore
         product: MakerWorldKit
+      - package: MakerSliceCore
+        product: ClaudeKit
+      - package: MakerSliceCore
+        product: PrintAssistant
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.makerslice.app

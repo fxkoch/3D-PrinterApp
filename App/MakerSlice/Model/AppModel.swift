@@ -6,7 +6,7 @@ import SliceKit
 import SwiftUI
 
 enum AppTab: Hashable {
-    case discover, library, printers, settings
+    case discover, library, printers, assistant, settings
 }
 
 @MainActor
@@ -17,6 +17,8 @@ final class AppModel {
     let log = EventLog()
     /// Kept for the app's lifetime so the MakerWorld page and login survive tab switches.
     let browser = MakerWorldBrowser()
+    /// Chat with Claude, which reads and changes the app through `AssistantHost`.
+    let assistant = AssistantSession()
 
     var tab: AppTab = .discover
     /// Project shown in the "prepare & slice" screen.
@@ -66,6 +68,7 @@ final class AppModel {
         if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") {
             loadSample()
         }
+        assistant.attach(self)
     }
 
     func settings(for model: PrinterModel) -> PrintSettings {

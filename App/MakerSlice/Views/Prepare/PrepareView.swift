@@ -15,6 +15,7 @@ struct PrepareView: View {
     @State private var showAdvice = false
     @State private var showPrePrint = false
     @State private var printAfterSlice = false
+    @State private var showAssistant = false
 
     struct SlotSelection: Identifiable {
         let id: Int
@@ -54,6 +55,15 @@ struct PrepareView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Schließen") { app.project = nil }.accessibilityIdentifier("closeProject")
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showAssistant = true
+                    } label: {
+                        Image(systemName: "sparkles")
+                    }
+                    .accessibilityLabel("Claude fragen")
+                    .accessibilityIdentifier("askClaude")
+                }
                 if app.expertMode {
                     ToolbarItem(placement: .topBarTrailing) {
                         NavigationLink {
@@ -65,6 +75,11 @@ struct PrepareView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
+            .sheet(isPresented: $showAssistant) {
+                AssistantView(isSheet: true)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+            }
             .sheet(item: $filamentSlot) { slot in
                 FilamentPickerView(settings: $project.settings, slot: slot.id,
                                    loaded: app.printers.status(of: app.printers.selected)?.filaments)

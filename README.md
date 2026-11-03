@@ -21,6 +21,7 @@ Gestaltung: ruhig und reduziert im macOS-Stil, mit Expertenmodus – jede Einste
 | **Filamente** | **325 Profile** aus den offiziellen OrcaSlicer-Daten (25 Kobra S1, 59 U1, 241 Markenfilamente). Auswahl lädt die empfohlenen Werte; im Expertenmodus feinjustierbar mit „Auf Empfehlung zurücksetzen“. Eingelegtes Material (RFID am U1, ACE Pro am Kobra) wird erkannt. |
 | **Drucker-Display** | Der G-Code enthält Vorschaubilder (U1: 48 und 300 px, Kobra: 230×110 px) sowie Druckzeit, Filament je Slot und Temperaturen im OrcaSlicer-Format, damit Drucker und Moonraker sie anzeigen. |
 | **Drucker** | Live-Daten: Fortschritt, Restzeit, Schicht, Temperaturen, Lüfter, Licht, Filament je Slot, ACE-Feuchte und Trocknen, Kamerabild (U1). Pause/Fortsetzen/Abbrechen, Vorheizen. |
+| **Claude-Assistent** | Chat mit Claude (Tab „Claude“ und ✨ im Vorbereiten-Bildschirm). Claude liest **live** Druckerstatus, Temperaturen, Fortschritt, eingelegtes Filament, ACE-Feuchte, das offene Projekt mit allen Slicer-Einstellungen, Bibliothek und Protokoll – und **gestaltet mit**: Einstellungen ändern, Material je Slot setzen, Objekte drehen/skalieren/teilen, Empfehlungen übernehmen, slicen, Modelle auf Printables suchen und laden. Druckerbefehle (Pause, Abbruch, Heizen, Licht) und Drucken nur nach Bestätigung im Chat. |
 | **Kalibrierung & Protokoll** | Bett-Mesh als Farbkarte, Z-Offset, Pressure Advance, Input Shaper (U1); Fehler- und Ereignislog, exportierbar. |
 
 ## Drucker verbinden
@@ -32,6 +33,18 @@ Gestaltung: ruhig und reduziert im macOS-Stil, mit Expertenmodus – jede Einste
 | Kobra S1 mit Rinkhals | Moonraker | Community-Firmware Rinkhals |
 
 Beim Kobra S1 gilt: Slot im Modell = Slot der ACE Pro; die Zuordnung wird beim Start mitgeschickt.
+
+## Claude-Assistent einrichten
+
+1. Unter [console.anthropic.com](https://console.anthropic.com) einen API-Schlüssel erstellen (Abrechnung über dein Anthropic-Konto).
+2. In der App: *Einstellungen → Claude-Assistent* → Schlüssel einfügen → „Speichern und testen“. Der Schlüssel liegt nur im Schlüsselbund des iPhones.
+3. Modell wählen: **Claude Opus 5.5** (Standard), Sonnet 5.5 (schneller, günstiger) oder Haiku 5.5. „Gründlichkeit“ steuert, wie lange Claude nachdenkt.
+
+So funktioniert es: Die App spricht direkt mit der Claude-Messages-API (`ClaudeKit`, ohne Server dazwischen). Claude bekommt
+17 Werkzeuge (`PrintAssistant`), die über das Protokoll `AssistantHost` auf den Live-Zustand der App zugreifen – dieselben
+Funktionen, die auch die Oberfläche benutzt. Daten werden nur gesendet, wenn Claude sie für deine Frage abruft. Alles, was den
+Drucker bewegt oder heizt, wartet auf dein „Ausführen“ im Chat. Bei einer Sicherheitsablehnung springt serverseitig ein
+Ersatzmodell ein (`fallbacks: "default"`); der Gesprächsverlauf wird unverändert zurückgeschickt, damit Prompt-Caching greift.
 
 ## Getestet – mit virtuellen Druckern
 
@@ -46,7 +59,10 @@ Ohne Zugriff auf die echten Geräte wird alles gegen möglichst echte Gegenstüc
   Kobra zweifarbig mit Steckverbindern) werden mit OrcaSlicer gesliced und geprüft.
 - **UI-Tests im iPhone-Simulator** mit Screenshots: Tabs, Suche + Download + Slicen, beide Drucker, Teilen-Werkzeug,
   Druck auf dem virtuellen Kobra.
-- **72 automatische Tests im Swift-Paket** (davon 5 mit virtuellen Druckern; Import, Slicer-Funktionen, G-Code, Empfehlungen, Protokolle, Cloud-Client gegen nachgebaute GitHub-API).
+- **Claude-Assistent**: Client und Werkzeug-Schleife gegen eine nachgebaute Claude-API (Anfrageformat, Fehler/Wiederholung,
+  unveränderter Verlauf inkl. Thinking-Blöcken, Ablehnungen); alle Werkzeuge gegen eine nachgebaute App (Live-Werte,
+  Einstellungsänderungen mit Prüfung, Material, Objekte, Bestätigungspflicht für Druckerbefehle und Drucken).
+- **92 automatische Tests im Swift-Paket** (davon 5 mit virtuellen Druckern; Import, Slicer-Funktionen, G-Code, Empfehlungen, Protokolle, Cloud-Client gegen nachgebaute GitHub-API).
 
 Lokal auf dem Mac (ohne GitHub-Minuten): `tools/test-local.sh` – siehe [TESTING.md](TESTING.md), dort auch, wie dein Mac
 die GitHub-Läufe kostenlos übernimmt.
@@ -57,7 +73,8 @@ die GitHub-Läufe kostenlos übernimmt.
 App/MakerSlice/             SwiftUI-App (Entdecken, Bibliothek, Vorbereiten, Drucker, Einstellungen)
 App/MakerSliceUITests/      UI-Tests (Simulator)
 Packages/MakerSliceCore/    Swift-Paket: SliceKit (Slicer, G-Code, 3MF, Empfehlungen, Erklärungen),
-                            PrinterKit (U1/Moonraker, Kobra-LAN, Cloud-Slicing), MakerWorldKit (Suche)
+                            PrinterKit (U1/Moonraker, Kobra-LAN, Cloud-Slicing), MakerWorldKit (Suche),
+                            ClaudeKit (Claude-Messages-API), PrintAssistant (Werkzeuge des Claude-Assistenten)
 tools/cloudslice/           OrcaSlicer-Aufruf und G-Code-Prüfung für den Cloud-Workflow
 tools/virtualprinters/      Virtueller U1 (u1sim + Snapmaker Moonraker) und virtueller Kobra S1
 tools/profiles/             Erzeugt die Filamentbibliothek aus den OrcaSlicer-Profilen
@@ -66,6 +83,9 @@ tools/profiles/             Erzeugt die Filamentbibliothek aus den OrcaSlicer-Pr
 
 ## Ehrliche Grenzen
 
+- **Claude-Assistent**: braucht einen eigenen Anthropic-API-Schlüssel und Internet; jede Nachricht kostet Tokens
+  (Prompt-Caching hält das gering). Antworten kommen am Stück, nicht Wort für Wort. MakerWorld-Modelle sucht Claude nicht
+  (nur Printables) – dafür den Tab „Entdecken“ nutzen.
 - **Nicht an echten Druckern getestet.** Die virtuellen Drucker bilden die Protokolle nach (beim U1 mit dem originalen
   Moonraker), führen aber keinen G-Code physisch aus. Ersten Druck bitte mit einem kleinen Teil und dabeistehen.
   Der Kobra-S1-LAN-Modus ist inoffiziell (reverse-engineered) und kann durch Firmware-Updates brechen.
