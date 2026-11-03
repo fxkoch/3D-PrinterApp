@@ -8,6 +8,11 @@ wieder.
 
 ![Montage](assembly.png)
 
+Moderne Optik: rundum abgerundete Formen, angefaste Sichtkanten, weiche
+Backen mit großen Radien und bündig versenkte Schrauben in Abdeckscheiben.
+Farbvorschlag: Wandplatte weiß, Schlitten hellgrau, Arme und Scheiben
+anthrazit (matt), z. B. PETG oder PLA Matte.
+
 Links: offen (Schlitten oben). Rechts: leer/geschlossen (Schlitten unten).
 
 ![Mechanik](mechanism_open_vs_closed.png)
@@ -32,14 +37,14 @@ Links: offen (Schlitten oben). Rechts: leer/geschlossen (Schlitten unten).
 | `stl/slider.stl` | 1 | steht auf dem Boden des Fußrings |
 | `stl/arm_right.stl` | 1 | flach, Backe zeigt nach oben |
 | `stl/arm_left.stl` | 1 | gespiegelt |
-| `stl/washer.stl` | 4 | oder normale M3-Unterlegscheiben (max. Ø 10 mm) |
-| `stl/print_plate_all.stl` | – | alles zusammen auf einer Platte (153 × 141 mm) |
+| `stl/washer.stl` | 4 | Abdeckscheibe mit Senkung, Senkkopf sitzt bündig |
+| `stl/print_plate_all.stl` | – | alles zusammen auf einer Platte (154 × 138 mm) |
 
 Keine Stützstrukturen nötig. Empfehlung: PETG (Bad), 0,2 mm Schichthöhe,
 4 Wände, 25 % Infill.
 
-**Schrauben:** 2 × M3×8 (Drehpunkte der Arme), 2 × M3×12 (Führung des
-Schlittens). Sie werden direkt in die 2,6-mm-Bohrungen der Dome geschraubt
+**Schrauben:** M3-Senkkopf (DIN 7991 / ISO 10642): 2 × M3×8 (Drehpunkte
+der Arme), 2 × M3×12 (Führung des Schlittens). Sie werden direkt in die 2,6-mm-Bohrungen der Dome geschraubt
 (selbstschneidend). Nur so fest anziehen, dass Arme und Schlitten noch leicht
 laufen.
 
@@ -49,9 +54,9 @@ laufen.
 ## Zusammenbau
 
 1. Schlitten auf die beiden unteren Dome stecken (die Langlöcher zeigen nach
-   unten) und mit Scheibe + M3×12 sichern.
+   unten) und mit Abdeckscheibe + M3×12 sichern.
 2. Arme auf die Drehpunkt-Dome stecken, sodass die Zapfen in den waagrechten
-   Langlöchern des Schlittens sitzen. Mit Scheibe + M3×8 sichern.
+   Langlöchern des Schlittens sitzen. Mit Abdeckscheibe + M3×8 sichern.
 3. Prüfen: Schlitten hochschieben → Backen öffnen; loslassen → Backen schließen.
 
 ## Anpassen (OpenSCAD)
@@ -65,6 +70,7 @@ einstellbar:
 | `dev_d` | 30 | Tiefe des Geräts |
 | `foot_d` | 32 | Innendurchmesser des Fußrings |
 | `pad_h` | 30 | Höhe der Backen |
+| `edge` | 1,2 | Fase an den Sichtkanten |
 | `travel_up` / `travel_down` | 4 / 3 | Schlittenweg (öffnen / schließen) |
 
 Mit den Standardwerten klemmt der Halter Geräte mit 26–40 mm Breite. Am besten
@@ -83,7 +89,7 @@ Schlitten.
 ## Geprüft
 
 Alle Teile wurden in drei Schlittenstellungen (offen, neutral, geschlossen) auf
-Überschneidungen geprüft. Dabei waren Schraubenköpfe, Scheiben und ein
+Überschneidungen geprüft. Dabei waren die Abdeckscheiben und ein
 eingesetztes 30-mm-Gerät mit drin: keine Kollisionen. Alle STLs sind
 geschlossen (watertight) und liegen flach auf dem Druckbett.
 

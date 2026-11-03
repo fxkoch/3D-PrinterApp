@@ -7,8 +7,9 @@
 // open again (pushing the pads apart lifts the slider).
 //
 // Coordinates: x = right, y = away from the wall, z = up.
-// Hardware: 4x M3 screw (2x M3x8 for the arm pivots, 2x M3x12 for the
-// slider guides), self-tapping into the printed bosses. Mount the back
+// Hardware: 4x M3 countersunk screw (DIN 7991 / ISO 10642: 2x M3x8 for the
+// arm pivots, 2x M3x12 for the slider guides), self-tapping into the printed
+// bosses. They sit flush in the printed cap washers. Mount the back
 // plate with double-sided foam tape (or the optional screw holes).
 //
 // Render a single part with:  openscad -D 'part="arm_right"' -o x.stl this.scad
@@ -31,6 +32,7 @@ st   = 4;     // slider thickness
 gap  = 0.5;   // gap between arm layer and slider layer
 clr  = 0.35;  // radial clearance for pins / bosses
 wall_screws = false; // add 2 countersunk holes for wall screws
+edge = 1.2;   // chamfer on visible front edges (modern look)
 
 /* [View] */
 part = "assembly"; // [assembly, backplate, arm_right, arm_left, slider, washer, print_plate]
@@ -47,10 +49,11 @@ lx  = px - lever;         // lever pin x (neutral)
 H   = 8 + pad_h;          // upright height above pivot
 S0  = bt + at + gap;      // slider back face
 S1  = S0 + st;            // slider front face
-yb  = S1 + 0.3 + 2 + 3 + 1.2; // back of device (clears washer + M3 head)
+cap_h = 2.5;              // cap washer height (countersunk screw sits flush)
+yb  = S1 + 0.3 + cap_h + 1; // back of device (clears the cap washers)
 cy  = yb + dev_d/2;       // device centre (y)
 Rf  = foot_d/2;
-pad_front = cy + 8;       // pads reach past the device centre
+pad_front = cy + 9;       // pads reach past the device centre
 pin_d = 5;
 boss_d = 6;               // arm pivot boss
 gx  = 7; gz = 16;         // slider guide bosses (±gx, gz)
@@ -73,12 +76,18 @@ module rrect(x0, x1, z0, z1, r=3) {
 module xz(y0, y1) {
     translate([0, y1, 0]) rotate([90, 0, 0]) linear_extrude(y1 - y0) children();
 }
+// same, but the front face (y1) gets a stepped chamfer of size c
+module xzc(y0, y1, c=edge, n=6) {
+    xz(y0, y1 - c) children();
+    for (i=[0:n-1]) xz(y1 - c + i*c/n, y1 - c + (i+1)*c/n)
+        offset(delta=-(i+1)*c/n) children();
+}
 
 // ---------------- back plate ----------------
 module backplate() {
     difference() {
         union() {
-            xz(0, bt) rrect(-bp_w/2, bp_w/2, bp_z0, bp_z1, 5);
+            xzc(0, bt, 1.5) rrect(-bp_w/2, bp_w/2, bp_z0, bp_z1, 10);
             // arm pivot bosses
             for (m=[0,1]) mirror([m,0,0]) translate([px, 0, pz]) rotate([-90,0,0])
                 cylinder(d=boss_d, h=bt + at + 0.3);
@@ -105,20 +114,22 @@ module backplate() {
 module arm_local() {
     difference() {
         union() {
-            xz(bt, bt + at) {
-                hull() { circle(r=6); translate([-lever, 0]) circle(r=4); }       // lever
-                hull() { circle(r=6); translate([-3, 0]) square([6, H]); }      // upright
+            xzc(bt, bt + at) {
+                hull() { circle(r=6.5); translate([-lever, 0]) circle(r=4); }     // lever
+                hull() { circle(r=6.5); translate([0, H - 3]) circle(r=3); }    // upright, rounded top
             }
             // pin into the slider
             translate([-lever, bt + at - 0.01, 0]) rotate([-90,0,0])
                 cylinder(d=pin_d, h=gap + st + 0.01);
             // grip pad: vertical fin facing the device
             difference() {
-                hull() {
-                    translate([-3, bt, 8]) cube([3, 1, pad_h]);
-                    translate([-3, pad_front - 3, 8 + 3]) rotate([0,90,0]) cylinder(r=3, h=3);
-                    translate([-3, pad_front - 3, 8 + pad_h - 3]) rotate([0,90,0]) cylinder(r=3, h=3);
-                }
+                // soft rounded fin with chamfered edges: big radius at the front corners
+                hull() for (c=[[bt + 1, 8 + 1, 1], [bt + 1, 8 + pad_h - 1, 1],
+                               [pad_front - 8, 8 + 8, 8], [pad_front - 8, 8 + pad_h - 8, 8]])
+                    translate([-3, c[0], c[1]]) rotate([0,90,0]) {
+                        translate([0,0,0.8]) cylinder(r=c[2], h=1.4);
+                        cylinder(r=c[2] - 0.8, h=3);
+                    }
                 // lead-in chamfer at the top inner edge
                 translate([-3, bt - 1, 8 + pad_h]) rotate([0, 45, 0]) cube([3, 60, 3], center=false);
             }
@@ -136,21 +147,24 @@ module slider() {
     top = pz + pin_d/2 + clr + 2.5;
     difference() {
         union() {
-            xz(S0, S1) hull() {
+            xzc(S0, S1, 1) hull() {
                 translate([-(lx + 2.5 + pin_d/2 + clr + 1), -3]) square([2*(lx + 2.5 + pin_d/2 + clr + 1), 1]);
-                for (m=[-1,1]) translate([m*(lx + 1 + pin_d/2 + clr + 2.5 - 3), top - 3]) circle(r=3);
+                for (m=[-1,1]) translate([m*(lx + 1 + pin_d/2 + clr + 2.5 - 5), top - 5]) circle(r=5);
             }
             // bridge from the slider to the foot ring
             translate([-10, S0, -3]) cube([20, cy - S0, 3]);
             // foot ring: floor + rim, open at the front
             difference() {
-                translate([0, cy, -3]) union() {
-                    cylinder(r=Rf + 3, h=3);
-                    cylinder(r=Rf + 3, h=3 + 5);
+                translate([0, cy, -3]) hull() {
+                    cylinder(r=Rf + 3, h=3 + 4);
+                    cylinder(r=Rf + 2, h=3 + 5);        // soft chamfered top edge
                 }
                 translate([0, cy, -3 - 1]) cylinder(r=Rf - 5, h=20);   // drain / cable hole
                 translate([0, cy, 0]) cylinder(r=Rf, h=20);            // pocket for the device
-                translate([-(Rf - 4), cy, 0]) cube([2*(Rf - 4), Rf + 10, 20]); // front opening of the rim
+                translate([0, cy, 0]) linear_extrude(20) hull() {        // front opening of the rim, rounded
+                    for (m=[-1,1]) translate([m*(Rf - 6), Rf - 2]) circle(r=2);
+                    translate([-(Rf + 2), Rf + 4]) square([2*(Rf + 2), 1]);
+                }
             }
         }
         // horizontal slots for the arm pins
@@ -162,22 +176,29 @@ module slider() {
     }
 }
 
-module washer() { difference() { cylinder(d=10, h=2); translate([0,0,-1]) cylinder(d=3.4, h=4, $fn=24); } }
+// cap washer: domed, with a 90 deg countersink so an M3 countersunk head sits flush
+module washer() {
+    difference() {
+        hull() { cylinder(d=10, h=cap_h - 0.8); cylinder(d=8.4, h=cap_h); }
+        translate([0,0,-1]) cylinder(d=3.4, h=cap_h + 2, $fn=24);
+        translate([0,0,cap_h - 1.75]) cylinder(d1=3.4, d2=6.9, h=1.76, $fn=32);
+    }
+}
 
-// screws + washers in place (pan head M3: d 5.5, h 3)
+// cap washers in place (countersunk screws sit flush inside them)
 module hardware() for (m=[0,1]) mirror([m,0,0]) {
-    translate([px, bt + at + 0.3, pz]) rotate([-90,0,0]) { washer(); translate([0,0,2]) cylinder(d=5.5, h=3); }
-    translate([gx, S1 + 0.3, gz]) rotate([-90,0,0]) { washer(); translate([0,0,2]) cylinder(d=5.5, h=3); }
+    translate([px, bt + at + 0.3, pz]) rotate([-90,0,0]) washer();
+    translate([gx, S1 + 0.3, gz]) rotate([-90,0,0]) washer();
 }
 module device() translate([0, cy, 0]) scale([dev_w/dev_d, 1, 1]) cylinder(d=dev_d, h=120);
 
 // ---------------- views ----------------
 module assembly(s=0) {
     phi = asin(s/lever);
-    color("SaddleBrown") backplate();
-    color("Tan") translate([0,0,-s]) slider();
-    color("Peru") { arm_right(phi); arm_left(phi); }
-    color("Gray") hardware();
+    color("#EDEDEA") backplate();
+    color("#C9CCD1") translate([0,0,-s]) slider();
+    color("#2E3136") { arm_right(phi); arm_left(phi); }
+    color("#2E3136") hardware();
     if (show_device) %device();
 }
 
