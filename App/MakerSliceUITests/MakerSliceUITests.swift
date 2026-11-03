@@ -41,6 +41,33 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("04-Einstellungen")
     }
 
+    /// Claude assistant without an API key: the ✨ button in the prepare screen, the Claude tab and the setup screen.
+    func testClaudeAssistantSetup() {
+        app.launchArguments = ["-uiTestSampleModel"]
+        app.launch()
+
+        let ask = app.buttons["askClaude"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 20), "prepare screen should show the Claude button")
+        ask.tap()
+        XCTAssertTrue(app.staticTexts["Claude einrichten"].waitForExistence(timeout: 5), "sheet asks for setup without a key")
+        sleep(1)
+        snapshot("30-Claude-im-Projekt")
+        app.buttons["Fertig"].tap()
+
+        app.buttons["closeProject"].tap()
+        let tab = app.tabBars.buttons["Claude"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        tab.tap()
+        XCTAssertTrue(app.staticTexts["Claude einrichten"].waitForExistence(timeout: 5))
+        snapshot("31-Claude-Tab")
+
+        app.buttons["Jetzt einrichten"].tap()
+        XCTAssertTrue(app.secureTextFields["claudeKey"].waitForExistence(timeout: 5), "setup screen with key field")
+        XCTAssertTrue(app.staticTexts["Claude Opus 5.5"].exists, "model picker lists Opus 5.5")
+        sleep(1)
+        snapshot("32-Claude-Einrichtung")
+    }
+
     func testSliceSampleForBothPrinters() {
         app.launchArguments = ["-uiTestSampleModel"]
         app.launch()
