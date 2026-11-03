@@ -17,6 +17,24 @@ Links: offen (Schlitten oben). Rechts: leer/geschlossen (Schlitten unten).
 
 ![Mechanik](mechanism_open_vs_closed.png)
 
+## Fertige Varianten für deine Geräte
+
+![Mijia und OneBlade](presets_mijia_oneblade.png)
+
+| Variante | Gemessen (Unterseite) | Fußmulde | Klemmbereich | Ordner |
+|---|---|---|---|---|
+| Xiaomi Mijia Zahnbürste | 28,4 × 29,2 mm, rund | 30,6 × 31,4 mm, rund | ca. 24–45 mm | `stl/mijia/` |
+| Philips OneBlade Pro 360 (QP6541) | 34,7 × 33,2 mm, abgerundet-eckig | 36,8 × 35,3 mm, Eckradius 9 mm | ca. 30–50 mm | `stl/oneblade/` |
+
+In jedem Ordner liegen alle Einzelteile und eine komplette Druckplatte
+(`print_plate_all.stl`). In OpenSCAD wählst du die Variante mit
+`preset = "mijia"` oder `preset = "oneblade"` aus. Mit `preset = "custom"`
+gelten die eigenen Werte `c_dev_w`, `c_dev_d`, `c_foot_w`, `c_foot_d` und
+`c_foot_r`. Die STLs direkt in `stl/` sind die alte 30-mm-Standardvariante.
+
+Die Öffnung im Boden der Fußmulde bleibt frei: Ladebuchse bzw. Ladekontakte
+sind erreichbar, und Wasser läuft ab.
+
 ## So funktioniert's
 
 - Jeder Arm dreht sich um eine M3-Schraube in der Wandplatte.
@@ -66,9 +84,11 @@ einstellbar:
 
 | Parameter | Standard | Bedeutung |
 |---|---|---|
-| `dev_w` | 30 | Breite des Geräts auf Klemmhöhe |
-| `dev_d` | 30 | Tiefe des Geräts |
-| `foot_d` | 32 | Innendurchmesser des Fußrings |
+| `preset` | custom | `mijia`, `oneblade` oder `custom` |
+| `c_dev_w` | 30 | Breite des Geräts auf Klemmhöhe |
+| `c_dev_d` | 30 | Tiefe des Geräts |
+| `c_foot_w` / `c_foot_d` | 32 / 32 | Innenmaß der Fußmulde |
+| `c_foot_r` | 16 | Eckradius der Fußmulde (halbe Breite = rund) |
 | `pad_h` | 30 | Höhe der Backen |
 | `edge` | 1,2 | Fase an den Sichtkanten |
 | `travel_up` / `travel_down` | 4 / 3 | Schlittenweg (öffnen / schließen) |
@@ -90,7 +110,8 @@ Schlitten.
 
 Alle Teile wurden in drei Schlittenstellungen (offen, neutral, geschlossen) auf
 Überschneidungen geprüft. Dabei waren die Abdeckscheiben und ein
-eingesetztes 30-mm-Gerät mit drin: keine Kollisionen. Alle STLs sind
+eingesetztes Gerät mit drin, für die Standardvariante sowie für Mijia und
+OneBlade: keine Kollisionen. Alle STLs sind
 geschlossen (watertight) und liegen flach auf dem Druckbett.
 
 Nicht geprüft ist ein echter Druck. Die Klemmkraft hängt von Reibung und

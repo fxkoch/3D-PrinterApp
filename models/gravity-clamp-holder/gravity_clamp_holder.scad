@@ -15,9 +15,24 @@
 // Render a single part with:  openscad -D 'part="arm_right"' -o x.stl this.scad
 
 /* [Device] */
-dev_w   = 30;   // width of the device at grip height (mm)
-dev_d   = 30;   // depth of the device (front to back, mm)
-foot_d  = 32;   // inner diameter of the foot ring (a bit bigger than the device bottom)
+// preset: measured devices, or "custom" to use the values below
+preset  = "custom"; // [custom, mijia, oneblade]
+c_dev_w  = 30;  // custom: width of the device at grip height (mm)
+c_dev_d  = 30;  // custom: depth of the device (front to back, mm)
+c_foot_w = 32;  // custom: inner width of the foot pocket (device bottom + ~2 mm)
+c_foot_d = 32;  // custom: inner depth of the foot pocket
+c_foot_r = 16;  // custom: corner radius of the foot pocket (= half width -> round)
+
+// measured: Xiaomi Mijia toothbrush, bottom 28.4 x 29.2 mm, round
+// measured: Philips OneBlade Pro 360 (QP6541), bottom 34.7 x 33.2 mm, rounded square
+P = preset == "mijia"    ? [28.4, 29.2, 30.6, 31.4, 15.3]
+  : preset == "oneblade" ? [34.7, 33.2, 36.8, 35.3, 9]
+  : [c_dev_w, c_dev_d, c_foot_w, c_foot_d, c_foot_r];
+dev_w  = P[0];
+dev_d  = P[1];
+foot_w = P[2];
+foot_d = P[3];
+foot_r = min(P[4], foot_w/2, foot_d/2);
 
 /* [Mechanism] */
 lever   = 12;   // distance pivot -> lever pin
@@ -52,7 +67,7 @@ S1  = S0 + st;            // slider front face
 cap_h = 2.5;              // cap washer height (countersunk screw sits flush)
 yb  = S1 + 0.3 + cap_h + 1; // back of device (clears the cap washers)
 cy  = yb + dev_d/2;       // device centre (y)
-Rf  = foot_d/2;
+Fw  = foot_w/2; Fd = foot_d/2;
 pad_front = cy + 9;       // pads reach past the device centre
 pin_d = 5;
 boss_d = 6;               // arm pivot boss
@@ -143,6 +158,11 @@ module arm_right(phi=0) {
 module arm_left(phi=0) { mirror([1,0,0]) arm_right(phi); }
 
 // ---------------- slider with foot ring ----------------
+// outline of the foot pocket (rounded rectangle), grown by o
+module foot2d(o=0) {
+    offset(r=o) hull() for (mx=[-1,1], my=[-1,1])
+        translate([mx*(Fw - foot_r), my*(Fd - foot_r)]) circle(r=foot_r);
+}
 module slider() {
     top = pz + pin_d/2 + clr + 2.5;
     difference() {
@@ -156,14 +176,14 @@ module slider() {
             // foot ring: floor + rim, open at the front
             difference() {
                 translate([0, cy, -3]) hull() {
-                    cylinder(r=Rf + 3, h=3 + 4);
-                    cylinder(r=Rf + 2, h=3 + 5);        // soft chamfered top edge
+                    linear_extrude(3 + 4) foot2d(3);
+                    linear_extrude(3 + 5) foot2d(2);        // soft chamfered top edge
                 }
-                translate([0, cy, -3 - 1]) cylinder(r=Rf - 5, h=20);   // drain / cable hole
-                translate([0, cy, 0]) cylinder(r=Rf, h=20);            // pocket for the device
-                translate([0, cy, 0]) linear_extrude(20) hull() {        // front opening of the rim, rounded
-                    for (m=[-1,1]) translate([m*(Rf - 6), Rf - 2]) circle(r=2);
-                    translate([-(Rf + 2), Rf + 4]) square([2*(Rf + 2), 1]);
+                translate([0, cy, -3 - 1]) linear_extrude(20) foot2d(-5);   // drain / charging-plug hole
+                translate([0, cy, 0]) linear_extrude(20) foot2d(0);         // pocket for the device
+                translate([0, cy, 0]) linear_extrude(20) hull() {           // front opening of the rim, rounded
+                    for (m=[-1,1]) translate([m*(Fw - 6), Fd - 2]) circle(r=2);
+                    translate([-(Fw + 2), Fd + 4]) square([2*(Fw + 2), 1]);
                 }
             }
         }
@@ -191,6 +211,8 @@ module hardware() for (m=[0,1]) mirror([m,0,0]) {
     translate([gx, S1 + 0.3, gz]) rotate([-90,0,0]) washer();
 }
 module device() translate([0, cy, 0]) scale([dev_w/dev_d, 1, 1]) cylinder(d=dev_d, h=120);
+
+echo(str("preset=", preset, " device ", dev_w, "x", dev_d, " foot ", foot_w, "x", foot_d, " r", foot_r));
 
 // ---------------- views ----------------
 module assembly(s=0) {
