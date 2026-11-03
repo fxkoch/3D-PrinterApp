@@ -41,7 +41,7 @@ lever   = 12;   // distance pivot -> lever pin
 pad_h   = 30;   // grip pad height
 travel_up   = 4;   // slider travel above neutral (opens pads)
 travel_down = 3;   // slider travel below neutral (closes pads)
-lip     = 4;    // front claw: how far it reaches around the front of the device
+lip     = 7;    // front claw: how far it reaches around the front of the device
 lip_clr = 0.6;  // clearance between claw and device
 
 /* [Self-opening counterweight] */
@@ -85,7 +85,7 @@ cap_h = groove + pin_tip; // how far a pin sticks out in front of the part it ho
 yb  = S1 + 0.3 + cap_h + 0.7; // back of device (clears the guide pins and clips)
 cy  = yb + dev_d/2;       // device centre (y)
 Fw  = foot_w/2; Fd = foot_d/2;
-pad_front = cy + dev_d/2 - 2; // pads + claws reach around the front of the device
+pad_front = cy + dev_d/2;  // pads + claws reach around the front of the device
 pin_d = 5;
 boss_d = 6;               // arm pivot pin
 groove_d  = 4.4;          // pivot pin diameter in the clip groove

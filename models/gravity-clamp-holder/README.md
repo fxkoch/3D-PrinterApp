@@ -14,6 +14,10 @@ geschlossen und die Krallen halten das Gerät vorne fest.
 
 ![Mechanik](mechanism_open_vs_closed.png)
 
+Draufsicht: Die Krallen greifen vorne um das Gerät (links Mijia, rechts OneBlade).
+
+![Krallen von oben](claws_top_view.png)
+
 ## Fertige Varianten für deine Geräte
 
 ![Mijia und OneBlade](presets_mijia_oneblade.png)
@@ -40,7 +44,7 @@ sind erreichbar, und Wasser läuft ab.
 2. **Einsetzen:** Das Gerät von oben in die Fußmulde stellen. Sein Gewicht
    zieht den Schlitten nach unten. Die Hebel (12 mm) ziehen die Arme herum,
    und die Backen schließen sich ums Gerät. Die Übersetzung ist etwa 1 : 2,5.
-3. **Festhalten:** Vorne an jeder Backe sitzt eine Kralle, die 4 mm um die
+3. **Festhalten:** Vorne an jeder Backe sitzt eine Kralle, die bis zu 7 mm um die
    Vorderseite des Geräts greift. Nach vorne kann es nicht herausfallen.
 4. **Herausnehmen:** Gerät anheben. Sobald sein Gewicht vom Fuß weg ist,
    klappen die Gegengewichte die Backen auf. Das Gerät kommt nach oben frei,
@@ -119,7 +123,7 @@ Tasche sichern.
 | `preset` | custom | `mijia`, `oneblade` oder `custom` |
 | `c_dev_w` / `c_dev_d` / `c_dev_r` | 30 / 30 / 15 | Gerät: Breite, Tiefe, Eckradius |
 | `c_foot_w` / `c_foot_d` / `c_foot_r` | 32 / 32 / 16 | Fußmulde: innen Breite, Tiefe, Eckradius |
-| `lip` / `lip_clr` | 4 / 0,6 | Krallen: Übergriff und Spiel |
+| `lip` / `lip_clr` | 7 / 0,6 | Krallen: Übergriff und Spiel |
 | `nuts` / `cw_x` | 2 / 15 | Gegengewicht: Muttern pro Arm, Abstand zum Drehpunkt |
 | `pad_h` | 30 | Höhe der Backen |
 | `edge` | 1,2 | Fase an den Sichtkanten |
