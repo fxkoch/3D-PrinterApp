@@ -12,11 +12,12 @@ final class MultiACETests: XCTestCase {
             "3": ["ace_index": 0, "slot": 3, "type": "PETG", "subtype": "Basic", "color": "000000", "brand": "Generic"],
         ],
         "aces": [[
-            "idx": 0, "connected": true, "model": "ACE 2 Pro", "temp": 51, "humidity": 22, "humidity_effective": 22.0,
+            "idx": 0, "connected": true, "model": "ACE 2 Pro", "temp": 51, "gate_status": [0, 1, 1], "humidity": 22, "humidity_effective": 22.0,
             "dryer_status": ["status": "keeping", "target_temp": 50, "duration": 14400, "remain_time": 9731],
             "slots": [
                 ["index": 0, "status": "unknown", "material": "", "color": [0, 0, 0]],
                 ["index": 1, "status": "ready", "material": "PETG", "color": [169, 117, 79]],
+                ["index": 2, "status": "unknown", "material": "", "color": [0, 0, 0]],
             ],
         ]],
     ]
@@ -32,6 +33,9 @@ final class MultiACETests: XCTestCase {
         XCTAssertEqual(ace.units[0].humidity, 22)
         XCTAssertEqual(ace.units[0].slots[1].color, "#A9754F")
         XCTAssertFalse(ace.units[0].slots[0].present)
+        // A spool without RFID chip: the gate sensor sees it, but no material is reported.
+        XCTAssertTrue(ace.units[0].slots[2].present)
+        XCTAssertNil(ace.units[0].slots[2].material)
         XCTAssertNil(ace.headSlots[0])
         XCTAssertEqual(ace.headSlots[2]?.material, "PLA Basic")
     }

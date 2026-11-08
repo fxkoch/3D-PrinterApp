@@ -297,12 +297,32 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     }
 
     /// Snapshot URL of the first configured webcam, if any.
+    /// The U1's own camera service only delivers pictures while it is asked for them every few seconds
+    /// (`camera.start_monitor`, the same call Snapmaker's apps make). About one picture per second is all it produces.
+    public func wakeCamera() async {
+        #if !canImport(FoundationNetworking)
+        guard let base = connection.baseURL, var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return }
+        comps.scheme = base.scheme == "https" ? "wss" : "ws"
+        comps.path = "/websocket"
+        guard let url = comps.url else { return }
+        let task = session.webSocketTask(with: url)
+        task.resume()
+        let request = #"{"jsonrpc":"2.0","id":1,"method":"camera.start_monitor","params":{"domain":"lan","interval":0}}"#
+        try? await task.send(.string(request))
+        _ = try? await task.receive()
+        task.cancel(with: .normalClosure, reason: nil)
+        #endif
+    }
+
     public func webcamSnapshotURL() async throws -> URL? {
         let json = try await getJSON("/server/webcams/list")
+        guard let base = connection.baseURL else { return nil }
         guard let result = json["result"] as? [String: Any], let cams = result["webcams"] as? [[String: Any]],
               let cam = cams.first(where: { ($0["enabled"] as? Bool) ?? true }),
-              let snapshot = cam["snapshot_url"] as? String, !snapshot.isEmpty,
-              let base = connection.baseURL else { return nil }
+              let snapshot = cam["snapshot_url"] as? String, !snapshot.isEmpty else {
+            // Stock U1 software: no webcam entry, but its camera service writes this picture once it was woken (`wakeCamera`).
+            return URL(string: "/server/files/camera/monitor.jpg", relativeTo: base)?.absoluteURL
+        }
         if snapshot.hasPrefix("http") { return URL(string: snapshot) }
         // Relative URLs are served by the web frontend on port 80.
         var comps = URLComponents(url: base, resolvingAgainstBaseURL: false)

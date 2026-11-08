@@ -342,7 +342,7 @@ struct PrinterDetailView: View {
                     ForEach(unit.slots, id: \.index) { slot in
                         VStack(spacing: 4) {
                             Swatch(color: slot.present ? (slot.color ?? "#888888") : "#E5E5EA", label: "\(slot.index + 1)", selected: false, size: 30)
-                            Text(slot.present ? (slot.material ?? "?") : "leer").font(.caption2).lineLimit(1)
+                            Text(slot.present ? (slot.material ?? "Spule") : "leer").font(.caption2).lineLimit(1)
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -445,12 +445,18 @@ struct CameraView: View {
                 snapshotURL = try? await moonraker.webcamSnapshotURL()
                 if snapshotURL == nil { unavailable = true; return }
             }
+            var lastWake = Date.distantPast
             repeat {
+                // The U1's stock camera goes to sleep unless it is woken every few seconds.
+                if Date().timeIntervalSince(lastWake) > 8 {
+                    lastWake = Date()
+                    await moonraker.wakeCamera()
+                }
                 if let url = snapshotURL, let response = try? await URLSession.shared.data(from: url),
                    let img = UIImage(data: response.0) {
                     image = img
                 }
-                try? await Task.sleep(nanoseconds: UInt64((active ? 2 : 10) * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64((active ? 1 : 10) * 1_000_000_000))
             } while !Task.isCancelled
         }
     }

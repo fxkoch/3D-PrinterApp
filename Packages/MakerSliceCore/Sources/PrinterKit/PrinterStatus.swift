@@ -216,9 +216,13 @@ public struct PrinterStatus: Sendable, Equatable {
                 unit.dryingTarget = number(d["target_temp"])
                 unit.dryingRemainingMinutes = number(d["remain_time"]).map { $0 / 60 }
             }
+            // The gate sensors know whether a spool is in the slot; spools without an RFID chip report no material.
+            let gates = u["gate_status"] as? [Any] ?? []
             unit.slots = (u["slots"] as? [[String: Any]] ?? []).map { sl in
+                let index = Int(number(sl["index"]) ?? 0)
                 let material = (sl["material"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                return MultiACE.Slot(index: Int(number(sl["index"]) ?? 0), present: material != nil || (sl["status"] as? String) == "ready",
+                let gate = index < gates.count ? (number(gates[index]) ?? 0) != 0 : false
+                return MultiACE.Slot(index: index, present: gate || material != nil || (sl["status"] as? String) == "ready",
                                      material: material, color: material == nil ? nil : hex(sl["color"]))
             }
             units.append(unit)
