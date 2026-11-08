@@ -314,10 +314,40 @@ struct BrowserView: View {
     }
 }
 
-/// Hosts the shared WKWebView.
+/// Hosts the shared WKWebView. The web view lives for the whole app run and is shown in different places (tab, sheet);
+/// every place gets its own container, so UIKit never sees one web view moved around under SwiftUI's feet.
 struct WebView: UIViewRepresentable {
     let webView: WKWebView
 
-    func makeUIView(context: Context) -> WKWebView { webView }
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func makeUIView(context: Context) -> WebContainer { WebContainer(webView) }
+    func updateUIView(_ uiView: WebContainer, context: Context) { uiView.attach(webView) }
+    static func dismantleUIView(_ uiView: WebContainer, coordinator: ()) { uiView.detach() }
+}
+
+final class WebContainer: UIView {
+    private let web: WKWebView
+
+    init(_ web: WKWebView) {
+        self.web = web
+        super.init(frame: .zero)
+        attach(web)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func attach(_ web: WKWebView) {
+        guard web.superview !== self else { return }
+        web.removeFromSuperview()
+        web.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(web)
+        NSLayoutConstraint.activate([
+            web.leadingAnchor.constraint(equalTo: leadingAnchor), web.trailingAnchor.constraint(equalTo: trailingAnchor),
+            web.topAnchor.constraint(equalTo: topAnchor), web.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    /// Only lets go when this container still holds the web view (a newer container may already have taken it over).
+    func detach() {
+        if web.superview === self { web.removeFromSuperview() }
+    }
 }

@@ -32,7 +32,8 @@ final class MakerWorldBrowser: NSObject {
         // Present as Safari: Google/Apple sign-in and Cloudflare reject unknown embedded browsers.
         config.applicationNameForUserAgent = "Version/18.0 Mobile/15E148 Safari/604.1"
         webView = WKWebView(frame: .zero, configuration: config)
-        webView.allowsBackForwardNavigationGestures = true
+        // The back button in the toolbar does this; edge swipes clash with the sheet's own swipe-down gesture.
+        webView.allowsBackForwardNavigationGestures = false
         super.init()
         webView.navigationDelegate = self
         webView.uiDelegate = self
