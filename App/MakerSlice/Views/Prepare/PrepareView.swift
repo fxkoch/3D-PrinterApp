@@ -302,7 +302,8 @@ struct PrepareView: View {
 
     private var materialPanel: some View {
         let machine = project.settings.machine
-        return Panel(title: machine.multiMaterial == .filamentSwitcher ? "Material (ACE Pro)" : "Material (Druckköpfe)",
+        let fedByACE = loadedPrinter.flatMap { app.printers.status(of: $0)?.ace } != nil
+        return Panel(title: machine.multiMaterial == .filamentSwitcher ? "Material (ACE Pro)" : (fedByACE ? "Material (Druckköpfe, ACE)" : "Material (Druckköpfe)"),
                      systemImage: "circle.hexagongrid") {
             HStack(spacing: 10) {
                 ForEach(0..<machine.toolCount, id: \.self) { slot in

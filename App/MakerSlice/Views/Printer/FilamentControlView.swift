@@ -62,7 +62,7 @@ struct FilamentControlView: View {
     }
 
     private var slotPanel: some View {
-        Panel(title: "Spule (AMS)", systemImage: "circle.hexagongrid") {
+        Panel(title: status?.ace != nil ? "Druckkopf aus dem ACE" : "Spule (AMS)", systemImage: "circle.hexagongrid") {
             if let filaments = status?.filaments, !filaments.isEmpty {
                 Picker("Slot", selection: $slot) {
                     ForEach(Array(filaments.prefix(4).enumerated()), id: \.offset) { i, f in

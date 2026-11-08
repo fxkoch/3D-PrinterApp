@@ -83,6 +83,12 @@ final class AppModel {
             printers.add(PrinterConnection(name: "Virtueller Kobra S1", host: "127.0.0.1",
                                            model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
         }
+        // UI tests: a virtual Snapmaker U1 with multiACE (tools/virtualprinters/u1_multiace_sim.py) on this Mac.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestVirtualU1ACE"),
+           !printers.printers.contains(where: { $0.host == "127.0.0.1:17125" }) {
+            printers.add(PrinterConnection(name: "Virtueller U1 (ACE)", host: "127.0.0.1:17125",
+                                           model: PrinterModel.snapmakerU1.rawValue, kind: .moonraker))
+        }
         if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") || ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") || ProcessInfo.processInfo.arguments.contains("-uiTestPlates") || ProcessInfo.processInfo.arguments.contains("-uiTestMultiColorModel") {
             loadSample()
         }

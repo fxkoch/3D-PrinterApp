@@ -642,4 +642,65 @@ final class MakerSliceUITests: XCTestCase {
         sleep(1)
         snapshot("34-Kobra-ACE")
     }
+
+    private func simState() -> [String: Any] {
+        var result: [String: Any] = [:]
+        let done = expectation(description: "sim state")
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:17125/sim/state")!)
+        request.timeoutInterval = 5
+        URLSession(configuration: .ephemeral).dataTask(with: request) { data, _, _ in
+            if let data, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { result = json }
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 8)
+        return result
+    }
+
+    /// Virtual Snapmaker U1 with multiACE (tools/virtualprinters/u1_multiace_sim.py): the app shows the ACE, loads a tool
+    /// head from its ACE slot and starts the dryer – the simulator records the exact commands.
+    func testVirtualU1WithMultiACE() throws {
+        app.launchArguments += ["-uiTestVirtualU1ACE"]
+        app.launch()
+        app.tabBars.buttons["Drucker"].tap()
+        let printer = app.staticTexts["Virtueller U1 (ACE)"].firstMatch
+        XCTAssertTrue(printer.waitForExistence(timeout: 20))
+        printer.tap()
+        let details = app.staticTexts["aceMode"].firstMatch
+        for _ in 0..<5 where !details.exists { app.swipeUp(); sleep(1) }
+        XCTAssertTrue(details.waitForExistence(timeout: 20), "the app should show the ACE of the U1")
+        XCTAssertTrue(app.staticTexts["ACE Pro 2 (multiACE)"].exists || app.staticTexts["ACE PRO 2 (MULTIACE)"].exists)
+        XCTAssertTrue(app.staticTexts["aceMode"].label.contains("Mehrfarbig"), app.staticTexts["aceMode"].label)
+        snapshot("90-U1-ACE")
+
+        let control = app.buttons["filamentControlButton"]
+        for _ in 0..<4 where !control.isHittable { app.swipeUp() }
+        control.tap()
+        XCTAssertTrue(app.buttons["loadSlot"].waitForExistence(timeout: 10), "load is offered for the ACE")
+        XCTAssertTrue(app.buttons["retractSlot"].exists, "pulling back into the ACE is offered")
+        XCTAssertFalse(app.buttons["unloadFilament"].exists, "no blind 'unload everything'")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH '3 '")).firstMatch.tap()
+        app.buttons["loadSlot"].tap()
+        snapshot("91-U1-ACE-laden")
+        // The confirmation dialog repeats the button title (without the identifier).
+        let confirm = app.buttons.matching(NSPredicate(format: "label == 'Slot 3 laden' AND identifier != 'loadSlot'")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        let started = Date()
+        while !((simState()["scripts"] as? [String]) ?? []).contains("ACE_LOAD_HEAD HEAD=2"), Date().timeIntervalSince(started) < 20 { sleep(1) }
+        XCTAssertTrue(((simState()["scripts"] as? [String]) ?? []).contains("ACE_LOAD_HEAD HEAD=2"), "load command reached the printer")
+        app.buttons["Fertig"].tap()
+        sleep(6)
+        for _ in 0..<5 where !app.buttons["dryButton"].exists { app.swipeUp(); sleep(1) }
+        snapshot("92-U1-ACE-geladen")
+        let dry = app.buttons["dryButton"]
+        XCTAssertTrue(dry.waitForExistence(timeout: 10))
+        XCTAssertTrue(dry.isEnabled, "drying is offered once a spool is loaded")
+        dry.tap()
+        let start = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Starten:'")).firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        let t0 = Date()
+        while !((simState()["scripts"] as? [String]) ?? []).contains(where: { $0.hasPrefix("ACE_START_DRYING TEMP=") }), Date().timeIntervalSince(t0) < 20 { sleep(1) }
+        XCTAssertTrue(((simState()["scripts"] as? [String]) ?? []).contains(where: { $0.hasPrefix("ACE_START_DRYING TEMP=") }), "dryer command reached the printer")
+    }
 }

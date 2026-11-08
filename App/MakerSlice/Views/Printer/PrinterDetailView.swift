@@ -68,7 +68,14 @@ struct PrinterDetailView: View {
                     Task { await app.printers.perform(on: printer, "Druck abgebrochen") { try await $0.cancel() } }
                 }
             case .dry:
-                if let lan = app.printers.driver(for: printer) as? AnycubicLANClient,
+                if let u1 = app.printers.driver(for: printer) as? MoonrakerClient, u1.hasMultiACE,
+                   let plan = DryingAdvice.plan(types: (status?.filaments ?? []).filter(\.present).compactMap(\.type)) {
+                    Button("Starten: \(plan.summary)") {
+                        Task { await app.printers.perform(on: printer, "Trocknen gestartet (\(plan.summary))") { _ in
+                            try await u1.setACEDrying(true, temperature: plan.temperature, minutes: plan.minutes)
+                        } }
+                    }
+                } else if let lan = app.printers.driver(for: printer) as? AnycubicLANClient,
                    let plan = DryingAdvice.plan(types: (status?.filaments ?? []).filter(\.present).compactMap(\.type)) {
                     Button("Starten: \(plan.summary)") {
                         Task { await app.printers.perform(on: printer, "Trocknen gestartet (\(plan.summary))") { _ in
@@ -141,7 +148,7 @@ struct PrinterDetailView: View {
                     Label(s.state == .error ? "Der letzte Auftrag ist fehlgeschlagen." : "Der letzte Auftrag wurde abgebrochen.", systemImage: "info.circle")
                         .font(.footnote)
                     if s.state == .error {
-                        Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
+            Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
                             .buttonStyle(.bordered).font(.footnote)
                     }
                 }
@@ -253,7 +260,7 @@ struct PrinterDetailView: View {
     }
 
     private func materialPanel(_ s: PrinterStatus) -> some View {
-        Panel(title: model == .kobraS1 ? "ACE Pro" : (model == .bambuP1S ? "AMS" : "Filament"), systemImage: "circle.hexagongrid") {
+        Panel(title: s.ace != nil ? "ACE Pro 2 (multiACE)" : (model == .kobraS1 ? "ACE Pro" : (model == .bambuP1S ? "AMS" : "Filament")), systemImage: "circle.hexagongrid") {
             if s.filaments.isEmpty {
                 Text("Der Drucker meldet kein Filament.").font(.caption).foregroundStyle(.secondary)
             } else {
@@ -268,6 +275,7 @@ struct PrinterDetailView: View {
                     }
                 }
             }
+            if let ace = s.ace { aceDetails(ace) }
             Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
                 .font(.subheadline)
                 .accessibilityIdentifier("filamentCheckButton")
@@ -281,6 +289,22 @@ struct PrinterDetailView: View {
                     if let t = box.temperature { Metric(value: Format.temp(t), caption: "Box", systemImage: "thermometer") }
                     Metric(value: box.drying ? "\(Int(box.dryingRemainingMinutes ?? 0)) min" : "aus", caption: "Trocknen",
                            systemImage: "sun.max")
+                }
+                if let u1 = app.printers.driver(for: printer) as? MoonrakerClient, u1.hasMultiACE {
+                    let plan = DryingAdvice.plan(types: s.filaments.filter(\.present).compactMap(\.type))
+                    Button(box.drying ? "Trocknen beenden" : (plan.map { "Trocknen starten (\($0.summary))" } ?? "Trocknen starten")) {
+                        if box.drying {
+                            Task { await app.printers.perform(on: printer, "Trocknen beendet") { _ in try await u1.setACEDrying(false) } }
+                        } else {
+                            confirmDry = true
+                        }
+                    }
+                    .font(.subheadline)
+                    .disabled((!box.drying && plan == nil) || s.state == .printing || s.state == .paused)
+                    .accessibilityIdentifier("dryButton")
+                    if !box.drying, let plan {
+                        Text(plan.explanation).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 #if canImport(Network)
                 if let lan = app.printers.driver(for: printer) as? AnycubicLANClient {
@@ -300,6 +324,29 @@ struct PrinterDetailView: View {
                     }
                 }
                 #endif
+            }
+        }
+    }
+
+    /// multiACE: operating mode and the spools in the ACE slots (including those not yet assigned to a tool head).
+    private func aceDetails(_ ace: PrinterStatus.MultiACE) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+            Text(ace.isMultiMode ? "Modus: Mehrfarbig – jeder Druckkopf bekommt sein Filament aus dem ACE."
+                                 : "Modus: Normal – der ACE wird nicht für den Druck genutzt.")
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("aceMode")
+            ForEach(ace.units, id: \.index) { unit in
+                Text(unit.connected ? "\(unit.model) – Slots" : "\(unit.model) – nicht verbunden").font(.caption.weight(.semibold))
+                HStack(spacing: 10) {
+                    ForEach(unit.slots, id: \.index) { slot in
+                        VStack(spacing: 4) {
+                            Swatch(color: slot.present ? (slot.color ?? "#888888") : "#E5E5EA", label: "\(slot.index + 1)", selected: false, size: 30)
+                            Text(slot.present ? (slot.material ?? "?") : "leer").font(.caption2).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
             }
         }
     }

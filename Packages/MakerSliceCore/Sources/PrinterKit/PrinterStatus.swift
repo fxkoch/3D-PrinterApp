@@ -57,6 +57,38 @@ public struct PrinterStatus: Sendable, Equatable {
         public var activeSlot: Int?
     }
 
+    /// Anycubic ACE Pro 2 units on a Snapmaker U1, reported by the multiACE add-on (`ace` Klipper object).
+    public struct MultiACE: Sendable, Equatable {
+        public struct Slot: Sendable, Equatable {
+            public var index: Int
+            public var present: Bool
+            public var material: String?
+            /// "#RRGGBB"
+            public var color: String?
+        }
+
+        public struct Unit: Sendable, Equatable {
+            public var index: Int
+            public var model: String
+            public var connected: Bool
+            public var humidity: Double?
+            public var temperature: Double?
+            public var drying = false
+            public var dryingTarget: Double?
+            public var dryingRemainingMinutes: Double?
+            public var slots: [Slot] = []
+        }
+
+        /// "normal" (stock feeders), "head" or "multi" (every tool head fed from the ACE).
+        public var mode: String
+        public var units: [Unit]
+        /// Index = tool head (0...3): the ACE slot that feeds it, `nil` when none is assigned.
+        public var headSlots: [Slot?]
+        public var swapInProgress: Bool
+
+        public var isMultiMode: Bool { mode == "multi" || mode == "head" }
+    }
+
     public var state: JobState = .unknown
     /// True when the printer itself says it is idle: a "failed" or "finished" state is then only the result of the last job
     /// (there is nothing to cancel).
@@ -82,6 +114,8 @@ public struct PrinterStatus: Sendable, Equatable {
     public var speedMode: Int?
     public var lightOn: Bool?
     public var filamentBox: FilamentBox?
+    /// Set when the multiACE add-on runs on the printer.
+    public var ace: MultiACE?
     public var firmware: String?
     public var cameraStreamURL: URL?
     /// Remaining time reported by the printer itself, if any.
@@ -101,7 +135,7 @@ public struct PrinterStatus: Sendable, Equatable {
     /// Object names to request from Klipper.
     public static let queryObjects = [
         "print_stats", "virtual_sdcard", "display_status", "heater_bed",
-        "extruder", "extruder1", "extruder2", "extruder3", "toolhead", "print_task_config",
+        "extruder", "extruder1", "extruder2", "extruder3", "toolhead", "print_task_config", "ace",
     ]
 
     /// Parses the `status` dictionary of `/printer/objects/query`.
@@ -158,6 +192,57 @@ public struct PrinterStatus: Sendable, Equatable {
                     )
                 }
             }
+        }
+        if let ace = status["ace"] as? [String: Any] { applyMultiACE(ace) }
+    }
+
+    /// Parses the multiACE `ace` object: units, slots, humidity/dryer and which slot feeds which tool head.
+    mutating func applyMultiACE(_ ace: [String: Any]) {
+        func hex(_ rgb: Any?) -> String? {
+            if let s = rgb as? String, !s.isEmpty { return "#" + s.replacingOccurrences(of: "#", with: "").prefix(6).uppercased() }
+            guard let a = rgb as? [Any], a.count >= 3 else { return nil }
+            let c = a.prefix(3).map { Int(number($0) ?? 0) }
+            return String(format: "#%02X%02X%02X", c[0], c[1], c[2])
+        }
+        var units: [MultiACE.Unit] = []
+        for u in ace["aces"] as? [[String: Any]] ?? [] {
+            var unit = MultiACE.Unit(index: Int(number(u["idx"]) ?? Double(units.count)), model: (u["model"] as? String) ?? "ACE",
+                                     connected: (u["connected"] as? Bool) ?? true)
+            unit.humidity = number(u["humidity_effective"]) ?? number(u["humidity"])
+            unit.temperature = number(u["temp"])
+            if let d = u["dryer_status"] as? [String: Any] {
+                let st = (d["status"] as? String) ?? ""
+                unit.drying = ["drying", "keeping", "heating", "running"].contains(st)
+                unit.dryingTarget = number(d["target_temp"])
+                unit.dryingRemainingMinutes = number(d["remain_time"]).map { $0 / 60 }
+            }
+            unit.slots = (u["slots"] as? [[String: Any]] ?? []).map { sl in
+                let material = (sl["material"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                return MultiACE.Slot(index: Int(number(sl["index"]) ?? 0), present: material != nil || (sl["status"] as? String) == "ready",
+                                     material: material, color: material == nil ? nil : hex(sl["color"]))
+            }
+            units.append(unit)
+        }
+        var heads: [MultiACE.Slot?] = Array(repeating: nil, count: 4)
+        let sources = ace["head_source"] as? [String: Any] ?? [:]
+        for (key, value) in sources {
+            guard let head = Int(key), (0..<4).contains(head), let src = value as? [String: Any] else { continue }
+            let type = (src["type"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            heads[head] = MultiACE.Slot(index: Int(number(src["slot"]) ?? 0), present: type != nil,
+                                        material: [type, (src["subtype"] as? String).flatMap { $0.isEmpty ? nil : $0 }].compactMap { $0 }.joined(separator: " ").nilIfEmpty,
+                                        color: hex(src["color"]))
+            if type != nil {
+                while filaments.count <= head { filaments.append(LoadedFilament(present: false)) }
+                filaments[head] = LoadedFilament(present: true, vendor: (src["brand"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                                                 type: type, subType: (src["subtype"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                                                 color: hex(src["color"]))
+            }
+        }
+        self.ace = MultiACE(mode: (ace["mode"] as? String) ?? "normal", units: units, headSlots: heads,
+                            swapInProgress: (ace["swap_in_progress"] as? Bool) ?? false)
+        if let first = units.first {
+            filamentBox = FilamentBox(temperature: first.temperature, humidity: first.humidity, drying: first.drying,
+                                      dryingTarget: first.dryingTarget, dryingRemainingMinutes: first.dryingRemainingMinutes, activeSlot: nil)
         }
     }
 

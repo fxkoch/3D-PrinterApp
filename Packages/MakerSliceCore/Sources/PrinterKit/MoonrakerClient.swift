@@ -80,6 +80,19 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
 public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public let connection: PrinterConnection
     private let session: URLSession
+    private let aceLock = NSLock()
+    private var aceSeen = false
+
+    /// True once the printer has reported the multiACE add-on (Anycubic ACE Pro 2 on the U1).
+    public var hasMultiACE: Bool {
+        aceLock.lock(); defer { aceLock.unlock() }
+        return aceSeen
+    }
+
+    private func setACESeen(_ seen: Bool) {
+        aceLock.lock(); defer { aceLock.unlock() }
+        aceSeen = seen
+    }
 
     public init(connection: PrinterConnection, session: URLSession? = nil) {
         self.connection = connection
@@ -122,6 +135,7 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         }
         var s = PrinterStatus()
         s.apply(status)
+        setACESeen(s.ace != nil)
         return s
     }
 
@@ -163,7 +177,42 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     }
 
     public var filamentControl: FilamentControlSupport {
-        FilamentControlSupport(extrude: true, note: "Laden und Entladen ganzer Spulen geht an diesem Drucker am Display; die App kann Filament bei heißer Düse vorschieben und zurückziehen.")
+        if hasMultiACE {
+            return FilamentControlSupport(extrude: true, loadSlot: true, retract: true,
+                                          note: "Der ACE ist über multiACE angebunden. „Laden“ führt das Filament des ACE-Slots bis in den Druckkopf mit der gleichen Nummer, „Zurückziehen“ zieht es wieder in den ACE. Der Drucker heizt dabei selbst.")
+        }
+        return FilamentControlSupport(extrude: true, note: "Laden und Entladen ganzer Spulen geht an diesem Drucker am Display; die App kann Filament bei heißer Düse vorschieben und zurückziehen.")
+    }
+
+    /// multiACE: loads tool head `slot` (0...3) from its ACE slot.
+    public func loadSlot(_ slot: Int) async throws {
+        guard hasMultiACE else { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+        try await requireIdleForACE(head: slot)
+        try await runGCode(MultiACECommand.load(head: slot))
+    }
+
+    /// multiACE: pulls the filament of tool head `slot` back into the ACE.
+    public func retractSlot(_ slot: Int) async throws {
+        guard hasMultiACE else { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+        try await requireIdleForACE(head: slot)
+        try await runGCode(MultiACECommand.unload(head: slot))
+    }
+
+    /// multiACE: starts or stops the dryer of ACE `unit`.
+    public func setACEDrying(_ on: Bool, unit: Int = 0, temperature: Int = 45, minutes: Int = 240) async throws {
+        guard hasMultiACE else { throw PrinterError.unsupported("Der ACE ist an diesem Drucker nicht eingerichtet.") }
+        try await requireIdleForACE(head: nil)
+        try await runGCode(on ? MultiACECommand.startDrying(unit: unit, temperature: temperature, minutes: minutes)
+                              : MultiACECommand.stopDrying(unit: unit))
+    }
+
+    /// The ACE commands move filament and heat the nozzle: never during a print.
+    private func requireIdleForACE(head: Int?) async throws {
+        if let head, !(0..<4).contains(head) { throw PrinterError.unsupported("Werkzeugkopf \(head + 1) gibt es nicht.") }
+        let s = try await status()
+        if s.state == .printing || s.state == .paused {
+            throw PrinterError.unsupported("Während eines Drucks bewegt die App kein Filament.")
+        }
     }
 
     public func extrude(millimetres: Double) async throws {

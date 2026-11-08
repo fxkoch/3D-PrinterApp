@@ -15,7 +15,8 @@ quick=false
 
 sim_pid=""
 bambu_pid=""
-cleanup() { [ -n "$sim_pid" ] && kill "$sim_pid" 2>/dev/null || true; [ -n "$bambu_pid" ] && kill "$bambu_pid" 2>/dev/null || true; }
+u1_pid=""
+cleanup() { [ -n "$sim_pid" ] && kill "$sim_pid" 2>/dev/null || true; [ -n "$bambu_pid" ] && kill "$bambu_pid" 2>/dev/null || true; [ -n "$u1_pid" ] && kill "$u1_pid" 2>/dev/null || true; }
 trap cleanup EXIT
 
 echo "▶︎ Virtueller Kobra S1 wird gestartet …"
@@ -27,6 +28,11 @@ echo "▶︎ Virtueller Bambu P1S wird gestartet …"
 (cd tools/virtualprinters && python3 bambu_p1s_sim.py --speed 30 --duration 1800 > ../../build-bambu-sim.log 2>&1 &)
 bambu_pid=$(pgrep -f bambu_p1s_sim.py | head -1)
 for _ in $(seq 1 20); do curl -sf --noproxy '*' http://127.0.0.1:18884/sim/state >/dev/null && break; sleep 1; done
+
+echo "▶︎ Virtueller Snapmaker U1 mit ACE (multiACE) wird gestartet …"
+python3 tools/virtualprinters/u1_multiace_sim.py > build-u1-sim.log 2>&1 &
+u1_pid=$!
+for _ in $(seq 1 20); do curl -sf --noproxy '*' http://127.0.0.1:17125/sim/state >/dev/null && break; sleep 1; done
 
 echo "▶︎ Kern-Tests (Slicer, G-Code, Drucker-Protokolle, Kobra-LAN und Bambu-LAN gegen die virtuellen Drucker) …"
 (cd Packages/MakerSliceCore && BAMBU_SIM=1 KOBRA_HOST=127.0.0.1 swift test 2>&1 | grep -E "error:|failed|Executed .* tests" | tail -5)
