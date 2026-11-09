@@ -135,6 +135,11 @@ public enum PrintAdvisor {
                 detail: String(format: "Etwa %.0f mm² hängen frei in der Luft (flacher als %.0f°). Ohne Stützen hängen diese Stellen durch.",
                                overhang, s.supportAngle) + (mode == .everywhere ? " Einige Überhänge liegen über dem Modell – Stützen „Überall“." : ""),
                 icon: "building.columns", severity: .warning, action: .support(mode)))
+        } else if overhang > 30, s.support == .buildPlateOnly, analyses.contains(where: \.overhangOverModel) {
+            result.append(Recommendation(
+                id: "support-everywhere", title: "Stützen „Überall“ nötig",
+                detail: "Einige Überhänge liegen über dem Modell selbst. Mit „Nur vom Druckbett“ entstehen dort keine Stützen und die Stellen hängen durch.",
+                icon: "building.columns", severity: .warning, action: .support(.everywhere)))
         } else if overhang < 5, s.support != .off {
             result.append(Recommendation(
                 id: "support-off", title: "Stützen sind unnötig",
