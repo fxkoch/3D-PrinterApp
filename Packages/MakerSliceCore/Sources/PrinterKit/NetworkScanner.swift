@@ -87,7 +87,9 @@ public enum NetworkScanner {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = timeout
         config.timeoutIntervalForResource = timeout
+        #if !canImport(FoundationNetworking)
         config.waitsForConnectivity = false
+        #endif
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }
