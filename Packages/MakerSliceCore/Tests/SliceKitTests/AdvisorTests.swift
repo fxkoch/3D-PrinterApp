@@ -125,4 +125,17 @@ final class AdvisorTests: XCTestCase {
         let kobra = PrintAdvisor.recommendations(objects: objs, settings: PrintSettings(printer: .kobraS1))
         XCTAssertTrue(kobra.contains { $0.id == "kobra-spaghetti" })
     }
+
+    func testFanAdviceForPETGAndABS() throws {
+        let objs = [ModelObject(name: "A", mesh: Fixtures.box(20, 20, 20))]
+        var s = PrintSettings()
+        var petg = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
+        petg.fanSpeed = 0.9
+        s.filaments[0] = petg
+        var o = objs
+        let rec = try XCTUnwrap(PrintAdvisor.recommendations(objects: objs, settings: s).first { $0.id == "fan-petg-0" })
+        try PrintAdvisor.apply(rec.action!, settings: &s, objects: &o)
+        XCTAssertEqual(s.filaments[0].fanSpeed, 0.4)
+        XCTAssertNil(PrintAdvisor.recommendations(objects: objs, settings: s).first { $0.id == "fan-petg-0" })
+    }
 }

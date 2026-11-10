@@ -24,6 +24,7 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case supportDistances(z: Double, xy: Double)
         case outerWallSpeed(Double)
         case zHop(Double)
+        case filamentFan(slot: Int, speed: Double)
         case primeTowerTuning(width: Double, volume: Double)
         case spiralVase(Bool)
         case leveling(Bool)
@@ -312,6 +313,22 @@ public enum PrintAdvisor {
                 detail: "Beim Anheben der Düse zieht PETG Fäden. Ohne Z-Hop (0 mm) gibt es weniger Fäden und Klümpchen. Zuerst Filament trocknen (65 °C, 6 Stunden), dann Düse in 5-°C-Schritten kühler.",
                 icon: "scribble", severity: .suggestion, action: .zHop(0)))
         }
+        // Cooling (OrcaSlicer wiki and community): PETG 30–50 % (more weakens layer bonding and makes it brittle),
+        // ABS/ASA 0–30 % (more warps and splits layers).
+        for tool in usedTools.sorted() where tool < s.filaments.count {
+            let f = s.filaments[tool]
+            if f.type.hasPrefix("PETG"), f.fanSpeed > 0.6 {
+                result.append(Recommendation(
+                    id: "fan-petg-\(tool)", title: "PETG: Lüfter zu stark",
+                    detail: String(format: "Slot %d kühlt mit %.0f %%. PETG hält bei 30–50 %% besser zwischen den Schichten zusammen und bricht nicht so leicht. Nur bei hängenden Überhängen etwas mehr.", tool + 1, f.fanSpeed * 100),
+                    icon: "fan", severity: .suggestion, action: .filamentFan(slot: tool, speed: 0.4)))
+            } else if f.type.hasPrefix("ABS") || f.type.hasPrefix("ASA"), f.fanSpeed > 0.3 {
+                result.append(Recommendation(
+                    id: "fan-abs-\(tool)", title: "\(f.type): Lüfter niedriger",
+                    detail: String(format: "Slot %d kühlt mit %.0f %%. ABS/ASA verzieht und reißt zwischen den Schichten bei starker Kühlung; 0–30 %% in geschlossenem Raum sind üblich.", tool + 1, f.fanSpeed * 100),
+                    icon: "fan", severity: .suggestion, action: .filamentFan(slot: tool, speed: 0.2)))
+            }
+        }
         // Kobra S1: the camera's spaghetti detection sometimes pauses a good print.
         if s.printer == .kobraS1 {
             result.append(Recommendation(
@@ -367,6 +384,8 @@ public enum PrintAdvisor {
         case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
         case .outerWallSpeed(let v): s.outerWallSpeed = v
         case .zHop(let v): s.zHop = v
+        case .filamentFan(let slot, let speed):
+            if slot < s.filaments.count { s.filaments[slot].fanSpeed = speed; s.filaments[slot].fanMinSpeed = min(s.filaments[slot].fanMinSpeed, speed) }
         case .primeTowerTuning(let width, let volume): s.primeTowerWidth = width; s.purgeVolume = volume
         case .spiralVase(let on): s.spiralVase = on
         case .useLoadedFilament(let slot, let type):
