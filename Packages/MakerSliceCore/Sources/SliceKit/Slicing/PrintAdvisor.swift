@@ -23,6 +23,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case supportTopZ(Double)
         case supportDistances(z: Double, xy: Double)
         case outerWallSpeed(Double)
+        case zHop(Double)
+        case primeTowerTuning(width: Double, volume: Double)
         case spiralVase(Bool)
         case leveling(Bool)
     }
@@ -288,6 +290,36 @@ public enum PrintAdvisor {
                 icon: "square.stack.3d.up", severity: .warning, action: .primeTower(true)))
         }
 
+        // Snapmaker U1 forum: the tower stays on (without it: strings and blobs), but a narrow tower with a small purge volume
+        // saves most of the waste ("minimal purge" 10–15 mm³ instead of 60).
+        if usedTools.count > 1, s.printer == .snapmakerU1 {
+            if !s.primeTower {
+                result.append(Recommendation(
+                    id: "u1-tower", title: "Reinigungsturm nicht ganz weglassen",
+                    detail: "Beim U1 hat jeder Farbe einen eigenen Druckkopf, der Turm ist klein. Ohne ihn berichten Nutzer im Snapmaker-Forum von Fäden und Klümpchen am Modell.",
+                    icon: "square.stack.3d.up", severity: .suggestion, action: .primeTower(true)))
+            } else if s.purgeVolume == 0 || s.purgeVolume > 40 || s.primeTowerWidth > 30 {
+                result.append(Recommendation(
+                    id: "u1-tower-waste", title: "Weniger Abfall am Reinigungsturm",
+                    detail: "Nutzer im Snapmaker-Forum kommen mit 15 mm³ Spülmenge und etwa 25 mm Turmbreite aus. Das spart Filament und Zeit. Je dünner die Schichten, desto mehr Spülmenge braucht der Turm.",
+                    icon: "square.stack.3d.up", severity: .suggestion, action: .primeTowerTuning(width: 25, volume: 15)))
+            }
+        }
+        // PETG strings when the nozzle lifts: Z-hop pulls the soft strand up (Snapmaker PETG guide, community checklists).
+        if materials.contains(where: { $0.type.hasPrefix("PETG") }), s.zHop > 0 {
+            result.append(Recommendation(
+                id: "petg-zhop", title: "PETG: Z-Hop aus",
+                detail: "Beim Anheben der Düse zieht PETG Fäden. Ohne Z-Hop (0 mm) gibt es weniger Fäden und Klümpchen. Zuerst Filament trocknen (65 °C, 6 Stunden), dann Düse in 5-°C-Schritten kühler.",
+                icon: "scribble", severity: .suggestion, action: .zHop(0)))
+        }
+        // Kobra S1: the camera's spaghetti detection sometimes pauses a good print.
+        if s.printer == .kobraS1 {
+            result.append(Recommendation(
+                id: "kobra-spaghetti", title: "Kobra S1: Fehlalarm der Spaghetti-Erkennung",
+                detail: "Die KI-Erkennung pausiert gelegentlich gute Drucke, besonders bei dunklem, durchscheinendem oder glänzendem Filament, mit Resten auf dem Bett oder mit sich lösender erster Schicht. Bett freiräumen, einen Skirt drucken, die Empfindlichkeit im Display senken und die Firmware aktuell halten. Mit „Fortsetzen“ läuft der Druck weiter.",
+                icon: "camera.metering.unknown", severity: .info))
+        }
+
         result += materialAdvice(objects: objects, settings: s, usedTools: usedTools, dryerHumidity: dryerHumidity)
 
         // Compare with what is loaded in the printer.
@@ -334,6 +366,8 @@ public enum PrintAdvisor {
         case .supportTopZ(let value): s.supportTopZDistance = value
         case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
         case .outerWallSpeed(let v): s.outerWallSpeed = v
+        case .zHop(let v): s.zHop = v
+        case .primeTowerTuning(let width, let volume): s.primeTowerWidth = width; s.purgeVolume = volume
         case .spiralVase(let on): s.spiralVase = on
         case .useLoadedFilament(let slot, let type):
             if slot < s.filaments.count, var f = FilamentLibrary.bestMatch(type: type, printer: s.printer) {

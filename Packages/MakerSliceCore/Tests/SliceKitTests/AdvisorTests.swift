@@ -100,4 +100,29 @@ final class AdvisorTests: XCTestCase {
         XCTAssertEqual(s.supportTopZDistance, 0.28, accuracy: 1e-9)
         XCTAssertEqual(s.supportXYDistance, 0.6, accuracy: 1e-9)
     }
+
+    func testU1TowerPETGHopAndKobraTips() throws {
+        let objs = [ModelObject(name: "A", mesh: Fixtures.box(20, 20, 20), tool: 0), ModelObject(name: "B", mesh: Fixtures.box(20, 20, 20), tool: 1)]
+        var s = PrintSettings(printer: .snapmakerU1)
+        s.primeTower = true
+        s.purgeVolume = 0
+        s.primeTowerWidth = 35
+        var recs = PrintAdvisor.recommendations(objects: objs, settings: s)
+        var o = objs
+        let waste = try XCTUnwrap(recs.first { $0.id == "u1-tower-waste" })
+        try PrintAdvisor.apply(waste.action!, settings: &s, objects: &o)
+        XCTAssertEqual(s.primeTowerWidth, 25)
+        XCTAssertEqual(s.purgeVolume, 15)
+        s.primeTower = false
+        recs = PrintAdvisor.recommendations(objects: objs, settings: s)
+        XCTAssertEqual(recs.first { $0.id == "u1-tower" }?.action, .primeTower(true))
+        s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
+        s.zHop = 0.4
+        recs = PrintAdvisor.recommendations(objects: objs, settings: s)
+        let hop = try XCTUnwrap(recs.first { $0.id == "petg-zhop" })
+        try PrintAdvisor.apply(hop.action!, settings: &s, objects: &o)
+        XCTAssertEqual(s.zHop, 0)
+        let kobra = PrintAdvisor.recommendations(objects: objs, settings: PrintSettings(printer: .kobraS1))
+        XCTAssertTrue(kobra.contains { $0.id == "kobra-spaghetti" })
+    }
 }
