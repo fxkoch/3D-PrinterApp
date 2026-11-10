@@ -20,6 +20,7 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case useLoadedFilament(slot: Int, type: String)
         case retraction(slot: Int, length: Double)
         case elephantFoot(Double)
+        case supportTopZ(Double)
         case spiralVase(Bool)
         case leveling(Bool)
     }
@@ -161,11 +162,37 @@ public enum PrintAdvisor {
                 let reason = warpProne ? "\(materials.first { $0.needsEnclosure }!.type) neigt zum Verziehen."
                     : slender ? "„\(object.name)“ ist hoch und steht auf kleiner Fläche."
                     : "„\(object.name)“ hat wenig Kontaktfläche zum Bett."
+                // Snapmaker forum (U1 "model does not stick"): 2 mm is too narrow, 10 mm or more for tall / small parts.
+                let width: Double = slender || a.footprintArea < 150 ? 10 : 5
                 result.append(Recommendation(
                     id: "brim", title: "Brim für bessere Haftung",
-                    detail: reason + " Ein 5-mm-Rand verhindert Ablösen und lässt sich danach leicht abziehen.",
-                    icon: "square.dashed", severity: .suggestion, action: .brim(5)))
+                    detail: reason + String(format: " Ein %.0f-mm-Rand verhindert Ablösen und lässt sich danach leicht abziehen. Hilft es nicht: Filament trocknen, Platte mit warmem Wasser und Spülmittel reinigen (kein Aceton), Betttemperatur 5 °C höher, Z-Hop an.", width),
+                    icon: "square.dashed", severity: .suggestion, action: .brim(width)))
                 break
+            }
+        }
+        // Orca leaves a gap between brim and part when the elephant-foot compensation is set (Snapmaker forum: set it to 0).
+        if s.brimWidth > 0, s.elephantFootCompensation > 0 {
+            result.append(Recommendation(
+                id: "brim-gap", title: "Brim ohne Abstand zum Teil",
+                detail: "Mit Elefantenfuß-Ausgleich lässt der Slicer einen kleinen Spalt zwischen Brim und Teil – dann hält der Brim das Teil nicht. Im Snapmaker-Forum behob 0 mm Ausgleich das. Der Ausgleich ist nur ohne Brim sinnvoll.",
+                icon: "square.dashed.inset.filled", severity: .suggestion, action: .elephantFoot(0)))
+        }
+        // Supports: Snapmaker forum users print organic supports with Z distance = layer height + 0.05 mm
+        // (0.25 mm at 0.2 mm layers); with a different material as interface 0 mm works and leaves a clean surface.
+        if s.support != .off {
+            if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0 {
+                result.append(Recommendation(
+                    id: "support-z0", title: "Stützen: Abstand 0 mm bei anderem Material",
+                    detail: "Die Kontaktschicht der Stützen besteht aus einem anderen Material (z. B. PETG unter PLA). Dann haftet sie kaum, und Nutzer im Snapmaker-Forum stellen den oberen Abstand auf 0 mm – die Unterseite wird so glatter. Erst mit einem kleinen Teil testen; verschmilzt es, wieder 0,2 mm.",
+                    icon: "building.columns", severity: .info, action: .supportTopZ(0)))
+            } else if s.supportInterfaceSlot == nil, s.supportTopZDistance < s.layerHeight + 0.04 {
+                let value = ((s.layerHeight + 0.05) * 100).rounded() / 100
+                result.append(Recommendation(
+                    id: "support-z", title: "Stützen lassen sich leichter lösen",
+                    detail: String(format: "Bei %.2f mm Schichten nutzen Snapmaker-Anwender %.2f mm Abstand zwischen Stütze und Teil: Die Stützen gehen \"wie Butter\" ab. Für sehr hohe Stützen zusätzlich die Erweiterung der ersten Schicht auf 5–7 mm stellen.",
+                                   s.layerHeight, value),
+                    icon: "building.columns", severity: .suggestion, action: .supportTopZ(value)))
             }
         }
 
@@ -285,6 +312,7 @@ public enum PrintAdvisor {
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
         case .elephantFoot(let value): s.elephantFootCompensation = value
+        case .supportTopZ(let value): s.supportTopZDistance = value
         case .spiralVase(let on): s.spiralVase = on
         case .useLoadedFilament(let slot, let type):
             if slot < s.filaments.count, var f = FilamentLibrary.bestMatch(type: type, printer: s.printer) {

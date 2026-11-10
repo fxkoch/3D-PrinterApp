@@ -58,4 +58,24 @@ final class AdvisorTests: XCTestCase {
         ], bedSize: 250))
         XCTAssertTrue(ids(PrintAdvisor.recommendations(objects: objs, settings: s)).contains("tower"))
     }
+
+    func testSnapmakerForumTipsForBrimAndSupport() throws {
+        let t = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "T", mesh: Fixtures.tShape())], bedSize: 270))
+        var s = PrintSettings()
+        s.support = .buildPlateOnly
+        s.layerHeight = 0.2
+        s.supportTopZDistance = 0.2
+        var recs = PrintAdvisor.recommendations(objects: t, settings: s)
+        XCTAssertEqual(recs.first { $0.id == "support-z" }?.action, .supportTopZ(0.25), "0.25 mm at 0.2 mm layers")
+        s.supportInterfaceSlot = 1
+        recs = PrintAdvisor.recommendations(objects: t, settings: s)
+        XCTAssertEqual(recs.first { $0.id == "support-z0" }?.action, .supportTopZ(0), "other material as interface: 0 mm")
+        s.brimWidth = 5
+        s.elephantFootCompensation = 0.15
+        recs = PrintAdvisor.recommendations(objects: t, settings: s)
+        var objects = t
+        let gap = try XCTUnwrap(recs.first { $0.id == "brim-gap" })
+        try PrintAdvisor.apply(gap.action!, settings: &s, objects: &objects)
+        XCTAssertEqual(s.elephantFootCompensation, 0)
+    }
 }
