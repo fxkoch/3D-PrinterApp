@@ -1,3 +1,4 @@
+#if canImport(Network)
 import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -129,3 +130,4 @@ final class BambuVirtualPrintTests: XCTestCase {
         }
     }
 }
+#endif
