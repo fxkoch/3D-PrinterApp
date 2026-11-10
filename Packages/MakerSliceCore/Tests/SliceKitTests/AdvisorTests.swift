@@ -138,4 +138,16 @@ final class AdvisorTests: XCTestCase {
         XCTAssertEqual(s.filaments[0].fanSpeed, 0.4)
         XCTAssertNil(PrintAdvisor.recommendations(objects: objs, settings: s).first { $0.id == "fan-petg-0" })
     }
+
+    func testQuietAirGCodeForTheU1() throws {
+        var s = PrintSettings(printer: .snapmakerU1)
+        let arranged = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "c", mesh: Fixtures.box(20, 20, 6))], bedSize: s.bedSize))
+        let quiet = try SliceJob(name: "q", objects: arranged, settings: s).run().gcode
+        XCTAssertTrue(quiet.contains("SET_PURIFIER_MODE MODE=1 DESIRE_TEMP=42 ALARM_TEMP=48 FAN_SPEED=0.30"), "exhaust starts low")
+        XCTAssertTrue(quiet.contains("SET_PURIFIER FAN=inner SPEED=0.35"), "filter fan at 35 %")
+        s.quietAir = false
+        let normal = try SliceJob(name: "n", objects: arranged, settings: s).run().gcode
+        XCTAssertTrue(normal.contains("FAN_SPEED=0.6"))
+        XCTAssertFalse(normal.contains("SET_PURIFIER FAN=inner"))
+    }
 }

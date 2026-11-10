@@ -231,6 +231,20 @@ struct PrinterDetailView: View {
                     Metric(value: Format.temp(chamber.temperature), caption: "Kammer", systemImage: "cube.transparent")
                 }
             }
+            if let air = s.purifier {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Haube: \(air.mode)", systemImage: "wind")
+                        .font(.subheadline.weight(.semibold))
+                    HStack {
+                        Metric(value: "\(Int((air.innerSpeed * 100).rounded())) %", caption: "Filterlüfter", systemImage: "fanblades")
+                        Metric(value: "\(Int((air.exhaustSpeed * 100).rounded())) %", caption: "Abluft", systemImage: "arrow.up.right.square")
+                    }
+                    .accessibilityIdentifier("purifierStatus")
+                    Text(String(format: "Filter: %.0f von 720 Betriebsstunden.", air.innerHours))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if app.expertMode, s.state != .printing, s.state != .paused {
                 Menu {
                     ForEach(["PLA", "PETG", "ABS", "TPU"], id: \.self) { type in

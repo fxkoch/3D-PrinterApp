@@ -193,6 +193,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var filaments: [Filament] = [.pla, .pla, .pla, .pla]
     public var enableTimelapse: Bool = true
     public var enableBedLeveling: Bool = true
+    /// Snapmaker U1 with top cover: quiet air handling – filter fan (inner) at a low fixed speed, the exhaust fan starts low and the printer raises it only when the chamber gets too warm.
+    public var quietAir: Bool = true
+    public var quietInnerFanSpeed: Double = 0.35
     /// Kobra S1 start options (sent with the print command): the printer's own vibration compensation and flow calibration.
     public var startVibrationCompensation: Bool = false
     public var startFlowCalibration: Bool = false
@@ -358,6 +361,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.fuzzySkinThickness, &fuzzySkinThickness); d(.fuzzySkinPointDistance, &fuzzySkinPointDistance)
         d(.plateType, &plateType); d(.filaments, &filaments)
         d(.enableTimelapse, &enableTimelapse); d(.enableBedLeveling, &enableBedLeveling)
+        d(.quietAir, &quietAir); d(.quietInnerFanSpeed, &quietInnerFanSpeed)
         d(.startVibrationCompensation, &startVibrationCompensation); d(.startFlowCalibration, &startFlowCalibration)
         d(.extraOptions, &extraOptions); d(.layerGCodes, &layerGCodes)
         d(.retractLengthSteps, &retractLengthSteps); d(.footerGCode, &footerGCode)

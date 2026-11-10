@@ -116,6 +116,8 @@ public struct PrinterStatus: Sendable, Equatable {
     public var filamentBox: FilamentBox?
     /// Set when the multiACE add-on runs on the printer.
     public var ace: MultiACE?
+    /// Snapmaker U1 top cover: filter fan (inner) and exhaust fan, set when the cover is detected.
+    public var purifier: Purifier?
     public var firmware: String?
     public var cameraStreamURL: URL?
     /// Remaining time reported by the printer itself, if any.
@@ -135,7 +137,7 @@ public struct PrinterStatus: Sendable, Equatable {
     /// Object names to request from Klipper.
     public static let queryObjects = [
         "print_stats", "virtual_sdcard", "display_status", "heater_bed",
-        "extruder", "extruder1", "extruder2", "extruder3", "toolhead", "print_task_config", "ace",
+        "extruder", "extruder1", "extruder2", "extruder3", "toolhead", "print_task_config", "ace", "purifier",
     ]
 
     /// Parses the `status` dictionary of `/printer/objects/query`.
@@ -194,6 +196,21 @@ public struct PrinterStatus: Sendable, Equatable {
             }
         }
         if let ace = status["ace"] as? [String: Any] { applyMultiACE(ace) }
+        if let p = status["purifier"] as? [String: Any], (p["power_detected"] as? Bool) == true {
+            func speed(_ key: String) -> Double { ((p[key] as? [String: Any])?["speed"] as? Double) ?? 0 }
+            let modes = [0: "Leerlauf", 1: "Abluft (kühlt die Kammer)", 2: "Vorheizen (Umluft)", 3: "Umluft (Filter)"]
+            purifier = Purifier(mode: modes[(p["mode"] as? Int) ?? 0] ?? "?", exhaustSpeed: speed("exhaust_fan"), innerSpeed: speed("inner_fan"),
+                                innerRPM: (p["inner_fan_rpm"] as? Double) ?? 0, innerHours: ((p["inner_fan_work_time"] as? Double) ?? 0) / 3600)
+        }
+    }
+
+    public struct Purifier: Equatable, Sendable {
+        public var mode: String
+        public var exhaustSpeed: Double
+        public var innerSpeed: Double
+        public var innerRPM: Double
+        /// Operating hours of the filter fan (the filter should be changed after about 720 h of recirculation).
+        public var innerHours: Double
     }
 
     /// Parses the multiACE `ace` object: units, slots, humidity/dryer and which slot feeds which tool head.

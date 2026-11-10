@@ -55,7 +55,9 @@ final class MakerSliceUITests: XCTestCase {
         }
         sleep(1)
         snapshot("49-Expertenmodus-an")
-        XCTAssertTrue(app.staticTexts["Standard-Einstellungen"].waitForExistence(timeout: 5),
+        let defaults = app.staticTexts["Standard-Einstellungen"]
+        for _ in 0..<5 where !defaults.exists { app.swipeUp(); sleep(1) }
+        XCTAssertTrue(defaults.waitForExistence(timeout: 5),
                       "expert mode should reveal the default settings (switch was \(before ?? "nil"), is \(expert.value as? String ?? "nil"))")
         for (i, model) in ["Snapmaker U1", "Anycubic Kobra S1"].enumerated() {
             let row = app.staticTexts[model].firstMatch
@@ -325,7 +327,7 @@ final class MakerSliceUITests: XCTestCase {
         app.tabBars.buttons["Bibliothek"].tap()
         let add = app.buttons["libraryAdd"]
         XCTAssertTrue(add.waitForExistence(timeout: 10))
-        add.tap()
+        add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()   // the nav-bar button is not "hittable" on small simulators
         let entry = app.buttons["libraryPhotoShape"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         entry.tap()
@@ -686,6 +688,7 @@ final class MakerSliceUITests: XCTestCase {
     /// Virtual Snapmaker U1 with multiACE (tools/virtualprinters/u1_multiace_sim.py): the app shows the ACE, loads a tool
     /// head from its ACE slot and starts the dryer – the simulator records the exact commands.
     func testVirtualU1WithMultiACE() throws {
+        try XCTSkipIf(simState().isEmpty, "the virtual U1 (tools/virtualprinters/u1_multiace_sim.py) is not running – started by tools/test-local.sh")
         app.launchArguments += ["-uiTestVirtualU1ACE"]
         app.launch()
         app.tabBars.buttons["Drucker"].tap()
