@@ -2,6 +2,13 @@ import Foundation
 import Observation
 
 /// A model file stored in the app's library.
+/// What the strength check recommends for printing this part; applied when the item is opened for printing.
+struct PrintHints: Codable, Hashable {
+    var wallLoops: Int
+    var infillDensity: Double
+    var material: String?
+}
+
 struct LibraryItem: Codable, Identifiable, Hashable {
     var id = UUID()
     var name: String
@@ -11,9 +18,10 @@ struct LibraryItem: Codable, Identifiable, Hashable {
     /// MakerWorld design id, if it came from there.
     var makerWorldID: Int?
     var coverURL: URL?
+    var hints: PrintHints?
 
     enum Source: String, Codable {
-        case file, makerWorld, printables
+        case file, makerWorld, printables, web
     }
 }
 
@@ -50,13 +58,13 @@ final class Library {
 
     @discardableResult
     func add(data: Data, fileName: String, name: String? = nil, origin: LibraryItem.Source = .file,
-             makerWorldID: Int? = nil, coverURL: URL? = nil) throws -> LibraryItem {
+             makerWorldID: Int? = nil, coverURL: URL? = nil, hints: PrintHints? = nil) throws -> LibraryItem {
         let ext = (fileName as NSString).pathExtension.lowercased()
         let stored = "\(UUID().uuidString).\(ext.isEmpty ? "3mf" : ext)"
         try data.write(to: folder.appendingPathComponent(stored), options: .atomic)
         let displayName = name ?? (fileName as NSString).deletingPathExtension
         let item = LibraryItem(name: displayName, fileName: stored, source: origin,
-                               makerWorldID: makerWorldID, coverURL: coverURL)
+                               makerWorldID: makerWorldID, coverURL: coverURL, hints: hints)
         items.insert(item, at: 0)
         save()
         return item

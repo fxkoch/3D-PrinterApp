@@ -60,33 +60,59 @@ public final class Slicer: @unchecked Sendable {
         let tops = layerHeights(forHeight: height)
         // Slice each layer through its vertical middle.
         let mids = tops.enumerated().map { i, top in top - (i == 0 ? s.firstLayerHeight : s.layerHeight) / 2 }
-        let tools = Array(Set(printable.map(\.tool))).sorted()
-
-        // 1. Outlines per tool and layer.
+        // 1. Outlines per tool and layer. Every object has a main body (its slot may change with height) and
+        // optional coloured parts; each body's slices go to the region of the slot used at that height.
         progress(SliceProgress(phase: "Schichten schneiden", fraction: 0))
         var regions: [Int: [Polygons]] = [:]
-        for (n, tool) in tools.enumerated() {
-            var perLayer = [Polygons](repeating: Polygons(), count: tops.count)
-            for object in printable where object.tool == tool {
-                var slices = MeshSlicer.slice(object.mesh, at: mids)
-                // Connector pegs are added, connector holes cut away.
-                for volume in object.volumes {
-                    let extra = MeshSlicer.slice(volume.mesh, at: mids)
-                    for i in 0..<tops.count where !extra[i].isEmpty {
-                        switch volume.kind {
-                        case .add: slices[i] = (slices[i] + extra[i]).union()
-                        case .subtract: slices[i] = slices[i].difference(extra[i])
-                        }
+        func add(_ slices: [Polygons], tool: (Int) -> Int) {
+            for i in 0..<tops.count where !slices[i].isEmpty {
+                let t = tool(i)
+                var perLayer = regions[t] ?? [Polygons](repeating: Polygons(), count: tops.count)
+                perLayer[i] = perLayer[i].isEmpty ? slices[i] : (perLayer[i] + slices[i]).union()
+                regions[t] = perLayer
+            }
+        }
+        for (n, object) in printable.enumerated() {
+            var slices = MeshSlicer.slice(object.mesh, at: mids)
+            // Connector pegs are added, connector holes cut away.
+            for volume in object.volumes {
+                let extra = MeshSlicer.slice(volume.mesh, at: mids)
+                for i in 0..<tops.count where !extra[i].isEmpty {
+                    switch volume.kind {
+                    case .add: slices[i] = (slices[i] + extra[i]).union()
+                    case .subtract: slices[i] = slices[i].difference(extra[i])
                     }
                 }
-                for i in 0..<tops.count where !slices[i].isEmpty {
-                    perLayer[i] = perLayer[i].isEmpty ? slices[i] : (perLayer[i] + slices[i]).union()
-                }
-                if isCancelled() { throw SliceError.cancelled }
             }
-            regions[tool] = perLayer
-            progress(SliceProgress(phase: "Schichten schneiden", fraction: Double(n + 1) / Double(tools.count) * 0.3))
+            if object.paint.isEmpty {
+                add(slices) { object.tool(atHeight: mids[$0]) }
+            } else {
+                // Painted surfaces: each colour takes the painted area of every layer (cut to the outline);
+                // what is left prints in the object's own slot.
+                let painted = PaintedRegions.regions(facets: object.paint, mids: mids, layerHeight: s.layerHeight)
+                var claimed = [Polygons](repeating: Polygons(), count: tops.count)
+                for tool in painted.keys.sorted() {
+                    var region = [Polygons](repeating: Polygons(), count: tops.count)
+                    for i in 0..<tops.count where !slices[i].isEmpty {
+                        var r = painted[tool]![i].intersection(slices[i])
+                        if !claimed[i].isEmpty { r = r.difference(claimed[i]) }
+                        guard !r.isEmpty else { continue }
+                        region[i] = r
+                        claimed[i] = claimed[i].isEmpty ? r : (claimed[i] + r).union()
+                    }
+                    add(region) { _ in tool }
+                }
+                var rest = slices
+                for i in 0..<tops.count where !claimed[i].isEmpty && !slices[i].isEmpty { rest[i] = slices[i].difference(claimed[i]) }
+                add(rest) { object.tool(atHeight: mids[$0]) }
+            }
+            for part in object.parts {
+                add(MeshSlicer.slice(part.mesh, at: mids)) { _ in part.tool }
+            }
+            if isCancelled() { throw SliceError.cancelled }
+            progress(SliceProgress(phase: "Schichten schneiden", fraction: Double(n + 1) / Double(printable.count) * 0.3))
         }
+        let tools = regions.keys.sorted()
         // Earlier tools win where objects of different tools overlap.
         var claimed = [Polygons](repeating: Polygons(), count: tops.count)
         for tool in tools {
@@ -128,11 +154,16 @@ public final class Slicer: @unchecked Sendable {
                 if let support, !support.areas[i].isEmpty {
                     let gen = LayerToolpathGenerator(settings: s, layerIndex: i, z: tops[i], height: height)
                     let supportPaths = gen.supportPaths(area: support.areas[i], interface: support.interfaces[i])
-                    let supportTool = tools.first ?? 0
-                    if let idx = islands.firstIndex(where: { $0.tool == supportTool }) {
-                        islands[idx].extrusions.insert(contentsOf: supportPaths, at: 0)
-                    } else {
-                        islands.insert(ToolIsland(tool: supportTool, extrusions: supportPaths), at: 0)
+                    // Support (and its contact layers) may use their own slots, e.g. a soluble or cheaper material.
+                    let supportTool = s.supportSlot ?? tools.first ?? 0
+                    let interfaceTool = s.supportInterfaceSlot ?? supportTool
+                    for (tool, paths) in [(supportTool, supportPaths.filter { $0.role != .supportInterface }),
+                                          (interfaceTool, supportPaths.filter { $0.role == .supportInterface })] where !paths.isEmpty {
+                        if let idx = islands.firstIndex(where: { $0.tool == tool }) {
+                            islands[idx].extrusions.insert(contentsOf: paths, at: 0)
+                        } else {
+                            islands.insert(ToolIsland(tool: tool, extrusions: paths), at: 0)
+                        }
                     }
                 }
                 var layer = SlicedLayer(index: i, z: tops[i], height: height, islands: islands, outline: all[i])
@@ -175,7 +206,8 @@ public final class Slicer: @unchecked Sendable {
         }
 
         // 6. Purge tower for single-nozzle multi-material printers.
-        if s.primeTower, s.machine.multiMaterial == .filamentSwitcher, tools.count > 1 {
+        let toolsInPrint = Set(result.flatMap { $0.islands.map(\.tool) })
+        if s.primeTower, s.machine.multiMaterial == .filamentSwitcher, toolsInPrint.count > 1 {
             try PrimeTower(settings: s).insert(into: &result, footprint: all)
         }
         progress(SliceProgress(phase: "Fertig", fraction: 1))

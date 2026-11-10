@@ -8,6 +8,7 @@ public enum PrinterError: Error, LocalizedError, Equatable {
     case http(Int, String)
     case unreachable(String)
     case badResponse
+    case unsupported(String)
 
     public var errorDescription: String? {
         switch self {
@@ -15,6 +16,7 @@ public enum PrinterError: Error, LocalizedError, Equatable {
         case .http(let code, let message): return "Drucker meldet Fehler \(code): \(message)"
         case .unreachable(let reason): return "Drucker nicht erreichbar: \(reason)"
         case .badResponse: return "Unerwartete Antwort vom Drucker."
+        case .unsupported(let why): return why
         }
     }
 }
@@ -29,9 +31,12 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
     /// "snapmakerU1" or "kobraS1" (matches SliceKit's PrinterModel).
     public var model: String
     public var kind: ConnectionKind
+    /// Serial number (Bambu Lab LAN mode: the MQTT topics contain it; the access code is stored in `apiKey`).
+    public var serial: String?
 
     public init(id: UUID = UUID(), name: String, host: String, apiKey: String? = nil,
-                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker) {
+                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker, serial: String? = nil) {
+        self.serial = serial
         self.id = id
         self.name = name
         self.host = host
@@ -40,7 +45,7 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
         self.kind = kind
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind }
+    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind, serial }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,6 +55,7 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
         apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey)
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? "snapmakerU1"
         kind = try c.decodeIfPresent(ConnectionKind.self, forKey: .kind) ?? .moonraker
+        serial = try c.decodeIfPresent(String.self, forKey: .serial)
     }
 
     /// Bare host name or IP without scheme/port.
@@ -74,6 +80,19 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
 public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public let connection: PrinterConnection
     private let session: URLSession
+    private let aceLock = NSLock()
+    private var aceSeen = false
+
+    /// True once the printer has reported the multiACE add-on (Anycubic ACE Pro 2 on the U1).
+    public var hasMultiACE: Bool {
+        aceLock.lock(); defer { aceLock.unlock() }
+        return aceSeen
+    }
+
+    private func setACESeen(_ seen: Bool) {
+        aceLock.lock(); defer { aceLock.unlock() }
+        aceSeen = seen
+    }
 
     public init(connection: PrinterConnection, session: URLSession? = nil) {
         self.connection = connection
@@ -116,6 +135,7 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         }
         var s = PrinterStatus()
         s.apply(status)
+        setACESeen(s.ace != nil)
         return s
     }
 
@@ -154,6 +174,50 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public func runGCode(_ script: String) async throws {
         let encoded = script.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? script
         _ = try await postJSON("/printer/gcode/script?script=\(encoded)")
+    }
+
+    public var filamentControl: FilamentControlSupport {
+        if hasMultiACE {
+            return FilamentControlSupport(extrude: true, loadSlot: true, retract: true,
+                                          note: "Der ACE ist über multiACE angebunden. „Laden“ führt das Filament des ACE-Slots bis in den Druckkopf mit der gleichen Nummer, „Zurückziehen“ zieht es wieder in den ACE. Der Drucker heizt dabei selbst.")
+        }
+        return FilamentControlSupport(extrude: true, note: "Laden und Entladen ganzer Spulen geht an diesem Drucker am Display; die App kann Filament bei heißer Düse vorschieben und zurückziehen.")
+    }
+
+    /// multiACE: loads tool head `slot` (0...3) from its ACE slot.
+    public func loadSlot(_ slot: Int) async throws {
+        guard hasMultiACE else { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+        try await requireIdleForACE(head: slot)
+        try await runGCode(MultiACECommand.load(head: slot))
+    }
+
+    /// multiACE: pulls the filament of tool head `slot` back into the ACE.
+    public func retractSlot(_ slot: Int) async throws {
+        guard hasMultiACE else { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+        try await requireIdleForACE(head: slot)
+        try await runGCode(MultiACECommand.unload(head: slot))
+    }
+
+    /// multiACE: starts or stops the dryer of ACE `unit`.
+    public func setACEDrying(_ on: Bool, unit: Int = 0, temperature: Int = 45, minutes: Int = 240) async throws {
+        guard hasMultiACE else { throw PrinterError.unsupported("Der ACE ist an diesem Drucker nicht eingerichtet.") }
+        try await requireIdleForACE(head: nil)
+        try await runGCode(on ? MultiACECommand.startDrying(unit: unit, temperature: temperature, minutes: minutes)
+                              : MultiACECommand.stopDrying(unit: unit))
+    }
+
+    /// The ACE commands move filament and heat the nozzle: never during a print.
+    private func requireIdleForACE(head: Int?) async throws {
+        if let head, !(0..<4).contains(head) { throw PrinterError.unsupported("Werkzeugkopf \(head + 1) gibt es nicht.") }
+        let s = try await status()
+        if s.state == .printing || s.state == .paused {
+            throw PrinterError.unsupported("Während eines Drucks bewegt die App kein Filament.")
+        }
+    }
+
+    public func extrude(millimetres: Double) async throws {
+        try await requireHotNozzle()
+        try await runGCode(FilamentMove.script(millimetres: millimetres))
     }
 
     public func setBedTemperature(_ t: Int) async throws { try await runGCode("M140 S\(t)") }
@@ -233,12 +297,32 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     }
 
     /// Snapshot URL of the first configured webcam, if any.
+    /// The U1's own camera service only delivers pictures while it is asked for them every few seconds
+    /// (`camera.start_monitor`, the same call Snapmaker's apps make). About one picture per second is all it produces.
+    public func wakeCamera() async {
+        #if !canImport(FoundationNetworking)
+        guard let base = connection.baseURL, var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return }
+        comps.scheme = base.scheme == "https" ? "wss" : "ws"
+        comps.path = "/websocket"
+        guard let url = comps.url else { return }
+        let task = session.webSocketTask(with: url)
+        task.resume()
+        let request = #"{"jsonrpc":"2.0","id":1,"method":"camera.start_monitor","params":{"domain":"lan","interval":0}}"#
+        try? await task.send(.string(request))
+        _ = try? await task.receive()
+        task.cancel(with: .normalClosure, reason: nil)
+        #endif
+    }
+
     public func webcamSnapshotURL() async throws -> URL? {
         let json = try await getJSON("/server/webcams/list")
+        guard let base = connection.baseURL else { return nil }
         guard let result = json["result"] as? [String: Any], let cams = result["webcams"] as? [[String: Any]],
               let cam = cams.first(where: { ($0["enabled"] as? Bool) ?? true }),
-              let snapshot = cam["snapshot_url"] as? String, !snapshot.isEmpty,
-              let base = connection.baseURL else { return nil }
+              let snapshot = cam["snapshot_url"] as? String, !snapshot.isEmpty else {
+            // Stock U1 software: no webcam entry, but its camera service writes this picture once it was woken (`wakeCamera`).
+            return URL(string: "/server/files/camera/monitor.jpg", relativeTo: base)?.absoluteURL
+        }
         if snapshot.hasPrefix("http") { return URL(string: snapshot) }
         // Relative URLs are served by the web frontend on port 80.
         var comps = URLComponents(url: base, resolvingAgainstBaseURL: false)
@@ -264,6 +348,33 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         request.httpMethod = method
         if let key = connection.apiKey, !key.isEmpty { request.setValue(key, forHTTPHeaderField: "X-Api-Key") }
         return request
+    }
+
+    // MARK: - Notes stored in the printer (calibration results)
+
+    /// Moonraker database namespace the app uses.
+    public static let databaseNamespace = "makerslice"
+
+    /// A JSON value the app stored in this printer's Moonraker database, as JSON data (nil if nothing is stored).
+    public func storedValue(key: String) async throws -> Data? {
+        do {
+            let json = try await getJSON("/server/database/item?namespace=\(Self.databaseNamespace)&key=\(key)")
+            guard let result = json["result"] as? [String: Any], let value = result["value"] else { return nil }
+            return try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
+        } catch PrinterError.http(404, _) {
+            return nil
+        }
+    }
+
+    /// Stores a JSON value in the printer's database (namespace "makerslice"). This only writes a small note into
+    /// Moonraker's database – it does not change the printer's configuration or start anything.
+    public func store(value: Data, key: String) async throws {
+        let json = try JSONSerialization.jsonObject(with: value, options: [.fragmentsAllowed])
+        var request = try makeRequest("/server/database/item", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["namespace": Self.databaseNamespace, "key": key, "value": json])
+        let (body, response) = try await perform { try await self.session.data(for: request) }
+        try check(response, body)
     }
 
     private func getJSON(_ path: String) async throws -> [String: Any] {

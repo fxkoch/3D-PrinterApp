@@ -53,7 +53,12 @@ struct PrimeTower {
                 }
             } else {
                 let strips = changeIslands.count
-                let stripDepth = (rect.maxY - rect.minY) / Double(strips)
+                var stripDepth = (rect.maxY - rect.minY) / Double(strips)
+                if settings.purgeVolume > 0 {
+                    // Depth of a fully filled strip that holds the purge volume (volume = width × depth × layer height).
+                    let wanted = settings.purgeVolume / max((rect.maxX - rect.minX - 2 * width) * height, 0.01)
+                    stripDepth = min(stripDepth, max(wanted, 2 * width))
+                }
                 for (k, j) in changeIslands.enumerated() {
                     let y0 = rect.minY + Double(k) * stripDepth
                     let strip = inner.intersection(Polygons.rectangle(minX: rect.minX, minY: y0,

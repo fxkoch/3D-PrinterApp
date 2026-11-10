@@ -36,7 +36,7 @@ public struct OrcaJob: Sendable {
             },
         ]
         self.manifest = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
-        model = ThreeMFWriter.write(objects)
+        model = ThreeMFWriter.write(objects, layerGCodes: settings.layerGCodes)
     }
 
     // MARK: - Mapping to Orca keys
@@ -108,6 +108,8 @@ public struct OrcaJob: Sendable {
             "default_acceleration": num(s.acceleration),
             "outer_wall_acceleration": num(s.outerWallAcceleration),
             "enable_support": s.support == .off ? "0" : "1",
+            "support_filament": "\((s.supportSlot ?? -1) + 1)",
+            "support_interface_filament": "\((s.supportInterfaceSlot ?? -1) + 1)",
             "support_on_build_plate_only": s.support == .buildPlateOnly ? "1" : "0",
             "support_threshold_angle": num(s.supportAngle),
             "support_top_z_distance": num(s.supportTopZDistance),
@@ -119,10 +121,14 @@ public struct OrcaJob: Sendable {
             "skirt_distance": num(s.skirtDistance),
             "enable_prime_tower": s.primeTower ? "1" : "0",
             "prime_tower_width": num(s.primeTowerWidth),
+            "prime_volume": num(s.purgeVolume > 0 ? s.purgeVolume : 45),
             "curr_bed_type": s.plateType.rawValue,
         ]
         if s.support != .off { o["support_type"] = "normal(auto)" }
         if !s.detectBridges { o["bridge_speed"] = num(s.solidInfillSpeed) }
+        for (key, value) in s.extraOptions where SlicerOptionCatalog.option(key)?.availableFor.contains(s.printer) == true {
+            o[key] = value
+        }
         return o
     }
 

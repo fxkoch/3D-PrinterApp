@@ -127,6 +127,85 @@ final class KobraVirtualPrintTests: XCTestCase {
         let done = try await waitFor(client, "finished", timeout: 120) { $0.state == .complete }
         XCTAssertEqual(done.fileName, "makerslice_short.gcode")
     }
+
+    /// Bed and nozzle are sent in one message and checked afterwards (the nozzle once stayed cold while the bed heated).
+    func testPreheatSetsBedAndNozzleAndVerifies() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        _ = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
+        try await client.preheat(bed: 62, nozzle: 213)
+        let hot = try await client.status()
+        XCTAssertEqual(hot.bed.target, 62)
+        XCTAssertEqual(hot.tools.first?.target, 213)
+        try await client.preheat(bed: 0, nozzle: 0)
+        let cold = try await client.status()
+        XCTAssertEqual(cold.tools.first?.target, 0)
+    }
+
+    /// Load, pull back and unload from the app reach the ACE as "feedFilament" with the right type.
+    func testAceFeedCommands() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        _ = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
+        try await client.loadSlot(2)
+        let loaded = try await waitFor(client, "slot loaded") { $0.filamentBox?.activeSlot == 2 }
+        XCTAssertEqual(loaded.filamentBox?.activeSlot, 2)
+        try await client.unloadFilament()
+        try await client.retractSlot(1)
+        let (data, _) = try await URLSession.shared.data(from: URL(string: "http://\(host!):18910/sim/state")!)
+        let state = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let sent = (state["commands"] as? [[String: Any]] ?? []).filter { $0["action"] as? String == "feedFilament" }
+        let types = sent.compactMap { (((($0["data"] as? [String: Any])?["multi_color_box"] as? [[String: Any]])?.first)?["feed_status"] as? [String: Any])?["type"] as? Int }
+        XCTAssertEqual(Array(types.suffix(3)), [1, 2, 3], "load, unload, retract")
+    }
+
+    /// Cancelling an idle printer says so (the old app stayed silent and looked frozen).
+    func testCancelOnAnIdlePrinterExplainsInsteadOfStayingSilent() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        let status = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
+        XCTAssertTrue(status.isIdle, "the printer reports `free`")
+        do {
+            try await client.cancel()
+            XCTFail("nothing to cancel")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("Leerlauf"), "\(error)")
+        }
+    }
+
+    /// Drying settings from the plan for the loaded filaments reach the dryer box.
+    func testDryingUsesTheTemperatureOfThePlan() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        let status = try await waitFor(client, "ACE data") { $0.filaments.count == 4 && $0.filamentBox?.humidity != nil }
+        let plan = try XCTUnwrap(DryingAdvice.plan(types: status.filaments.filter(\.present).compactMap(\.type)))
+        XCTAssertEqual(plan.temperature, 50, "the virtual ACE holds PLA and PETG: PLA limits to 50 °C")
+        try await client.setDrying(true, temperature: plan.temperature, minutes: plan.minutes)
+        let drying = try await waitFor(client, "drying") { $0.filamentBox?.drying == true }
+        XCTAssertEqual(drying.filamentBox?.dryingTarget, Double(plan.temperature))
+        try await client.setDrying(false)
+    }
+
+    /// The real printer answered the start command with code -1 although it started the job: no error must reach the user.
+    func testStartAnsweredWithMinusOneButRunningIsNoError() async throws {
+        let client = AnycubicLANClient(connection: PrinterConnection(name: "Virtueller Kobra S1", host: host,
+                                                                     model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        defer { client.disconnect() }
+        let settings = PrintSettings(printer: .kobraS1)
+        let objects = PlateArranger.arrange([ModelObject(name: "Würfel", mesh: box(10, 10, 4))], bedSize: settings.bedSize)!
+        let job = try SliceJob(name: "Kurz", objects: objects, settings: settings).run()
+        _ = try await waitFor(client, "idle") { $0.state != .printing && $0.state != .paused }
+        try await client.upload(gcode: Data(job.gcode.utf8), fileName: "reject_minus_one.gcode", startPrint: true,
+                                mapping: [SlotMapping(tool: 0, slot: 0, materialType: "PLA", color: [255, 255, 255])])
+        let events = try await client.recentEvents()
+        XCTAssertTrue(events.contains { $0.message.contains("Antwortcode -1") }, "the odd answer is logged for diagnosis")
+        _ = try await waitFor(client, "printing") { $0.state == .printing || $0.state == .complete }
+        try await client.cancel()   // virtual printer only
+    }
     #endif
 
     func box(_ x: Double, _ y: Double, _ z: Double) -> TriangleMesh {

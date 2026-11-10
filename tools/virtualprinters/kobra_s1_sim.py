@@ -132,6 +132,8 @@ class Printer:
         self.lock = threading.Lock()
         self.files: dict[str, dict] = {}
         self.commands: list[dict] = []
+        self.feed_log: list[dict] = []
+        self.loaded_slot = None
         self.state = "free"  # free | printing | paused | finished | stoped
         self.task: dict | None = None
         self.last_project: dict | None = None
@@ -148,6 +150,7 @@ class Printer:
         ]
         self.humidity = 46
         self.publish = lambda topic, payload: None
+        self.camera = False
 
     # Reports -----------------------------------------------------------------
     def report(self, rtype: str, data: dict, action: str = "report", code: int = 200) -> None:
@@ -180,7 +183,7 @@ class Printer:
             "state": "busy" if self.state in ("printing", "paused") else "free", "temp": self.temps(),
             "fan_speed_pct": self.fan, "aux_fan_speed_pct": 0, "print_speed_mode": 2,
             "urls": {"fileUploadurl": f"http://{self.host}:18910/gcode_upload?s={self.upload_secret}",
-                     "rtspUrl": ""},
+                     "rtspUrl": f"http://{self.host}:18088/flv"},
             "features": {"auto_leveling_support": 1, "drying_first_support": 1, "camera_timelapse_support": 1,
                          "gcode_3mf_support": 0, "fod_support": 0},
             "project": self.project(),
@@ -191,7 +194,7 @@ class Printer:
 
     def box(self) -> dict:
         return {"multi_color_box": [{"id": 0, "status": 1, "temp": 31, "humidity": self.humidity,
-                                     "loaded_slot": 0 if self.task else -1,
+                                     "loaded_slot": self.loaded_slot if self.loaded_slot is not None else (0 if self.task else -1),
                                      "drying_status": dict(self.dry, humidity=self.humidity), "slots": self.slots}]}
 
     # Commands ----------------------------------------------------------------
@@ -213,6 +216,10 @@ class Printer:
                     self.light = bool(data.get("status"))
                 self.report("light", {"lights": [{"type": 2, "status": 1 if self.light else 0, "brightness": 100}]})
             elif rtype == "multiColorBox":
+                if action == "feedFilament":
+                    feed = ((data.get("multi_color_box") or [{}])[0].get("feed_status") or {})
+                    self.feed_log.append(feed)
+                    self.loaded_slot = feed.get("slot_index", 0) if feed.get("type") == 1 else -1
                 if action == "setDry":
                     want = ((data.get("multi_color_box") or [{}])[0].get("drying_status") or {})
                     on = bool(want.get("status"))
@@ -220,6 +227,10 @@ class Printer:
                                 "duration": want.get("duration", 240) if on else 0,
                                 "remain_time": want.get("duration", 240) if on else 0}
                 self.report("multiColorBox", self.box())
+            elif rtype == "video":
+                # The camera only streams after startCapture, like the real printer.
+                self.camera = action == "startCapture"
+                self.report("video", None, action=action or "")
             elif rtype == "print":
                 code = self.print_command(action, data)
             else:
@@ -249,6 +260,8 @@ class Printer:
             self.bed[1] = first["max_bed"] or 60
             self.state = "printing"
             self.report("print", self.project())
+            if "reject" in (name or ""):
+                return -1  # like the real printer seen answering -1 although the job starts
         elif action == "pause":
             if self.state != "printing":
                 return 10006
@@ -327,6 +340,73 @@ class Printer:
 
 
 # ---------------------------------------------------------------------------- HTTP
+CAMERA_FIXTURE = Path(__file__).with_name("camera_test.flv")
+
+
+def flv_tags(data: bytes):
+    """Yields (timestamp_ms, raw tag bytes incl. trailer) of an FLV file; the first video config tag comes first."""
+    pos = struct.unpack(">I", data[5:9])[0] + 4
+    while pos + 11 <= len(data):
+        size = int.from_bytes(data[pos + 1:pos + 4], "big")
+        ts = int.from_bytes(data[pos + 4:pos + 7], "big") | data[pos + 7] << 24
+        end = pos + 11 + size + 4
+        if end > len(data):
+            break
+        yield data[pos], ts, data[pos:end]
+        pos = end
+
+
+def make_camera_handler(printer: Printer):
+    class Camera(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            pass
+
+        def do_GET(self):
+            if self.path.split("?")[0] == "/":
+                body = b"ok"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if self.path.split("?")[0] != "/flv":
+                self.send_error(404)
+                return
+            # Wait for startCapture (the real camera sends nothing before that).
+            for _ in range(150):
+                if printer.camera:
+                    break
+                time.sleep(0.1)
+            if not printer.camera or not CAMERA_FIXTURE.exists():
+                self.send_error(503)
+                return
+            data = CAMERA_FIXTURE.read_bytes()
+            tags = list(flv_tags(data))
+            header = data[:13]
+            video = [t for t in tags if t[0] == 9]
+            config, frames = video[0], video[1:]   # the first video tag is the decoder configuration
+            self.send_response(200)
+            self.send_header("Content-Type", "video/x-flv")
+            self.end_headers()
+            try:
+                self.wfile.write(header)
+                while printer.camera:
+                    last = 0
+                    self.wfile.write(config[2])
+                    for _, ts, raw in frames:
+                        time.sleep(max(ts - last, 0) / 1000)
+                        last = ts
+                        self.wfile.write(raw)
+                        self.wfile.flush()
+                        if not printer.camera:
+                            break
+            except (BrokenPipeError, ConnectionError):
+                pass
+
+    return Camera
+
+
 def make_http_handler(printer: Printer):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):  # quiet
@@ -541,6 +621,8 @@ async def main_async(args) -> None:
 
     http = ThreadingHTTPServer((args.bind, 18910), make_http_handler(printer))
     threading.Thread(target=http.serve_forever, daemon=True).start()
+    camera = ThreadingHTTPServer((args.bind, 18088), make_camera_handler(printer))
+    threading.Thread(target=camera.serve_forever, daemon=True).start()
 
     cert, key = make_certificate(Path(tempfile.mkdtemp(prefix="kobra_sim_tls")))
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

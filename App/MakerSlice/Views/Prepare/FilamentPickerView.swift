@@ -42,6 +42,10 @@ struct FilamentPickerView: View {
                             Text(current.name).font(.headline)
                             Text("\(current.nozzleTemp) °C Düse · \(current.bedTemp) °C Bett · max \(Int(current.maxVolumetricSpeed)) mm³/s")
                                 .font(.caption).foregroundStyle(.secondary)
+                            if let kinds = current.calibratedKinds, !kinds.isEmpty {
+                                Label("Kalibriert: " + kinds.compactMap { CalibrationKind(rawValue: $0)?.displayName }.joined(separator: ", "),
+                                      systemImage: "checkmark.seal").font(.caption2).foregroundStyle(.green)
+                            }
                         }
                         Spacer()
                         ColorPicker("Farbe", selection: Binding(
@@ -57,9 +61,8 @@ struct FilamentPickerView: View {
                             Label("Eingelegtes Material übernehmen: \(loaded[slot].displayName)", systemImage: "dot.radiowaves.left.and.right")
                         }
                     }
-                    if app.expertMode {
-                        Button { showEditor = true } label: { Label("Werte anpassen", systemImage: "slider.horizontal.3") }
-                    }
+                    Button { showEditor = true } label: { Label("Profil dieses Filaments anpassen", systemImage: "slider.horizontal.3") }
+                        .accessibilityIdentifier("editFilament")
                 }
                 ForEach(grouped, id: \.0) { group in
                     Section(group.0) {

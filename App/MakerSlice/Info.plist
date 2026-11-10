@@ -6,61 +6,6 @@
 	<string>de</string>
 	<key>CFBundleDisplayName</key>
 	<string>MakerSlice</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-	</dict>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>MakerSlice sucht deinen Snapmaker U1 im WLAN und sendet Druckaufträge an ihn.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_snapmaker._tcp</string>
-		<string>_moonraker._tcp</string>
-	</array>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<!-- The printer's Moonraker API is plain HTTP inside the home network. -->
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
-	<key>UIFileSharingEnabled</key>
-	<true/>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<false/>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -78,17 +23,81 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_snapmaker._tcp</string>
+		<string>_moonraker._tcp</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>de.makerslice.refresh</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Für den 3D-Scan fotografiert MakerSlice dein Objekt von allen Seiten und rechnet daraus ein druckbares 3D-Modell.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MakerSlice sucht deine 3D-Drucker (Snapmaker U1, Anycubic Kobra S1) im WLAN, zeigt ihren Status und sendet Druckaufträge.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>de.makerslice.3mf</string>
-			<key>UTTypeDescription</key>
-			<string>3MF-Projekt</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>
 			</array>
+			<key>UTTypeDescription</key>
+			<string>3MF-Projekt</string>
+			<key>UTTypeIdentifier</key>
+			<string>de.makerslice.3mf</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
@@ -102,14 +111,14 @@
 			</dict>
 		</dict>
 		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>public.standard-tesselated-geometry-format</string>
-			<key>UTTypeDescription</key>
-			<string>STL-Modell</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>
 			</array>
+			<key>UTTypeDescription</key>
+			<string>STL-Modell</string>
+			<key>UTTypeIdentifier</key>
+			<string>public.standard-tesselated-geometry-format</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>

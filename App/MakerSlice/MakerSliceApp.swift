@@ -5,10 +5,24 @@ struct MakerSliceApp: App {
     @State private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        NotificationService.registerBackgroundTask()
+        NotificationService.shared.setUp()
+    }
+
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Group {
+                if ProcessInfo.processInfo.arguments.contains("-uiTestDiagrams") {
+                    SettingDiagramGallery()
+                } else {
+                    RootView()
+                }
+            }
                 .environment(model)
+                .onAppear {
+                    NotificationService.shared.onOpen = { id, kind in model.openFromNotification(printer: id, kind: kind) }
+                }
                 .onOpenURL { url in
                     if url.isFileURL { model.handleIncoming(url) }
                 }
@@ -16,7 +30,9 @@ struct MakerSliceApp: App {
                     if phase == .active {
                         model.printers.startPolling()
                     } else {
+                        NotificationService.shared.scheduleRefresh()
                         model.printers.stopPolling()
+                        Task { await model.browser.keepSession() }
                     }
                 }
         }
@@ -48,6 +64,9 @@ struct RootView: View {
         }
         .fullScreenCover(item: $model.project) { project in
             PrepareView(project: project)
+        }
+        .sheet(item: $model.filamentCheckPrinter) { ref in
+            if let printer = model.printers.printers.first(where: { $0.id == ref.id }) { FilamentCheckView(printer: printer) }
         }
         .overlay {
             if model.isLoadingModel {

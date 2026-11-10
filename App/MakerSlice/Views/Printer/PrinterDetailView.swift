@@ -6,8 +6,21 @@ import SwiftUI
 struct PrinterDetailView: View {
     @Environment(AppModel.self) private var app
     let printer: PrinterConnection
-    @State private var confirmCancel = false
+    private enum Pending { case cancel, dry }
+    /// One confirmation at a time: several confirmation dialogs in one view hierarchy block each other.
+    @State private var pending: Pending?
+    private var confirmCancel: Bool {
+        get { pending == .cancel }
+        nonmutating set { pending = newValue ? .cancel : nil }
+    }
+    private var confirmDry: Bool {
+        get { pending == .dry }
+        nonmutating set { pending = newValue ? .dry : nil }
+    }
+    @State private var showFilamentCheck = false
+    @State private var showFilamentControl = false
     @State private var editing = false
+    @State private var showLive = false
 
     private var status: PrinterStatus? { app.printers.status(of: printer) }
     private var model: PrinterModel { app.printers.model(of: printer) }
@@ -18,9 +31,11 @@ struct PrinterDetailView: View {
                 header
                 if let status {
                     jobPanel(status)
-                    if printer.kind == .moonraker {
-                        CameraView(driver: app.printers.driver(for: printer), active: status.state == .printing)
+                    Button { showLive = true } label: {
+                        Label("Live-Ansicht mit Kamera", systemImage: "video").frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("liveButton")
                     temperaturePanel(status)
                     materialPanel(status)
                     machinePanel(status)
@@ -42,11 +57,45 @@ struct PrinterDetailView: View {
             }
         }
         .sheet(isPresented: $editing) { PrinterEditView(existing: printer) }
-        .confirmationDialog("Druck wirklich abbrechen?", isPresented: $confirmCancel, titleVisibility: .visible) {
-            Button("Druck abbrechen", role: .destructive) {
-                Task { await app.printers.perform(on: printer, "Druck abgebrochen") { try await $0.cancel() } }
+        .sheet(isPresented: $showFilamentCheck) { FilamentCheckView(printer: printer) }
+        .sheet(isPresented: $showFilamentControl) { FilamentControlView(printer: printer) }
+        .fullScreenCover(isPresented: $showLive) { LivePrintView(printer: printer) }
+        .confirmationDialog(pending == .dry ? "Trocknen starten?" : "Druck wirklich abbrechen?",
+                            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }), titleVisibility: .visible) {
+            switch pending {
+            case .cancel:
+                Button("Druck abbrechen", role: .destructive) {
+                    Task { await app.printers.perform(on: printer, "Druck abgebrochen") { try await $0.cancel() } }
+                }
+            case .dry:
+                if let u1 = app.printers.driver(for: printer) as? MoonrakerClient, u1.hasMultiACE,
+                   let plan = DryingAdvice.plan(types: (status?.filaments ?? []).filter(\.present).compactMap(\.type)) {
+                    Button("Starten: \(plan.summary)") {
+                        Task { await app.printers.perform(on: printer, "Trocknen gestartet (\(plan.summary))") { _ in
+                            try await u1.setACEDrying(true, temperature: plan.temperature, minutes: plan.minutes)
+                        } }
+                    }
+                } else if let lan = app.printers.driver(for: printer) as? AnycubicLANClient,
+                   let plan = DryingAdvice.plan(types: (status?.filaments ?? []).filter(\.present).compactMap(\.type)) {
+                    Button("Starten: \(plan.summary)") {
+                        Task { await app.printers.perform(on: printer, "Trocknen gestartet (\(plan.summary))") { _ in
+                            try await lan.setDrying(true, temperature: plan.temperature, minutes: plan.minutes)
+                        } }
+                    }
+                }
+            case nil:
+                EmptyView()
+            }
+        } message: {
+            if pending == .dry, let plan = DryingAdvice.plan(types: (status?.filaments ?? []).filter(\.present).compactMap(\.type)) {
+                Text(plan.explanation + " Der ACE heizt dabei auf. Spulen dürfen im Fach bleiben.")
             }
         }
+        .alert(app.printers.actionFailure?.title ?? "", isPresented: Binding(
+            get: { app.printers.actionFailure?.printerID == printer.id },
+            set: { if !$0 { app.printers.actionFailure = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(app.printers.actionFailure?.message ?? "") }
         .refreshable { await app.printers.refresh(printer) }
         .onAppear { app.printers.selectedID = printer.id }
     }
@@ -55,8 +104,10 @@ struct PrinterDetailView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.displayName).font(.headline)
-                Text("\(printer.hostOnly) · \(printer.kind.displayName)").font(.caption).foregroundStyle(.secondary)
-                if let fw = status?.firmware { Text("Firmware \(fw)").font(.caption2).foregroundStyle(.tertiary) }
+                if app.expertMode {
+                    Text("\(printer.hostOnly) · \(printer.kind.displayName)").font(.caption).foregroundStyle(.secondary)
+                    if let fw = status?.firmware { Text("Firmware \(fw)").font(.caption2).foregroundStyle(.tertiary) }
+                }
             }
             Spacer()
             StatusBadge(text: app.printers.isOnline(printer) ? "Online" : "Offline",
@@ -90,13 +141,28 @@ struct PrinterDetailView: View {
                 }
                 Spacer(minLength: 0)
             }
-            if s.state == .printing || s.state == .paused {
+            if let advice = PrintRecovery.advice(for: s) { recoveryCard(advice) }
+            if s.isIdle, s.state == .error || s.state == .cancelled {
+                // The printer is idle again: this is the result of the last job, there is nothing left to cancel.
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(s.state == .error ? "Der letzte Auftrag ist fehlgeschlagen." : "Der letzte Auftrag wurde abgebrochen.", systemImage: "info.circle")
+                        .font(.footnote)
+                    if s.state == .error {
+            Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
+                            .buttonStyle(.bordered).font(.footnote)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            }
+            if (s.state == .printing || s.state == .paused || s.state == .error) && !s.isIdle {
                 HStack {
                     if s.state == .printing {
                         Button {
                             Task { await app.printers.perform(on: printer, "Druck pausiert") { try await $0.pause() } }
                         } label: { Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity) }
-                    } else {
+                    } else if s.state == .paused {
                         Button {
                             Task { await app.printers.perform(on: printer, "Druck fortgesetzt") { try await $0.resume() } }
                         } label: { Label("Fortsetzen", systemImage: "play.fill").frame(maxWidth: .infinity) }
@@ -108,6 +174,48 @@ struct PrinterDetailView: View {
                 .buttonStyle(.bordered)
             }
         }
+    }
+
+    /// Whether resuming makes sense after a pause or error, with the steps to take first.
+    private func recoveryCard(_ advice: PrintRecovery) -> some View {
+        let (color, icon): (Color, String) = switch advice.verdict {
+        case .resume: (.green, "play.circle")
+        case .checkFirst: (.orange, "exclamationmark.circle")
+        case .discard: (.red, "xmark.octagon")
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            Label(advice.title, systemImage: icon).font(.headline).foregroundStyle(color)
+            ForEach(advice.reasons, id: \.self) { Text($0).font(.footnote).foregroundStyle(.secondary) }
+            ForEach(Array(advice.steps.enumerated()), id: \.offset) { i, step in
+                Text("\(i + 1). \(step)").font(.footnote)
+            }
+            if FilamentCheck.isFilamentMessage(status?.stateMessage) {
+                Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
+                    .buttonStyle(.bordered).font(.footnote)
+            }
+            HStack {
+                if advice.verdict != .discard, status?.state == .paused {
+                    Button {
+                        Task { await app.printers.perform(on: printer, "Druck fortgesetzt") { try await $0.resume() } }
+                    } label: { Label("Fortsetzen", systemImage: "play.fill") }
+                        .buttonStyle(.bordered)
+                }
+                if advice.verdict == .discard {
+                    Button(role: .destructive) { confirmCancel = true } label: { Label("Jetzt abbrechen", systemImage: "stop.fill") }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("recoveryCancel")
+                } else {
+                    Button(role: .destructive) { confirmCancel = true } label: { Label("Abbrechen", systemImage: "stop.fill") }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("recoveryCancel")
+                }
+            }
+            .font(.footnote)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityIdentifier("recoveryAdvice")
     }
 
     private func temperaturePanel(_ s: PrinterStatus) -> some View {
@@ -123,15 +231,14 @@ struct PrinterDetailView: View {
                     Metric(value: Format.temp(chamber.temperature), caption: "Kammer", systemImage: "cube.transparent")
                 }
             }
-            if s.state != .printing && s.state != .paused {
+            if app.expertMode, s.state != .printing, s.state != .paused {
                 Menu {
                     ForEach(["PLA", "PETG", "ABS", "TPU"], id: \.self) { type in
                         if let f = FilamentLibrary.bestMatch(type: type, printer: model) {
                             Button("\(type): \(f.nozzleTemp)° / \(f.bedTemp)°") {
                                 Task {
                                     await app.printers.perform(on: printer, "Vorheizen \(type)") { driver in
-                                        try await driver.setBedTemperature(f.bedTemp)
-                                        try await driver.setToolTemperature(tool: 0, f.nozzleTemp)
+                                        try await driver.preheat(bed: f.bedTemp, nozzle: f.nozzleTemp)
                                     }
                                 }
                             }
@@ -153,7 +260,7 @@ struct PrinterDetailView: View {
     }
 
     private func materialPanel(_ s: PrinterStatus) -> some View {
-        Panel(title: model == .kobraS1 ? "ACE Pro" : "Filament", systemImage: "circle.hexagongrid") {
+        Panel(title: s.ace != nil ? "ACE Pro 2 (multiACE)" : (model == .kobraS1 ? "ACE Pro" : (model == .bambuP1S ? "AMS" : "Filament")), systemImage: "circle.hexagongrid") {
             if s.filaments.isEmpty {
                 Text("Der Drucker meldet kein Filament.").font(.caption).foregroundStyle(.secondary)
             } else {
@@ -168,6 +275,13 @@ struct PrinterDetailView: View {
                     }
                 }
             }
+            if let ace = s.ace { aceDetails(ace) }
+            Button { showFilamentCheck = true } label: { Label("Filament prüfen", systemImage: "stethoscope") }
+                .font(.subheadline)
+                .accessibilityIdentifier("filamentCheckButton")
+            Button { showFilamentControl = true } label: { Label("Filament bedienen (laden, entladen, extrudieren)", systemImage: "arrow.up.and.down.circle") }
+                .font(.subheadline)
+                .accessibilityIdentifier("filamentControlButton")
             if let box = s.filamentBox {
                 Divider()
                 HStack {
@@ -176,28 +290,76 @@ struct PrinterDetailView: View {
                     Metric(value: box.drying ? "\(Int(box.dryingRemainingMinutes ?? 0)) min" : "aus", caption: "Trocknen",
                            systemImage: "sun.max")
                 }
-                #if canImport(Network)
-                if let lan = app.printers.driver(for: printer) as? AnycubicLANClient {
-                    Button(box.drying ? "Trocknen beenden" : "Trocknen starten (45 °C, 4 h)") {
-                        let on = !box.drying
-                        Task { await app.printers.perform(on: printer, on ? "Trocknen gestartet" : "Trocknen beendet") { _ in
-                            try await lan.setDrying(on)
-                        } }
+                if let u1 = app.printers.driver(for: printer) as? MoonrakerClient, u1.hasMultiACE {
+                    let plan = DryingAdvice.plan(types: s.filaments.filter(\.present).compactMap(\.type))
+                    Button(box.drying ? "Trocknen beenden" : (plan.map { "Trocknen starten (\($0.summary))" } ?? "Trocknen starten")) {
+                        if box.drying {
+                            Task { await app.printers.perform(on: printer, "Trocknen beendet") { _ in try await u1.setACEDrying(false) } }
+                        } else {
+                            confirmDry = true
+                        }
                     }
                     .font(.subheadline)
+                    .disabled((!box.drying && plan == nil) || s.state == .printing || s.state == .paused)
+                    .accessibilityIdentifier("dryButton")
+                    if !box.drying, let plan {
+                        Text(plan.explanation).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                #if canImport(Network)
+                if let lan = app.printers.driver(for: printer) as? AnycubicLANClient {
+                    let plan = DryingAdvice.plan(types: s.filaments.filter(\.present).compactMap(\.type))
+                    Button(box.drying ? "Trocknen beenden" : (plan.map { "Trocknen starten (\($0.summary))" } ?? "Trocknen starten")) {
+                        if box.drying {
+                            Task { await app.printers.perform(on: printer, "Trocknen beendet") { _ in try await lan.setDrying(false) } }
+                        } else {
+                            confirmDry = true
+                        }
+                    }
+                    .font(.subheadline)
+                    .disabled(!box.drying && plan == nil)
+                    .accessibilityIdentifier("dryButton")
+                    if !box.drying, let plan {
+                        Text(plan.explanation).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 #endif
             }
         }
     }
 
+    /// multiACE: operating mode and the spools in the ACE slots (including those not yet assigned to a tool head).
+    private func aceDetails(_ ace: PrinterStatus.MultiACE) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+            Text(ace.isMultiMode ? "Modus: Mehrfarbig – jeder Druckkopf bekommt sein Filament aus dem ACE."
+                                 : "Modus: Normal – der ACE wird nicht für den Druck genutzt.")
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("aceMode")
+            ForEach(ace.units, id: \.index) { unit in
+                Text(unit.connected ? "\(unit.model) – Slots" : "\(unit.model) – nicht verbunden").font(.caption.weight(.semibold))
+                HStack(spacing: 10) {
+                    ForEach(unit.slots, id: \.index) { slot in
+                        VStack(spacing: 4) {
+                            Swatch(color: slot.present ? (slot.color ?? "#888888") : "#E5E5EA", label: "\(slot.index + 1)", selected: false, size: 30)
+                            Text(slot.present ? (slot.material ?? "Spule") : "leer").font(.caption2).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+    }
+
     private func machinePanel(_ s: PrinterStatus) -> some View {
         Panel(title: "Gerät", systemImage: "gearshape") {
-            HStack {
-                if let fan = s.fanPercent { Metric(value: "\(Int(fan)) %", caption: "Bauteillüfter", systemImage: "fan") }
-                if let aux = s.auxFanPercent { Metric(value: "\(Int(aux)) %", caption: "Zusatzlüfter", systemImage: "wind") }
-                if let mode = s.speedMode {
-                    Metric(value: ["", "Leise", "Standard", "Sport"][min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+            if app.expertMode {
+                HStack {
+                    if let fan = s.fanPercent { Metric(value: "\(Int(fan)) %", caption: "Bauteillüfter", systemImage: "fan") }
+                    if let aux = s.auxFanPercent { Metric(value: "\(Int(aux)) %", caption: "Zusatzlüfter", systemImage: "wind") }
+                    if let mode = s.speedMode {
+                        Metric(value: ["", "Leise", "Standard", "Sport"][min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+                    }
                 }
             }
             Toggle(isOn: Binding(get: { s.lightOn ?? false }, set: { on in
@@ -213,6 +375,8 @@ struct PrinterDetailView: View {
             Text(error).font(.callout).foregroundStyle(.secondary)
             Text(printer.kind == .anycubicLAN
                  ? "Am Kobra S1: Einstellungen → Netzwerk → LAN-Modus einschalten. iPhone und Drucker müssen im selben WLAN sein."
+                 : printer.kind == .bambuLAN
+                 ? "Am P1S: Einstellungen → WLAN → LAN-Modus einschalten und prüfen, dass Seriennummer und Zugangscode (steht dort auch) stimmen. iPhone und Drucker müssen im selben WLAN sein."
                  : "Prüfe, ob der Drucker eingeschaltet und im selben WLAN ist.")
                 .font(.caption).foregroundStyle(.secondary)
             Button("Erneut versuchen") { Task { await app.printers.refresh(printer) } }.buttonStyle(.bordered)
@@ -221,10 +385,17 @@ struct PrinterDetailView: View {
 
     private var links: some View {
         VStack(spacing: 0) {
-            NavigationLink { CalibrationView(printer: printer) } label: {
-                LinkRow(title: "Kalibrierdaten", icon: "level")
+            NavigationLink { CalibrationHomeView(printer: printer, model: model) } label: {
+                LinkRow(title: "Kalibrieren", icon: "slider.horizontal.below.rectangle")
             }
+            .accessibilityIdentifier("calibrateLink")
             Divider().padding(.leading, 44)
+            if app.expertMode {
+                NavigationLink { CalibrationView(printer: printer) } label: {
+                    LinkRow(title: "Kalibrierdaten", icon: "level")
+                }
+                Divider().padding(.leading, 44)
+            }
             NavigationLink { LogView(source: printer.name) } label: {
                 LinkRow(title: "Protokoll & Fehler", icon: "list.bullet.rectangle")
             }
@@ -274,12 +445,18 @@ struct CameraView: View {
                 snapshotURL = try? await moonraker.webcamSnapshotURL()
                 if snapshotURL == nil { unavailable = true; return }
             }
+            var lastWake = Date.distantPast
             repeat {
+                // The U1's stock camera goes to sleep unless it is woken every few seconds.
+                if Date().timeIntervalSince(lastWake) > 8 {
+                    lastWake = Date()
+                    await moonraker.wakeCamera()
+                }
                 if let url = snapshotURL, let response = try? await URLSession.shared.data(from: url),
                    let img = UIImage(data: response.0) {
                     image = img
                 }
-                try? await Task.sleep(nanoseconds: UInt64((active ? 2 : 10) * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: UInt64((active ? 1 : 10) * 1_000_000_000))
             } while !Task.isCancelled
         }
     }

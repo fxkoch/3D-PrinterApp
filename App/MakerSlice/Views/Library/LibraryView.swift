@@ -7,6 +7,9 @@ struct LibraryView: View {
     @State private var renaming: LibraryItem?
     @State private var newName = ""
     @State private var filter = ""
+    @State private var workshopItem: LibraryItem?
+    @State private var showScan = false
+    @State private var showPhotoShape = false
 
     private static let modelTypes: [UTType] = [
         UTType(filenameExtension: "3mf") ?? .data,
@@ -36,6 +39,14 @@ struct LibraryView: View {
                         ForEach(items) { item in
                             Button { app.open(item) } label: { LibraryRow(item: item) }
                                 .buttonStyle(.plain)
+                                .swipeActions(edge: .leading) {
+                                    Button { workshopItem = item } label: { Label("Prüfen", systemImage: "checkmark.shield") }
+                                        .tint(.indigo)
+                                }
+                                .contextMenu {
+                                    Button { workshopItem = item } label: { Label("Festigkeit prüfen und optimieren", systemImage: "checkmark.shield") }
+                                    Button { app.open(item) } label: { Label("Zum Drucken öffnen", systemImage: "printer") }
+                                }
                                 .swipeActions {
                                     Button(role: .destructive) { app.library.delete(item) } label: {
                                         Label("Löschen", systemImage: "trash")
@@ -59,6 +70,10 @@ struct LibraryView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button { showImporter = true } label: { Label("Datei importieren", systemImage: "doc.badge.plus") }
+                        Button { showPhotoShape = true } label: { Label("Foto → Form (Sekunden)", systemImage: "photo.badge.plus") }
+                            .accessibilityIdentifier("libraryPhotoShape")
+                        Button { showScan = true } label: { Label("3D-Scan (genau, dauert Minuten)", systemImage: "camera.viewfinder") }
+                            .accessibilityIdentifier("libraryScan")
                         Button { app.loadSample() } label: { Label("Testwürfel", systemImage: "cube") }
                     } label: {
                         Image(systemName: "plus")
@@ -78,6 +93,9 @@ struct LibraryView: View {
                 }
                 if imported.count == 1 { app.open(imported[0]) }
             }
+            .sheet(item: $workshopItem) { WorkbenchView(item: $0) }
+            .sheet(isPresented: $showScan) { ScanView() }
+            .sheet(isPresented: $showPhotoShape) { PhotoShapeView() }
             .alert("Umbenennen", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("Name", text: $newName)
                 Button("Sichern") { if let r = renaming { app.library.rename(r, to: newName) } }

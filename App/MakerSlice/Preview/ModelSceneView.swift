@@ -108,8 +108,9 @@ struct ModelSceneView: UIViewRepresentable {
             updatePlane(cutPlane, objects: objects, bedSize: bedSize)
             let newSignature = objects.map { o in
                 let b = o.boundingBox
-                let color = filaments.isEmpty ? "" : filaments[min(o.tool, filaments.count - 1)].color
-                return "\(o.id)-\(o.tool)-\(o.mesh.vertices.count)-\(o.volumes.count)-\(b.min.x)-\(b.min.y)-\(b.max.z)-\(color)"
+                let colors = filaments.isEmpty ? "" : o.allTools.sorted().map { filaments[min($0, filaments.count - 1)].color }.joined()
+                let multi = "\(o.parts.count)/\(o.paint.count)/\(o.colorChanges.map { "\($0.z):\($0.tool)" })"
+                return "\(o.id)-\(o.tool)-\(o.mesh.vertices.count)-\(o.volumes.count)-\(b.min.x)-\(b.min.y)-\(b.max.z)-\(colors)-\(multi)"
             }
             guard newSignature != signature else { return }
             signature = newSignature
@@ -123,11 +124,10 @@ struct ModelSceneView: UIViewRepresentable {
             }
             modelsNode.childNodes.forEach { $0.removeFromParentNode() }
             for object in objects {
-                let hex = filaments.isEmpty ? "#3D8BFF" : filaments[min(object.tool, filaments.count - 1)].color
-                let color = UIColor(Color(hex: hex))
-                modelsNode.addChildNode(Self.node(for: object.mesh, color: color, bedSize: bedSize))
-                for volume in object.volumes where volume.kind == .add {
-                    modelsNode.addChildNode(Self.node(for: volume.mesh, color: color, bedSize: bedSize))
+                // Every colour of the object (parts, painted areas, colour changes at a height) in its slot's colour.
+                for surface in object.displaySurfaces() {
+                    let hex = filaments.isEmpty ? "#3D8BFF" : filaments[min(surface.tool, filaments.count - 1)].color
+                    modelsNode.addChildNode(Self.node(for: surface.mesh, color: UIColor(Color(hex: hex)), bedSize: bedSize))
                 }
             }
         }

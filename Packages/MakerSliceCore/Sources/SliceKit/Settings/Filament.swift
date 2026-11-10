@@ -38,6 +38,8 @@ public struct Filament: Codable, Hashable, Sendable, Identifiable {
     public var color: String
     /// Where the values come from.
     public var source: String
+    /// Calibrations (raw `CalibrationKind` values) whose results are included in this profile.
+    public var calibratedKinds: [String]?
 
     public init(name: String, vendor: String = "Generic", type: String, nozzleTemp: Int, firstLayerNozzleTemp: Int? = nil,
                 nozzleTempMin: Int? = nil, nozzleTempMax: Int? = nil,
@@ -75,7 +77,13 @@ public struct Filament: Codable, Hashable, Sendable, Identifiable {
     public func bedTemp(for plate: PlateType, firstLayer: Bool) -> Int {
         switch plate {
         case .texturedPEI: return firstLayer ? firstLayerBedTemp : bedTemp
-        case .highTemp: return smoothPlateBedTemp
+        case .highTemp, .engineering: return smoothPlateBedTemp
+        case .coolPlate:
+            // Cool plates need less heat for PLA/TPU and PETG; ABS/ASA/PC/PA stick better on the warm plates anyway.
+            let t = type.uppercased()
+            if t.hasPrefix("PLA") || t.hasPrefix("TPU") || t.hasPrefix("PVA") { return max(30, smoothPlateBedTemp - 25) }
+            if t.hasPrefix("PETG") || t.hasPrefix("PET") { return max(40, smoothPlateBedTemp - 10) }
+            return smoothPlateBedTemp
         }
     }
 
@@ -184,7 +192,11 @@ public enum FilamentLibrary {
     /// Profiles for a printer: its own profiles first, then brand filaments.
     public static func entries(for printer: PrinterModel) -> [Entry] {
         let scope = printer.machine.filamentScope
-        return all.filter { $0.scope == scope } + all.filter { $0.scope == "any" }
+        return (all.filter { $0.scope == scope } + all.filter { $0.scope == "any" }).map { entry in
+            var e = entry
+            e.filament = CalibrationBook.shared.apply(to: entry.filament, printer: printer)
+            return e
+        }
     }
 
     public static var vendors: [String] {
@@ -221,7 +233,7 @@ public enum FilamentLibrary {
     /// Default material for a printer.
     public static func defaultFilament(for printer: PrinterModel) -> Filament {
         let own = entries(for: printer).filter { $0.scope != "any" }.map(\.filament)
-        return own.first { $0.name == "Generic PLA" } ?? own.first { $0.name == "Anycubic PLA" } ?? .pla
+        return own.first { $0.name == "Generic PLA" } ?? own.first { $0.name == "Bambu PLA Basic" } ?? own.first { $0.name == "Anycubic PLA" } ?? .pla
     }
 
     private static func load() -> [Entry] {

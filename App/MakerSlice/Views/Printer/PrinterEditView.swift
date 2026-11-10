@@ -13,9 +13,10 @@ struct PrinterEditView: View {
     @State private var name = ""
     @State private var host = ""
     @State private var apiKey = ""
+    @State private var serial = ""
     @State private var testing = false
     @State private var testResult: String?
-    @StateObject private var discovery = PrinterDiscovery()
+    @State private var scan = PrinterScan()
 
     var body: some View {
         NavigationStack {
@@ -25,7 +26,7 @@ struct PrinterEditView: View {
                         ForEach(PrinterModel.allCases) { Text($0.displayName).tag($0) }
                     }
                     .onChange(of: model) { _, new in
-                        kind = new == .kobraS1 ? .anycubicLAN : .moonraker
+                        kind = new == .kobraS1 ? .anycubicLAN : (new == .bambuP1S ? .bambuLAN : .moonraker)
                         if name.isEmpty || PrinterModel.allCases.map(\.displayName).contains(name) { name = new.displayName }
                     }
                     if model == .kobraS1 {
@@ -37,28 +38,40 @@ struct PrinterEditView: View {
                     TextField("Name", text: $name)
                 }
 
-                if kind == .moonraker {
-                    Section("Im WLAN gefunden") {
-                        if discovery.printers.isEmpty {
-                            HStack { ProgressView(); Text("Suche …").foregroundStyle(.secondary) }
-                        }
-                        ForEach(discovery.printers) { found in
-                            Button {
-                                host = found.host
-                                if name.isEmpty { name = found.name }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "printer")
-                                    VStack(alignment: .leading) {
-                                        Text(found.name)
-                                        Text(found.host).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    if host == found.host { Image(systemName: "checkmark") }
-                                }
-                            }
+                Section {
+                    if scan.scanning {
+                        HStack {
+                            ProgressView()
+                            Text("Suche im WLAN … \(Int(scan.progress * 100)) %").foregroundStyle(.secondary)
                         }
                     }
+                    ForEach(scan.found) { printer in
+                        Button { choose(printer) } label: {
+                            HStack {
+                                Image(systemName: "printer")
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(printer.name)
+                                    Text("\(printer.host) · \(printer.kind.displayName)").font(.caption).foregroundStyle(.secondary)
+                                    if let note = printer.note { Text(note).font(.caption).foregroundStyle(.orange) }
+                                }
+                                Spacer()
+                                if host == printer.host { Image(systemName: "checkmark") }
+                            }
+                        }
+                        .accessibilityIdentifier("found-\(printer.host)")
+                    }
+                    if !scan.scanning {
+                        if scan.found.isEmpty {
+                            Text("Kein Drucker gefunden. Ist er eingeschaltet, im selben WLAN – und beim Kobra S1 der LAN-Modus an?")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Button { scan.start() } label: { Label("Erneut suchen", systemImage: "arrow.clockwise") }
+                            .accessibilityIdentifier("scanAgain")
+                    }
+                } header: {
+                    Text("Im WLAN gefunden")
+                } footer: {
+                    Text("Die Suche fragt alle Adressen deines Heimnetzes ab – ganz ohne IP-Eingabe.")
                 }
 
                 Section {
@@ -69,6 +82,14 @@ struct PrinterEditView: View {
                         .accessibilityIdentifier("printerHost")
                     if kind == .moonraker {
                         SecureField("API-Schlüssel (optional)", text: $apiKey)
+                    }
+                    if kind == .bambuLAN {
+                        TextField("Seriennummer (Typenschild)", text: $serial)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("printerSerial")
+                        SecureField("Zugangscode (Drucker-Display)", text: $apiKey)
+                            .accessibilityIdentifier("printerAccessCode")
                     }
                 } header: {
                     Text("Adresse")
@@ -116,12 +137,13 @@ struct PrinterEditView: View {
                     name = existing.name
                     host = existing.host
                     apiKey = existing.apiKey ?? ""
+                    serial = existing.serial ?? ""
                 } else {
+                    scan.start()
                     name = model.displayName
                 }
-                discovery.start()
             }
-            .onDisappear { discovery.stop() }
+            .onDisappear { scan.stop() }
         }
     }
 
@@ -131,6 +153,8 @@ struct PrinterEditView: View {
             return "Am Kobra S1 unter Einstellungen → Netzwerk den LAN-Modus einschalten. Die IP steht im selben Menü. Hinweis: Im LAN-Modus ist die Anycubic-Cloud-App getrennt."
         case (.kobraS1, .moonraker):
             return "Für Kobra S1 mit der Community-Firmware Rinkhals (Moonraker auf Port 7125)."
+        case (.bambuP1S, _):
+            return "Am P1S unter Einstellungen → WLAN den LAN-Modus einschalten. Dort stehen IP-Adresse und Zugangscode; die Seriennummer steht auf dem Typenschild. Für den Druck muss eine microSD-Karte im Drucker stecken."
         default:
             return "Die IP findest du am U1 unter Einstellungen → WLAN. Port 7125 wird automatisch verwendet."
         }
@@ -139,7 +163,7 @@ struct PrinterEditView: View {
     private var connection: PrinterConnection {
         PrinterConnection(id: existing?.id ?? UUID(), name: name.isEmpty ? model.displayName : name,
                           host: host.trimmingCharacters(in: .whitespaces), apiKey: apiKey.isEmpty ? nil : apiKey,
-                          model: model.rawValue, kind: kind)
+                          model: model.rawValue, kind: kind, serial: serial.trimmingCharacters(in: .whitespaces).isEmpty ? nil : serial.trimmingCharacters(in: .whitespaces))
     }
 
     private func test() async {
@@ -155,6 +179,16 @@ struct PrinterEditView: View {
         } catch {
             testResult = "❌ \(error.localizedDescription)"
         }
+    }
+
+    /// Takes over a printer found on the network: model, connection type, address and name.
+    private func choose(_ printer: DiscoveredPrinter) {
+        let newModel: PrinterModel = printer.looksLikeBambu ? .bambuP1S : (printer.looksLikeKobraS1 || printer.modelText.lowercased().contains("kobra") ? .kobraS1 : .snapmakerU1)
+        model = newModel
+        host = printer.host
+        if name.isEmpty || PrinterModel.allCases.map(\.displayName).contains(name) { name = printer.name }
+        // `model` resets the connection type in onChange; set the detected one afterwards.
+        Task { @MainActor in kind = printer.kind }
     }
 
     private func save() {

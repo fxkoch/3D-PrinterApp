@@ -3,26 +3,27 @@ import Foundation
 /// Writes arranged objects as an OrcaSlicer/Bambu-compatible 3MF: one object per model object with its
 /// tool in `model_settings.config`; connector pegs become extra parts, connector holes negative parts.
 public enum ThreeMFWriter {
-    public static func write(_ objects: [ModelObject]) -> Data {
+    public static func write(_ objects: [ModelObject], layerGCodes: [LayerGCode] = []) -> Data {
         var resources = ""
         var build = ""
         var settings = ""
         var nextID = 1
 
         for object in objects {
-            var parts: [(id: Int, name: String, subtype: String)] = []
-            func addMesh(_ mesh: TriangleMesh, name: String, subtype: String) {
+            var parts: [(id: Int, name: String, subtype: String, tool: Int)] = []
+            func addMesh(_ mesh: TriangleMesh, name: String, subtype: String, tool: Int) {
                 let id = nextID
                 nextID += 1
                 resources += "  <object id=\"\(id)\" type=\"model\">\n"
                 resources += meshXML(mesh)
                 resources += "  </object>\n"
-                parts.append((id, name, subtype))
+                parts.append((id, name, subtype, tool))
             }
-            addMesh(object.mesh, name: object.name, subtype: "normal_part")
+            addMesh(object.mesh, name: object.name, subtype: "normal_part", tool: object.tool)
+            for part in object.parts { addMesh(part.mesh, name: part.name, subtype: "normal_part", tool: part.tool) }
             for (i, volume) in object.volumes.enumerated() {
                 addMesh(volume.mesh, name: "\(object.name) Verbinder \(i + 1)",
-                        subtype: volume.kind == .add ? "normal_part" : "negative_part")
+                        subtype: volume.kind == .add ? "normal_part" : "negative_part", tool: object.tool)
             }
             let containerID = nextID
             nextID += 1
@@ -38,7 +39,7 @@ public enum ThreeMFWriter {
             for part in parts {
                 settings += "    <part id=\"\(part.id)\" subtype=\"\(part.subtype)\">\n"
                 settings += "      <metadata key=\"name\" value=\"\(escape(part.name))\"/>\n"
-                settings += "      <metadata key=\"extruder\" value=\"\(extruder)\"/>\n"
+                settings += "      <metadata key=\"extruder\" value=\"\(part.tool + 1)\"/>\n"
                 settings += "    </part>\n"
             }
             settings += "  </object>\n"
@@ -81,12 +82,23 @@ public enum ThreeMFWriter {
         </Relationships>
 
         """
-        return ZipArchive.write([
+        var files: [(path: String, data: Data)] = [
             ("[Content_Types].xml", Data(contentTypes.utf8)),
             ("_rels/.rels", Data(rels.utf8)),
             ("3D/3dmodel.model", Data(model.utf8)),
             ("Metadata/model_settings.config", Data(modelSettings.utf8)),
-        ])
+        ]
+        let codes = layerGCodes.filter { !$0.lines.filter(LayerGCode.isAllowed).isEmpty }
+        if !codes.isEmpty {
+            var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<custom_gcodes_per_layer>\n<plate>\n<plate_info id=\"1\"/>\n"
+            for code in codes {
+                let text = escape(code.lines.filter(LayerGCode.isAllowed).joined(separator: "\n")).replacingOccurrences(of: "\n", with: "&#10;")
+                xml += "<layer top_z=\"\(formatDecimal(code.z, digits: 4))\" type=\"4\" extruder=\"1\" color=\"\" extra=\"\(text)\" gcode=\"\(text)\"/>\n"
+            }
+            xml += "<mode value=\"SingleExtruder\"/>\n</plate>\n</custom_gcodes_per_layer>\n"
+            files.append(("Metadata/custom_gcode_per_layer.xml", Data(xml.utf8)))
+        }
+        return ZipArchive.write(files)
     }
 
     private static func meshXML(_ mesh: TriangleMesh) -> String {

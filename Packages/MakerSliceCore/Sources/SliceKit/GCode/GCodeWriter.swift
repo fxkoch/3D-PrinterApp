@@ -8,6 +8,8 @@ public struct PrintEstimate: Sendable, Equatable {
     public var filamentGrams: [Int: Double]
     public var layerCount: Int
     public var toolChanges: Int
+    /// Filament used on the purge tower (waste of colour changes) in g.
+    public var purgeGrams: Double = 0
 
     public var totalGrams: Double { filamentGrams.values.reduce(0, +) }
 
@@ -50,6 +52,15 @@ protocol MachineDialect {
     /// Preview images the printer's screen shows (sizes from the official profile).
     var thumbnailSizes: [(width: Int, height: Int)] { get }
     func end(_ ctx: PrintContext) -> [String]
+    /// Command that sets the pressure advance (Klipper: SET_PRESSURE_ADVANCE, Bambu: M900).
+    func pressureAdvance(_ k: Double) -> String
+    /// Command that sets the acceleration in mm/s².
+    func acceleration(_ a: Int) -> String
+}
+
+extension MachineDialect {
+    func pressureAdvance(_ k: Double) -> String { "SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(k))" }
+    func acceleration(_ a: Int) -> String { "SET_VELOCITY_LIMIT ACCEL=\(a)" }
 }
 
 /// Emits Klipper G-code for the selected printer. The machine-specific parts
@@ -69,6 +80,7 @@ public struct GCodeWriter {
         switch settings.printer {
         case .snapmakerU1: return U1Dialect()
         case .kobraS1: return KobraS1Dialect()
+        case .bambuP1S: return BambuP1SDialect()
         }
     }
 
@@ -92,12 +104,19 @@ public struct GCodeWriter {
         var state = MachineState(tool: initialTool)
         var toolChanges = 0
         if let pa = s.filament(for: initialTool).pressureAdvance {
-            body.line("SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(pa))")
+            body.line(dialect.pressureAdvance(pa))
         }
 
+        var pendingLayerGCodes = s.layerGCodes.map { ($0.z, $0.lines.filter(LayerGCode.isAllowed)) }.filter { !$0.1.isEmpty }
         for layer in layers {
             let height = layer.height
+            if !s.retractLengthSteps.isEmpty { state.retractLength = s.retractLength(atHeight: layer.z, tool: state.tool) }
             body.line(";LAYER_CHANGE")
+            while let next = pendingLayerGCodes.first, next.0 <= layer.z + 0.001 {
+                body.line("; vom Modell eingefügt (Höhe \(fmt(next.0)))")
+                next.1.forEach { body.line($0) }
+                pendingLayerGCodes.removeFirst()
+            }
             body.line(";Z:\(fmt(layer.z))")
             body.line(";HEIGHT:\(fmt(height))")
             dialect.beforeLayer(layer, ctx).forEach { body.line($0) }
@@ -119,7 +138,7 @@ public struct GCodeWriter {
                     dialect.toolChange(from: state.tool, to: island.tool, layer: layer, ctx).forEach { body.line($0) }
                     body.line("M83")
                     body.line("G92 E0")
-                    if let pa = filament.pressureAdvance { body.line("SET_PRESSURE_ADVANCE ADVANCE=\(fmt5(pa))") }
+                    if let pa = filament.pressureAdvance { body.line(dialect.pressureAdvance(pa)) }
                     toolChanges += 1
                     stats.add(dialect.toolChangeSeconds)
                     state.tool = island.tool
@@ -149,9 +168,9 @@ public struct GCodeWriter {
                     if state.lastRole != extrusion.role {
                         body.line(";TYPE:\(extrusion.role.gcodeLabel)")
                         if extrusion.role == .outerWall {
-                            body.line("SET_VELOCITY_LIMIT ACCEL=\(Int(s.outerWallAcceleration))")
+                            body.line(dialect.acceleration(Int(s.outerWallAcceleration)))
                         } else if state.lastRole == .outerWall {
-                            body.line("SET_VELOCITY_LIMIT ACCEL=\(Int(s.acceleration))")
+                            body.line(dialect.acceleration(Int(s.acceleration)))
                         }
                         setFan(&body, &state, filament: filament, layerIndex: layer.index, role: extrusion.role)
                         state.lastRole = extrusion.role
@@ -190,6 +209,7 @@ public struct GCodeWriter {
                         stats.move(dist, speed: speed)
                         state.position = p
                         state.filament[island.tool, default: 0] += e
+                        if extrusion.role == .primeTower { state.towerMM += e }
                     }
                     if extrusion.closed, extrusion.role == .outerWall, spiralFromZ == nil {
                         wipeInward(&body, &state, &stats, along: extrusion.points)
@@ -205,7 +225,8 @@ public struct GCodeWriter {
         }
         let estimatedSeconds = stats.seconds + dialect.preparationSeconds
         let estimate = PrintEstimate(seconds: estimatedSeconds, filamentMM: filamentMM, filamentGrams: filamentGrams,
-                                     layerCount: layers.count, toolChanges: toolChanges)
+                                     layerCount: layers.count, toolChanges: toolChanges,
+                                     purgeGrams: state.towerMM * Self.filamentArea / 1000 * s.filament(for: usedTools.first ?? 0).density)
 
         let slots = Array(0..<max(s.machine.toolCount, (usedTools.max() ?? 0) + 1))
         func perSlot(_ value: (Int) -> String, _ separator: String = ",") -> String {
@@ -245,7 +266,12 @@ public struct GCodeWriter {
         out.line("G90")
         out.append(body.text)
         if !state.retracted {
-            out.line("G1 E-\(fmt5(s.filament(for: state.tool).retractLength)) F\(Int(s.retractSpeed * 60))")
+            out.line("G1 E-\(fmt5(state.retractLength ?? s.filament(for: state.tool).retractLength)) F\(Int(s.retractSpeed * 60))")
+        }
+        let footer = s.footerGCode.filter(LayerGCode.isAllowed)
+        if !footer.isEmpty {
+            out.line("; Kalibrierung: Werte zurücksetzen")
+            footer.forEach { out.line($0) }
         }
         dialect.end(ctx).forEach { out.line($0) }
 
@@ -310,7 +336,7 @@ public struct GCodeWriter {
 
     private func retract(_ g: inout GCodeBuffer, _ state: inout MachineState, _ stats: inout MotionStats) {
         guard !state.retracted else { return }
-        let length = settings.filament(for: state.tool).retractLength
+        let length = state.retractLength ?? settings.filament(for: state.tool).retractLength
         g.line("G1 E-\(fmt5(length)) F\(Int(settings.retractSpeed * 60))")
         stats.add(length / settings.retractSpeed)
         state.retracted = true
@@ -318,7 +344,7 @@ public struct GCodeWriter {
 
     private func unretract(_ g: inout GCodeBuffer, _ state: inout MachineState, _ stats: inout MotionStats) {
         guard state.retracted else { return }
-        let length = settings.filament(for: state.tool).retractLength
+        let length = state.retractLength ?? settings.filament(for: state.tool).retractLength
         g.line("G1 E\(fmt5(length)) F\(Int(settings.retractSpeed * 60))")
         stats.add(length / settings.retractSpeed)
         state.retracted = false
@@ -412,6 +438,9 @@ private struct MachineState {
     var fan = -1
     var lastRole: ExtrusionRole?
     var filament: [Int: Double] = [:]
+    var towerMM = 0.0
+    /// Retraction length at the current layer (calibration prints change it with the height).
+    var retractLength: Double?
 }
 
 /// Rough time estimate using trapezoidal acceleration.

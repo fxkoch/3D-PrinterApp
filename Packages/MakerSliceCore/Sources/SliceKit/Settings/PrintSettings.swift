@@ -39,11 +39,15 @@ public enum SupportMode: String, Codable, CaseIterable, Sendable, Identifiable {
 public enum PlateType: String, Codable, CaseIterable, Sendable, Identifiable {
     case texturedPEI = "Textured PEI Plate"
     case highTemp = "High Temp Plate"
+    case coolPlate = "Cool Plate"
+    case engineering = "Engineering Plate"
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
         case .texturedPEI: return "Strukturierte PEI-Platte"
         case .highTemp: return "Glatte PEI-Platte"
+        case .coolPlate: return "Cool Plate (glatt, kalt)"
+        case .engineering: return "Engineering Plate"
         }
     }
 }
@@ -87,6 +91,17 @@ public enum SurfacePattern: String, Codable, CaseIterable, Sendable, Identifiabl
 }
 
 /// Everything the slicer needs. Defaults mirror the "0.20mm Standard" Orca profiles.
+/// A value that applies from a height upwards (mm above the bed).
+public struct HeightValue: Codable, Equatable, Sendable {
+    public var z: Double
+    public var value: Double
+
+    public init(z: Double, value: Double) {
+        self.z = z
+        self.value = value
+    }
+}
+
 public struct PrintSettings: Codable, Equatable, Sendable {
     public var printer: PrinterModel = .snapmakerU1
 
@@ -152,6 +167,10 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var supportTopZDistance: Double = 0.2
     public var supportXYDistance: Double = 0.35
     public var supportSpacing: Double = 2.5
+    /// Slot (0-based) that prints the support; nil = the first slot used by the objects.
+    public var supportSlot: Int?
+    /// Slot for the support interface layers; nil = same as the support.
+    public var supportInterfaceSlot: Int?
     public var brimWidth: Double = 0
     public var skirtLoops: Int = 1
     public var skirtDistance: Double = 3
@@ -160,6 +179,8 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     /// Purge tower for single-nozzle multi-material (Kobra S1 + ACE).
     public var primeTower: Bool = false
     public var primeTowerWidth: Double = 30
+    /// Material purged at the tower per colour change in mm³ (0 = default dense strip).
+    public var purgeVolume: Double = 0
 
     // Travel
     public var retractSpeed: Double = 30
@@ -172,6 +193,27 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var filaments: [Filament] = [.pla, .pla, .pla, .pla]
     public var enableTimelapse: Bool = true
     public var enableBedLeveling: Bool = true
+    /// Kobra S1 start options (sent with the print command): the printer's own vibration compensation and flow calibration.
+    public var startVibrationCompensation: Bool = false
+    public var startFlowCalibration: Bool = false
+
+    /// Further slicer settings (OrcaSlicer keys, see `SlicerOptionCatalog`) the user changed in expert mode.
+    /// They only take effect when slicing in the cloud with OrcaSlicer.
+    public var extraOptions: [String: String] = [:]
+
+    /// G-code taken over from a project file, inserted before the layer at the given height (e.g. temperature towers).
+    public var layerGCodes: [LayerGCode] = []
+    /// Retraction length that applies from a height upwards (retraction calibration).
+    public var retractLengthSteps: [HeightValue] = []
+    /// Harmless commands written at the end of the print (calibration prints reset speed/flow factors here).
+    public var footerGCode: [String] = []
+
+    /// Retraction length at height `z`.
+    public func retractLength(atHeight z: Double, tool: Int) -> Double {
+        var result = filament(for: tool).retractLength
+        for step in retractLengthSteps.sorted(by: { $0.z < $1.z }) where step.z <= z + 1e-6 { result = step.value }
+        return result
+    }
 
     public init() {}
 
@@ -243,6 +285,11 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         if let v = project.supportEnabled { support = v ? (project.supportOnBuildPlateOnly == false ? .everywhere : .buildPlateOnly) : .off }
         if let v = project.brimWidth, (0...20).contains(v) { brimWidth = v }
         if let v = project.ironing { ironing = v }
+        applyMaterials(project)
+    }
+
+    /// Takes over the filament types, vendors and colours of a project file (the material mapping), not the process values.
+    public mutating func applyMaterials(_ project: ProjectSettings) {
         for (i, type) in project.filamentTypes.prefix(filaments.count).enumerated() {
             let vendor = i < project.filamentVendors.count ? project.filamentVendors[i] : nil
             if let preset = FilamentLibrary.bestMatch(type: type, vendor: vendor, printer: printer) {
@@ -276,7 +323,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
 
     public mutating func apply(_ quality: Quality) {
         layerHeight = quality.layerHeight
-        firstLayerHeight = printer == .kobraS1 ? 0.2 : (quality == .fine ? 0.2 : 0.25)
+        firstLayerHeight = printer != .snapmakerU1 ? 0.2 : (quality == .fine ? 0.2 : 0.25)
         topLayers = Int((1.0 / quality.layerHeight).rounded(.up))
         bottomLayers = Int((0.6 / quality.layerHeight).rounded(.up))
     }
@@ -301,8 +348,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.detectBridges, &detectBridges); d(.bridgeSpeed, &bridgeSpeed); d(.bridgeFlow, &bridgeFlow)
         d(.support, &support); d(.supportAngle, &supportAngle); d(.supportTopZDistance, &supportTopZDistance)
         d(.supportXYDistance, &supportXYDistance); d(.supportSpacing, &supportSpacing)
+        d(.supportSlot, &supportSlot); d(.supportInterfaceSlot, &supportInterfaceSlot)
         d(.brimWidth, &brimWidth); d(.skirtLoops, &skirtLoops); d(.skirtDistance, &skirtDistance)
-        d(.primeTower, &primeTower); d(.primeTowerWidth, &primeTowerWidth)
+        d(.primeTower, &primeTower); d(.primeTowerWidth, &primeTowerWidth); d(.purgeVolume, &purgeVolume)
         d(.retractSpeed, &retractSpeed); d(.retractMinTravel, &retractMinTravel); d(.zHop, &zHop)
         d(.topSurfacePattern, &topSurfacePattern); d(.bottomSurfacePattern, &bottomSurfacePattern)
         d(.seamPosition, &seamPosition); d(.wallOrder, &wallOrder); d(.elephantFootCompensation, &elephantFootCompensation)
@@ -310,6 +358,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.fuzzySkinThickness, &fuzzySkinThickness); d(.fuzzySkinPointDistance, &fuzzySkinPointDistance)
         d(.plateType, &plateType); d(.filaments, &filaments)
         d(.enableTimelapse, &enableTimelapse); d(.enableBedLeveling, &enableBedLeveling)
+        d(.startVibrationCompensation, &startVibrationCompensation); d(.startFlowCalibration, &startFlowCalibration)
+        d(.extraOptions, &extraOptions); d(.layerGCodes, &layerGCodes)
+        d(.retractLengthSteps, &retractLengthSteps); d(.footerGCode, &footerGCode)
         while filaments.count < machine.toolCount { filaments.append(filaments.last ?? .pla) }
     }
 }

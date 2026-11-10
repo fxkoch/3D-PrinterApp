@@ -52,3 +52,22 @@ Voraussetzungen auf dem Mac: Xcode mit iPhone-Simulator, Homebrew. Den Rest inst
 | **Codemagic** | 500 Mac-Minuten/Monat (M2, persönlicher Account) | eigene Konfiguration (`codemagic.yaml`) nötig |
 | **Xcode Cloud** | 25 Stunden/Monat | nur mit bezahltem Apple-Entwickler-Account (99 €/Jahr); dafür gleich TestFlight |
 | **GitHub Pro** | 3000 Minuten/Monat | kostet; Mac zählt weiterhin zehnfach |
+
+## Tests gegen echte Drucker (nur lesend)
+
+Diese Tests laufen nur, wenn du sie ausdrücklich mit der Adresse startest – sonst werden sie übersprungen. Sie senden **keine**
+Druck-, Heiz-, Pause-, Abbruch- oder Dateibefehle, nur Abfragen:
+
+```bash
+cd Packages/MakerSliceCore
+REAL_KOBRA_HOST=192.168.x.y swift test --filter KobraRealReadOnlyTests    # Status, Temperaturen, ACE-Slots (rohe Antworten werden ausgegeben)
+REAL_SCAN=1 swift test --filter NetworkScannerRealTests                   # sucht Drucker im Heimnetz (fragt nur die Ports 18910 und 7125)
+REAL_KOBRA_HOST=192.168.x.y REAL_KOBRA_CAMERA=1 swift test --filter KobraRealCameraTests   # startet die Kamera, liest 8 s Video, stoppt sie
+```
+
+Die Tests `U1VirtualPrintTests`, `testFullVirtualPrintWithACE` und `testPrintRunsToCompletion` starten echte Drucke und gehören
+**nur** gegen die virtuellen Drucker (`tools/virtualprinters`).
+
+Neue Tests dieser Runde: Platten-Verteilung (`PlateTests`), Mehrfarbe und Bemalung (`MultiColorTests`, `PaintTests`),
+Profil-Übernahme (`ProfileAdvisorTests`), Netzwerk-Suche (`NetworkScannerTests`), FLV-Video (`FLVDemuxerTests`),
+Druckphasen (`PrintPhaseTests`), Kalibrierung (`CalibrationTests`, `MoonrakerDatabaseTests`) und die zugehörigen UI-Tests.

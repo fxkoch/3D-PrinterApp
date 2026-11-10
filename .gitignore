@@ -7,3 +7,7 @@ xcuserdata/
 .virtualprinters/
 build/
 build-kobra-sim.log
+build-bambu-sim.log
+__pycache__/
+*.pyc
+build-*.log

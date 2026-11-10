@@ -54,6 +54,37 @@ final class CutTests: XCTestCase {
         XCTAssertNotNil(PlateArranger.arrange([pieces[0]], bedSize: 250))
     }
 
+    func testTurningTheObjectAvoidsCuttingWhenItFitsDiagonally() throws {
+        // 330 mm bar on a 270 mm bed: too long for X or Y, but it fits along the diagonal.
+        let bar = ModelObject(name: "Leiste", mesh: Fixtures.box(330, 20, 20))
+        let parts = try MeshCutter.autoSplit(bar, bedSize: 270, maxHeight: 270)
+        XCTAssertEqual(parts.count, 1, "no cut needed")
+        XCTAssertEqual(parts[0].name, "Leiste")
+        XCTAssertNotNil(PlateArranger.arrange(parts, bedSize: 270), "it really fits")
+        XCTAssertGreaterThan(parts[0].boundingBox.size.x, 200, "turned, not shrunk")
+        XCTAssertEqual(parts[0].mesh.volume, bar.mesh.volume, accuracy: 1)
+    }
+
+    func testTallPillarLiesDownInsteadOfBeingCut() throws {
+        let pillar = ModelObject(name: "Säule", mesh: Fixtures.box(10, 10, 300))
+        let parts = try MeshCutter.autoSplit(pillar, bedSize: 250, maxHeight: 250)
+        XCTAssertEqual(parts.count, 1, "laid down diagonally it fits without a cut")
+        XCTAssertLessThanOrEqual(parts[0].boundingBox.size.z, 248)
+    }
+
+    func testFewestPiecesWhenTurningCannotHelp() throws {
+        // 500 × 30 × 10 on a 250 mm bed.
+        let bar = ModelObject(name: "Lang", mesh: Fixtures.box(500, 30, 10))
+        let parts = try MeshCutter.autoSplit(bar, bedSize: 250, maxHeight: 250, connector: .none)
+        // Straight it needs three pieces; turned by about 11° the bar fits into two.
+        let pieces = parts.filter { !$0.name.contains("Dübel") }
+        XCTAssertEqual(pieces.count, 2)
+        for piece in pieces { XCTAssertNotNil(PlateArranger.arrange([piece], bedSize: 250)) }
+        // Slightly too big on one side: a thin margin is enough without connectors.
+        let plate = ModelObject(name: "Platte", mesh: Fixtures.box(246, 100, 10))
+        XCTAssertEqual(try MeshCutter.autoSplit(plate, bedSize: 250, maxHeight: 250, connector: .none).count, 1)
+    }
+
     func testCutOutsideThrows() {
         let obj = ModelObject(name: "Box", mesh: Fixtures.box(10, 10, 10))
         XCTAssertThrowsError(try MeshCutter.cut(obj, CutOptions(axis: .z, position: 30)))

@@ -13,6 +13,34 @@ public struct ObjectVolume: Sendable, Equatable {
     }
 }
 
+/// A further body of an object printed in another colour/material (a part of a multi-colour 3MF).
+public struct ObjectPart: Sendable, Equatable {
+    public var name: String
+    public var mesh: TriangleMesh
+    /// Zero-based tool/slot index (0...3).
+    public var tool: Int
+    /// Extruder/colour index this part had in the imported file (before the user mapped colours to slots).
+    public var sourceTool: Int?
+
+    public init(name: String, mesh: TriangleMesh, tool: Int, sourceTool: Int? = nil) {
+        self.name = name
+        self.mesh = mesh
+        self.tool = tool
+        self.sourceTool = sourceTool ?? tool
+    }
+}
+
+/// From this height (mm above the bed) the object is printed with another slot.
+public struct ColorChange: Sendable, Equatable, Hashable, Codable {
+    public var z: Double
+    public var tool: Int
+
+    public init(z: Double, tool: Int) {
+        self.z = z
+        self.tool = tool
+    }
+}
+
 /// One printable object of an imported file, already in build-plate coordinates.
 public struct ModelObject: Identifiable, Sendable, Equatable {
     public var id = UUID()
@@ -23,19 +51,59 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     /// Plate number from a Bambu/Orca project (1-based), if known.
     public var plate: Int?
     public var volumes: [ObjectVolume]
+    /// Extruder/colour index the main body had in the imported file.
+    public var sourceTool: Int?
+    /// Further bodies with their own slot (multi-colour parts). The main `mesh` uses `tool`.
+    public var parts: [ObjectPart] = []
+    /// Surface painted with other colours (MakerWorld / Bambu Studio multi-colour painting), as small triangles.
+    public var paint: [PaintedFacet] = []
+    /// Height-based slot changes of the main body, sorted by height.
+    public var colorChanges: [ColorChange] = []
+
+    /// True when the object is printed in more than one colour.
+    public var isMultiColor: Bool { !parts.isEmpty || !colorChanges.isEmpty || !paint.isEmpty }
+
+    /// Slot used by the main body at height `z` (mm).
+    public func tool(atHeight z: Double) -> Int {
+        var result = tool
+        for change in colorChanges.sorted(by: { $0.z < $1.z }) where change.z <= z { result = change.tool }
+        return result
+    }
+
+    /// Every slot this object can use.
+    public var allTools: Set<Int> { Set([tool] + parts.map(\.tool) + colorChanges.map(\.tool) + paint.map(\.tool)) }
 
     public init(name: String, mesh: TriangleMesh, tool: Int = 0, plate: Int? = nil, volumes: [ObjectVolume] = []) {
         self.name = name
         self.mesh = mesh
         self.tool = tool
+        self.sourceTool = tool
         self.plate = plate
         self.volumes = volumes
+    }
+
+    /// The object with its colours mapped to printer slots (`map`: file colour → slot).
+    public func applyingColorMap(_ map: [Int: Int]) -> ModelObject {
+        var copy = self
+        copy.tool = map[sourceTool ?? tool] ?? tool
+        copy.parts = parts.map { part in
+            var p = part
+            p.tool = map[part.sourceTool ?? part.tool] ?? part.tool
+            return p
+        }
+        copy.paint = paint.map { facet in
+            var f = facet
+            f.tool = map[facet.sourceTool] ?? facet.tool
+            return f
+        }
+        return copy
     }
 
     /// Bounds of the printed shape (mesh plus added volumes).
     public var boundingBox: BoundingBox {
         var box = mesh.boundingBox
         for v in volumes where v.kind == .add { box.include(v.mesh.boundingBox) }
+        for part in parts { box.include(part.mesh.boundingBox) }
         return box
     }
 
@@ -43,6 +111,8 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
         var copy = self
         copy.mesh = mesh.transformed(t)
         copy.volumes = volumes.map { ObjectVolume(kind: $0.kind, mesh: $0.mesh.transformed(t)) }
+        copy.parts = parts.map { ObjectPart(name: $0.name, mesh: $0.mesh.transformed(t), tool: $0.tool, sourceTool: $0.sourceTool) }
+        copy.paint = paint.map { $0.transformed(t) }
         return copy
     }
 
@@ -54,11 +124,45 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     }
 }
 
+/// A colour/material of an imported project, as the file defines it.
+public struct ModelColor: Identifiable, Equatable, Sendable {
+    public var id: Int { tool }
+    /// Zero-based extruder index in the file.
+    public var tool: Int
+    /// "#RRGGBB"
+    public var colorHex: String
+    /// Material type from the project (PLA, PETG …), if known.
+    public var type: String?
+    public var vendor: String?
+    /// Names of the objects/parts printed in this colour.
+    public var users: [String]
+}
+
 /// Result of importing a model file.
 public struct ImportedModel: Sendable {
     public var objects: [ModelObject]
     /// Settings found in a Bambu Studio / Orca project (Metadata/project_settings.config).
     public var projectSettings: ProjectSettings?
+    /// Colours the project really uses (an extruder counts when an object or part is printed with it).
+    public var modelColors: [ModelColor] {
+        var users: [Int: [String]] = [:]
+        for object in objects {
+            users[object.sourceTool ?? object.tool, default: []].append(object.name)
+            for part in object.parts { users[part.sourceTool ?? part.tool, default: []].append(part.name) }
+            for tool in Set(object.paint.map(\.sourceTool)) { users[tool, default: []].append("\(object.name) (bemalt)") }
+        }
+        func at(_ list: [String]?, _ i: Int) -> String? { list.flatMap { $0.indices.contains(i) ? $0[i] : nil } }
+        return users.keys.sorted().map { tool in
+            let raw = at(projectSettings?.filamentColors, tool) ?? "#888888"
+            let hex = raw.hasPrefix("#") && raw.count >= 7 ? String(raw.prefix(7)) : "#888888"
+            let vendor = at(projectSettings?.filamentVendors, tool).flatMap { $0.isEmpty ? nil : $0 }
+            return ModelColor(tool: tool, colorHex: hex, type: at(projectSettings?.filamentTypes, tool), vendor: vendor, users: users[tool] ?? [])
+        }
+    }
+
+    /// True when the project prints in more than one colour.
+    public var isMultiColor: Bool { modelColors.count > 1 }
+
     public var plates: [Int] {
         Array(Set(objects.compactMap(\.plate))).sorted()
     }
@@ -89,6 +193,21 @@ public struct ProjectSettings: Sendable, Equatable {
     public var filamentTypes: [String] = []
     public var filamentVendors: [String] = []
     public var printerModel: String?
+    /// Name of the process preset the file was made with (`print_settings_id`).
+    public var profileName: String?
+    /// Every single-valued setting of the project, OrcaSlicer key → value.
+    public var raw: [String: String] = [:]
+    /// Per-filament settings (temperatures, flow, fan …), OrcaSlicer key → one value per filament.
+    public var perFilament: [String: [String]] = [:]
+    /// G-code the project inserts at certain heights (e.g. temperature towers change the nozzle temperature).
+    public var layerGCodes: [LayerGCode] = []
+
+    /// Reads `Metadata/project_settings.config` (JSON) and optionally `Metadata/custom_gcode_per_layer.xml`.
+    public static func fromConfig(_ config: Data, layerGCodeXML: Data? = nil) -> ProjectSettings? {
+        guard var project = parse(config) else { return nil }
+        if let xml = layerGCodeXML { project.layerGCodes = LayerGCode.parse(xml) }
+        return project
+    }
 
     static func parse(_ data: Data) -> ProjectSettings? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -122,8 +241,59 @@ public struct ProjectSettings: Sendable, Equatable {
         s.filamentVendors = json["filament_vendor"] as? [String] ?? []
         s.filamentColors = json["filament_colour"] as? [String] ?? []
         s.filamentTypes = json["filament_type"] as? [String] ?? []
-        s.printerModel = string("printer_model")
+        // A profile file of its own (from GitHub/Printables) has no printer_model: it names the printers it fits instead.
+        s.printerModel = string("printer_model") ?? (json["compatible_printers"] as? [String])?.first
+        s.profileName = string("print_settings_id") ?? string("name") ?? string("filament_settings_id")
+        for (key, value) in json {
+            if let v = value as? String { s.raw[key] = v }
+            else if let list = value as? [String] {
+                if list.count == 1 { s.raw[key] = list[0] }
+                s.perFilament[key] = list
+            }
+        }
         return s
+    }
+}
+
+extension ProjectSettings {
+    func withLayerGCodes(_ codes: [LayerGCode]) -> ProjectSettings {
+        var copy = self
+        copy.layerGCodes = codes
+        return copy
+    }
+}
+
+/// G-code a project inserts before the layer at height `z`.
+public struct LayerGCode: Codable, Sendable, Hashable {
+    public var z: Double
+    public var lines: [String]
+
+    public init(z: Double, lines: [String]) {
+        self.z = z
+        self.lines = lines
+    }
+
+    /// Commands that only change temperature, fan, speed, flow or pressure advance – the only ones taken over from a file.
+    static let allowedPrefixes = ["M104", "M109", "M140", "M190", "M106", "M107", "M220", "M221", "M900", "M572", "SET_PRESSURE_ADVANCE", "M117"]
+
+    static func isAllowed(_ line: String) -> Bool {
+        let command = line.trimmingCharacters(in: .whitespaces).uppercased()
+        return allowedPrefixes.contains { command == $0 || command.hasPrefix($0 + " ") }
+    }
+
+    /// Reads `Metadata/custom_gcode_per_layer.xml` (Bambu Studio / OrcaSlicer).
+    static func parse(_ data: Data) -> [LayerGCode] {
+        var result: [LayerGCode] = []
+        XMLTagScanner(data: data).forEachTag { tag in
+            guard tag.localName == "layer", !tag.isClosing, let z = tag.attribute("top_z").flatMap(Double.init) else { return }
+            let type = tag.attribute("type").flatMap(Int.init)
+            let gcode = tag.attribute("gcode").flatMap { $0.isEmpty ? nil : $0 } ?? (type == 4 ? tag.attribute("extra") : nil)
+            guard let gcode else { return }
+            let lines = gcode.replacingOccurrences(of: "&#10;", with: "\n").replacingOccurrences(of: "&#13;", with: "")
+                .split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            if !lines.isEmpty { result.append(LayerGCode(z: z, lines: lines)) }
+        }
+        return result.sorted { $0.z < $1.z }
     }
 }
 
@@ -154,6 +324,8 @@ public enum ThreeMFReader {
         var components: [(path: String?, objectID: String, transform: Transform3D)] = []
         var name: String?
         var type: String?
+        /// Triangle index → `paint_color` text (multi-colour painting).
+        var paint: [Int: String] = [:]
     }
 
     private struct ObjectSettings {
@@ -189,40 +361,68 @@ public enum ThreeMFReader {
 
         let settings: (objects: [String: ObjectSettings], plateForObject: [String: Int]) =
             try zip.contents(of: "Metadata/model_settings.config").map(parseModelSettings) ?? ([:], [:])
-        let project = try zip.contents(of: "Metadata/project_settings.config").flatMap(ProjectSettings.parse)
+        var project = try zip.contents(of: "Metadata/project_settings.config").flatMap(ProjectSettings.parse)
+        if let xml = try zip.contents(of: "Metadata/custom_gcode_per_layer.xml") {
+            let codes = LayerGCode.parse(xml)
+            if !codes.isEmpty { project = (project ?? ProjectSettings()).withLayerGCodes(codes) }
+        }
 
         var result: [ModelObject] = []
+        var paintFailed = false
         for (index, item) in buildItems.enumerated() where item.printable {
             guard let object = rootObjects[item.objectID] else { continue }
             let objectSettings = settings.objects[item.objectID]
-            var mesh = TriangleMesh()
+            // Meshes per extruder (1-based): parts of a multi-colour project keep their own slot.
+            var paintFacets: [PaintedFacet] = []
+            var byExtruder: [Int: TriangleMesh] = [:]
+            var partNames: [Int: String] = [:]
+            let objectExtruder = objectSettings?.extruder ?? objectSettings?.parts.values.compactMap({ $0.extruder }).first ?? 1
 
             // Collect the object's own mesh plus all (nested) components.
-            func collect(_ obj: ObjectResource, file: String, transform: Transform3D, partID: String?, depth: Int) throws {
+            func collect(_ obj: ObjectResource, file: String, transform: Transform3D, partID: String?, extruder inherited: Int?, depth: Int) throws {
                 guard depth < 16 else { return }
                 if let partID, let subtype = objectSettings?.parts[partID]?.subtype,
                    subtype != "normal_part" && !subtype.isEmpty {
                     return // modifiers, negative volumes, support blockers
                 }
-                if !obj.mesh.isEmpty { mesh.append(obj.mesh.transformed(transform)) }
+                let extruder = partID.flatMap { objectSettings?.parts[$0]?.extruder } ?? inherited
+                if !obj.mesh.isEmpty {
+                    let slot = extruder ?? objectExtruder
+                    byExtruder[slot, default: TriangleMesh()].append(obj.mesh.transformed(transform))
+                    if partNames[slot] == nil { partNames[slot] = obj.name }
+                    for (triangle, text) in obj.paint {
+                        let m = obj.mesh
+                        guard triangle * 3 + 2 < m.indices.count else { continue }
+                        let v = (0..<3).map { transform.apply(m.vertices[Int(m.indices[triangle * 3 + $0])]) }
+                        if let facets = PaintDecoder.decode(text, a: v[0], b: v[1], c: v[2]) { paintFacets += facets } else { paintFailed = true }
+                    }
+                }
                 for component in obj.components {
                     let compFile = component.path.map(normalize) ?? file
                     let pool = try resources(in: compFile)
                     guard let child = pool[component.objectID] else { continue }
                     try collect(child, file: compFile, transform: component.transform.then(transform),
-                                partID: component.objectID, depth: depth + 1)
+                                partID: component.objectID, extruder: extruder, depth: depth + 1)
                 }
             }
-            try collect(object, file: normalize(rootPath), transform: item.transform, partID: nil, depth: 0)
-            guard !mesh.isEmpty else { continue }
+            try collect(object, file: normalize(rootPath), transform: item.transform, partID: nil, extruder: nil, depth: 0)
+            // The main body is the one with the most triangles; the rest become coloured parts.
+            guard let mainSlot = byExtruder.max(by: { $0.value.triangleCount < $1.value.triangleCount })?.key,
+                  let mesh = byExtruder[mainSlot], !mesh.isEmpty else { continue }
 
             let name = objectSettings?.name ?? object.name ?? "Objekt \(index + 1)"
-            let extruder = objectSettings?.extruder ?? objectSettings?.parts.values.compactMap({ $0.extruder }).first ?? 1
-            result.append(ModelObject(name: name, mesh: mesh, tool: max(0, extruder - 1),
-                                      plate: settings.plateForObject[item.objectID]))
+            var imported = ModelObject(name: name, mesh: mesh, tool: max(0, mainSlot - 1),
+                                       plate: settings.plateForObject[item.objectID])
+            for slot in byExtruder.keys.sorted() where slot != mainSlot {
+                guard let partMesh = byExtruder[slot], !partMesh.isEmpty else { continue }
+                imported.parts.append(ObjectPart(name: partNames[slot] ?? "Teil \(slot)", mesh: partMesh, tool: max(0, slot - 1)))
+            }
+            imported.paint = paintFacets
+            result.append(imported)
         }
         guard !result.isEmpty else { throw ModelImportError.empty }
-        return ImportedModel(objects: result, projectSettings: project, hasPaintedColors: painted)
+        // Painted colours are taken over; the warning stays only for paint data that could not be read.
+        return ImportedModel(objects: result, projectSettings: project, hasPaintedColors: painted && paintFailed)
     }
 
     private static func normalize(_ path: String) -> String {
@@ -278,8 +478,9 @@ public enum ThreeMFReader {
                    let c = tag.attributes["v3"].flatMap(UInt32.init),
                    a < vertices.count, b < vertices.count, c < vertices.count {
                     indices.append(a); indices.append(b); indices.append(c)
-                    if !painted, tag.attributes["paint_color"] != nil || tag.attributes["slic3rpe:mmu_segmentation"] != nil {
+                    if let text = tag.attributes["paint_color"] ?? tag.attributes["slic3rpe:mmu_segmentation"], !text.isEmpty {
                         painted = true
+                        current?.paint[indices.count / 3 - 1] = text
                     }
                 }
             case "component":

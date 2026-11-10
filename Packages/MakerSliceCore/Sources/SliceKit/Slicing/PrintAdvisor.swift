@@ -21,6 +21,7 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case retraction(slot: Int, length: Double)
         case elephantFoot(Double)
         case spiralVase(Bool)
+        case leveling(Bool)
     }
 
     public var id: String
@@ -98,7 +99,8 @@ public enum PrintAdvisor {
     /// - Parameter loadedTypes: material reported by the printer per slot (nil = unknown/empty).
     /// - Parameter dryerHumidity: relative humidity (%) reported by the ACE Pro, if known.
     public static func recommendations(objects: [ModelObject], settings s: PrintSettings,
-                                       loadedTypes: [String?] = [], dryerHumidity: Double? = nil) -> [Recommendation] {
+                                       loadedTypes: [String?] = [], dryerHumidity: Double? = nil,
+                                       hoursSinceLeveling: Double? = nil) -> [Recommendation] {
         var result: [Recommendation] = []
         let analyses = objects.map { analyze($0, supportAngle: s.supportAngle) }
         let usedTools = Set(objects.map(\.tool))
@@ -107,10 +109,20 @@ public enum PrintAdvisor {
         // Too big for the printer.
         for (object, a) in zip(objects, analyses)
         where a.size.x > s.bedSize - 2 || a.size.y > s.bedSize - 2 || a.size.z > s.maxHeight {
+            // Often turning the object (diagonally or onto its side) is enough.
+            var fitsTurned = false
+            if !object.isMultiColor, let turn = BestOrientation.best(for: object, bedSize: s.bedSize, maxHeight: s.maxHeight,
+                                                                     limitXY: s.bedSize - 2, limitZ: s.maxHeight - 1) {
+                let size = object.transformed(turn).boundingBox.size
+                fitsTurned = BestOrientation.pieces(size: size, limitXY: s.bedSize - 2, limitZ: s.maxHeight - 1) == 1
+            }
             result.append(Recommendation(
-                id: "split-\(object.id)", title: "„\(object.name)“ ist zu groß",
-                detail: String(format: "%.0f × %.0f × %.0f mm passt nicht in den %@. Automatisch in Teile schneiden – mit Dübeln zum Zusammenstecken.",
-                               a.size.x, a.size.y, a.size.z, s.printer.displayName),
+                id: "split-\(object.id)", title: fitsTurned ? "„\(object.name)“ passt nur gedreht" : "„\(object.name)“ ist zu groß",
+                detail: fitsTurned
+                    ? String(format: "%.0f × %.0f × %.0f mm passt nicht – gedreht (schräg auf dem Druckbett oder auf der Seite) aber ohne Schnitt in den %@. Die App dreht es für dich.",
+                             a.size.x, a.size.y, a.size.z, s.printer.displayName)
+                    : String(format: "%.0f × %.0f × %.0f mm passt nicht in den %@. Automatisch in möglichst wenige Teile schneiden (das Teil wird dafür gedreht) – mit Dübeln zum Zusammenstecken.",
+                             a.size.x, a.size.y, a.size.z, s.printer.displayName),
                 icon: "scissors", severity: .warning, action: .autoSplit(objectID: object.id)))
         }
 
@@ -123,6 +135,11 @@ public enum PrintAdvisor {
                 detail: String(format: "Etwa %.0f mm² hängen frei in der Luft (flacher als %.0f°). Ohne Stützen hängen diese Stellen durch.",
                                overhang, s.supportAngle) + (mode == .everywhere ? " Einige Überhänge liegen über dem Modell – Stützen „Überall“." : ""),
                 icon: "building.columns", severity: .warning, action: .support(mode)))
+        } else if overhang > 30, s.support == .buildPlateOnly, analyses.contains(where: \.overhangOverModel) {
+            result.append(Recommendation(
+                id: "support-everywhere", title: "Stützen „Überall“ nötig",
+                detail: "Einige Überhänge liegen über dem Modell selbst. Mit „Nur vom Druckbett“ entstehen dort keine Stützen und die Stellen hängen durch.",
+                icon: "building.columns", severity: .warning, action: .support(.everywhere)))
         } else if overhang < 5, s.support != .off {
             result.append(Recommendation(
                 id: "support-off", title: "Stützen sind unnötig",
@@ -194,6 +211,15 @@ public enum PrintAdvisor {
                 icon: "hare", severity: .info, action: .layerHeight(0.28)))
         }
 
+        // The bed was levelled a short while ago with the same plate: leveling again costs minutes for nothing.
+        if s.enableBedLeveling, let hours = hoursSinceLeveling, hours < 12 {
+            let saved = s.printer == .kobraS1 ? "ca. 4" : "2–3"
+            result.append(Recommendation(
+                id: "skip-leveling", title: "Nivellierung überspringen",
+                detail: "Das Bett wurde vor \(hours < 1 ? "weniger als einer Stunde" : "\(Int(hours.rounded())) Stunden") nivelliert, Platte und Drucker sind unverändert. Das Überspringen spart \(saved) Minuten. Bei Plattenwechsel oder schlechter Haftung der ersten Schicht wieder einschalten.",
+                icon: "timer", severity: .suggestion, action: .leveling(false)))
+        }
+
         // Material vs plate.
         if materials.contains(where: { $0.type.uppercased().hasPrefix("PETG") }), s.plateType == .highTemp {
             result.append(Recommendation(
@@ -221,7 +247,7 @@ public enum PrintAdvisor {
         // Compare with what is loaded in the printer.
         for tool in usedTools.sorted() where tool < loadedTypes.count {
             let configured = s.filament(for: tool)
-            let label = s.printer == .kobraS1 ? "Slot \(tool + 1)" : "T\(tool + 1)"
+            let label = "\(s.machine.slotLabel)\(tool + 1)"
             guard let loaded = loadedTypes[tool], !loaded.isEmpty, loaded.uppercased() != "NONE" else {
                 result.append(Recommendation(
                     id: "empty-\(tool)", title: "\(label) ist leer",
@@ -255,6 +281,7 @@ public enum PrintAdvisor {
         case .walls(let n): s.wallLoops = n
         case .plate(let p): s.plateType = p
         case .primeTower(let on): s.primeTower = on
+        case .leveling(let on): s.enableBedLeveling = on
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
         case .elephantFoot(let value): s.elephantFootCompensation = value
@@ -278,7 +305,7 @@ public enum PrintAdvisor {
                                dryerHumidity: Double?) -> [Recommendation] {
         var result: [Recommendation] = []
         let tools = usedTools.sorted()
-        let label = { (tool: Int) in s.printer == .kobraS1 ? "Slot \(tool + 1)" : "T\(tool + 1)" }
+        let label = { (tool: Int) in "\(s.machine.slotLabel)\(tool + 1)" }
         let flexTools = tools.filter { s.filament(for: $0).isFlexible }
         let types = Set(tools.map { s.filament(for: $0).type.uppercased() })
 
@@ -289,6 +316,11 @@ public enum PrintAdvisor {
                 result.append(Recommendation(
                     id: "kobra-tpu", title: "TPU nicht über die ACE Pro",
                     detail: "Die ACE Pro kann weiches TPU nicht zuverlässig fördern und es kann sich im Schlauch verklemmen. TPU über den externen Spulenhalter direkt in den Druckkopf führen" + (tools.count > 1 ? " – und nicht mit Farbwechseln kombinieren." : "."),
+                    icon: "exclamationmark.triangle", severity: .warning))
+            case .bambuP1S:
+                result.append(Recommendation(
+                    id: "p1s-tpu", title: "TPU am P1S",
+                    detail: "Weiches TPU nicht über das AMS führen, sondern vom externen Spulenhalter direkt zum Druckkopf. Langsam drucken (max. ca. 3,5 mm³/s), Trockenbox empfohlen." + (tools.count > 1 ? " Nicht mit Farbwechseln kombinieren." : ""),
                     icon: "exclamationmark.triangle", severity: .warning))
             case .snapmakerU1:
                 result.append(Recommendation(
@@ -347,6 +379,34 @@ public enum PrintAdvisor {
                 id: "kobra-wiper", title: "Düsenspitze prüfen",
                 detail: "Der Abstreifer des Kobra S1 hinterlässt manchmal Filamentreste an der Düse, die beim Start über die erste Schicht schleifen. Spitze vor dem Druck kurz kontrollieren.",
                 icon: "eye", severity: .info))
+        }
+
+        // Community experience (forums and user profiles). Shown as hints only – nothing is changed without asking.
+        if s.printer == .kobraS1 {
+            if types.contains(where: { $0.hasPrefix("ABS") }) {
+                result.append(Recommendation(
+                    id: "community-kobra-abs", title: "ABS am Kobra S1: Bett wärmer",
+                    detail: "Im Drucktipps3D-Forum haftete ABS mit dem mitgelieferten Anycubic-Profil schlecht; mit 85 °C Betttemperatur (und einem Rand/Brim) funktionierte es. Die Temperaturen im Profil sind dort als zu niedrig aufgefallen.",
+                    icon: "person.2", severity: .info))
+            }
+            if types.contains(where: { $0.hasPrefix("PETG") }) {
+                result.append(Recommendation(
+                    id: "community-kobra-petg", title: "PETG am Kobra S1: langsamer",
+                    detail: "Nutzer berichten schlechte Schichthaftung über etwa 120 mm/s und raten zu weniger Lüfter und höherem Fluss (um 1,1). Die Werksprofile sind für PETG oft zu schnell.",
+                    icon: "person.2", severity: .info))
+            }
+            if tools.count > 1 {
+                result.append(Recommendation(
+                    id: "community-kobra-purge", title: "Spülmenge am Kobra prüfen",
+                    detail: "Beim Farbwechsel stellt der Drucker die Spülmenge am Display ein, nicht der Slicer – zu hohe Werte verschwenden viel Filament. Der Spül-Multiplikator sollte bei 1 stehen. Der Drucker nimmt außerdem die am Display eingestellten Farben.",
+                    icon: "person.2", severity: .info))
+            }
+        }
+        if s.printer == .bambuP1S {
+            result.append(Recommendation(
+                id: "community-p1s-start", title: "P1S: Startsequenz",
+                detail: "MakerSlice nutzt die Original-Startsequenz von Bambu Lab. In der Community gibt es verkürzte Varianten (z. B. weniger Wischen an der Düsenbürste, Leveling nur bei Bedarf), die den Start von etwa 5 auf 2–4 Minuten kürzen. Sie ändern Bewegungen und Motorströme – deshalb nicht ungeprüft übernehmen.",
+                icon: "person.2", severity: .info))
         }
 
         // Spiral vase sanity checks.

@@ -6,13 +6,29 @@ public enum ConnectionKind: String, Codable, CaseIterable, Sendable, Identifiabl
     case moonraker
     /// Anycubic stock firmware in LAN mode (local MQTT + HTTP upload).
     case anycubicLAN
+    /// Bambu Lab printers in LAN mode (local MQTT over TLS + FTPS upload), e.g. the P1S.
+    case bambuLAN
 
     public var id: String { rawValue }
     public var displayName: String {
         switch self {
         case .moonraker: return "Moonraker (Klipper)"
         case .anycubicLAN: return "Anycubic LAN-Modus"
+        case .bambuLAN: return "Bambu LAN-Modus"
         }
+    }
+}
+
+/// What the printer does before a print starts (the same switches the makers' own apps offer in their send dialog).
+public struct PrintStartOptions: Equatable, Sendable {
+    public var autoLeveling = true
+    public var vibrationCompensation = false
+    public var flowCalibration = false
+
+    public init(autoLeveling: Bool = true, vibrationCompensation: Bool = false, flowCalibration: Bool = false) {
+        self.autoLeveling = autoLeveling
+        self.vibrationCompensation = vibrationCompensation
+        self.flowCalibration = flowCalibration
     }
 }
 
@@ -100,11 +116,83 @@ public protocol PrinterDriver: AnyObject, Sendable {
     func cancel() async throws
     func setBedTemperature(_ t: Int) async throws
     func setToolTemperature(tool: Int, _ t: Int) async throws
+    /// Heats bed and (first) nozzle together.
+    func preheat(bed: Int, nozzle: Int) async throws
+    /// What this printer lets the app do with the filament (extrude, load a slot, unload).
+    var filamentControl: FilamentControlSupport { get }
+    /// Pushes (positive) or pulls back (negative) filament by `millimetres` with the hot nozzle.
+    func extrude(millimetres: Double) async throws
+    /// AMS/ACE: feeds the filament of `slot` (0-based) to the nozzle.
+    func loadSlot(_ slot: Int) async throws
+    /// Pulls the filament out completely.
+    func unloadFilament() async throws
+    /// ACE: pulls the filament of `slot` back into the box.
+    func retractSlot(_ slot: Int) async throws
     func setLight(_ on: Bool) async throws
     func calibration() async throws -> CalibrationData
     /// Recent messages from the printer (console, errors).
     func recentEvents() async throws -> [PrinterEvent]
     func disconnect()
+}
+
+/// What the app may do with the filament on a printer.
+public struct FilamentControlSupport: Sendable, Equatable {
+    public var extrude = false
+    public var loadSlot = false
+    public var unload = false
+    /// Pull the filament back into the box without unloading it completely (ACE).
+    public var retract = false
+    /// Explanation when something is not possible, or a hint.
+    public var note: String?
+
+    public init(extrude: Bool = false, loadSlot: Bool = false, unload: Bool = false, retract: Bool = false, note: String? = nil) {
+        self.retract = retract
+        self.extrude = extrude
+        self.loadSlot = loadSlot
+        self.unload = unload
+        self.note = note
+    }
+
+    public var any: Bool { extrude || loadSlot || unload || retract }
+}
+
+/// G-code for a filament move: relative extruder, slow enough for a hot nozzle to melt it (pushing 3 mm/s, pulling 5 mm/s).
+public enum FilamentMove {
+    /// Longest single move the app sends.
+    public static let maxMillimetres = 100.0
+    /// Below this temperature filament must not be pushed through the nozzle.
+    public static let minimumNozzleTemperature = 170.0
+
+    public static func script(millimetres mm: Double) -> String {
+        let clamped = max(-maxMillimetres, min(maxMillimetres, mm))
+        let speed = clamped >= 0 ? 180 : 300   // mm/min
+        return "M83\nG1 E\(String(format: "%.1f", clamped)) F\(speed)"
+    }
+}
+
+extension PrinterDriver {
+    public func preheat(bed: Int, nozzle: Int) async throws {
+        try await setBedTemperature(bed)
+        try await setToolTemperature(tool: 0, nozzle)
+    }
+
+    public var filamentControl: FilamentControlSupport {
+        FilamentControlSupport(note: "Dieser Drucker lässt sich vom Handy aus nicht beim Filament bedienen.")
+    }
+
+    public func extrude(millimetres: Double) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+    public func loadSlot(_ slot: Int) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+    public func unloadFilament() async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+    public func retractSlot(_ slot: Int) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
+
+    /// Refuses to move filament through a cold nozzle (it would grind the filament or clog the extruder).
+    func requireHotNozzle() async throws {
+        let s = try await status()
+        let hot = s.tools.map(\.temperature).max() ?? 0
+        guard hot >= FilamentMove.minimumNozzleTemperature else {
+            throw PrinterError.unsupported("Die Düse ist nur \(Int(hot)) °C warm. Zum Vorschieben oder Zurückziehen muss sie mindestens \(Int(FilamentMove.minimumNozzleTemperature)) °C haben – erst aufheizen.")
+        }
+    }
 }
 
 public enum PrinterDrivers {
@@ -116,6 +204,12 @@ public enum PrinterDrivers {
         case .anycubicLAN:
             #if canImport(Network)
             return AnycubicLANClient(connection: connection)
+            #else
+            return MoonrakerClient(connection: connection)
+            #endif
+        case .bambuLAN:
+            #if canImport(Network)
+            return BambuLANClient(connection: connection)
             #else
             return MoonrakerClient(connection: connection)
             #endif

@@ -7,6 +7,8 @@ import Network
 /// anycubic-lan, anycubic_ha_local and kobra-lan-cli.
 public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     public let connection: PrinterConnection
+    /// Switches sent with the next print start (set by the app from the print settings).
+    public var startOptions = PrintStartOptions()
 
     private let queue = DispatchQueue(label: "AnycubicLANClient")
     private let lock = NSLock()
@@ -15,7 +17,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     private var credentials: AnycubicHandshake.Credentials?
     private var connected = false
     private var connAck: CheckedContinuation<Void, Error>?
-    private var responseWaiters: [String: CheckedContinuation<Int, Error>] = [:]
+    private var responseWaiters: [String: CheckedContinuation<(code: Int, message: String), Error>] = [:]
     private var cachedStatus = PrinterStatus()
     private var infoReceived = false
     private var uploadURL: String?
@@ -24,6 +26,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     private var lastQuery = Date.distantPast
     private var pingTimer: DispatchSourceTimer?
     private var packetID: UInt16 = 1
+    private var rawReports: [String: Data] = [:]
 
     public init(connection: PrinterConnection) {
         self.connection = connection
@@ -125,7 +128,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
     }
 
     private func handleDisconnect(_ reason: String?, from conn: NWConnection) {
-        let (wasConnected, ack, waiters): (Bool, CheckedContinuation<Void, Error>?, [CheckedContinuation<Int, Error>]) = locked {
+        let (wasConnected, ack, waiters): (Bool, CheckedContinuation<Void, Error>?, [CheckedContinuation<(code: Int, message: String), Error>]) = locked {
             // A replaced connection reporting late must not tear down the current one.
             guard mqtt === conn else { return (false, nil, []) }
             let w = connected
@@ -205,8 +208,12 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         guard let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else { return }
         if topic.hasSuffix("/response") {
             if let msgid = json["msgid"] as? String {
-                let waiter: CheckedContinuation<Int, Error>? = locked { responseWaiters.removeValue(forKey: msgid) }
-                waiter?.resume(returning: Int(jsonNumber(json["code"]) ?? -1))
+                let waiter: CheckedContinuation<(code: Int, message: String), Error>? = locked { responseWaiters.removeValue(forKey: msgid) }
+                let code = Int(jsonNumber(json["code"]) ?? -1)
+                if code != 0 && code != 200 {
+                    log(.warning, "Antwort des Druckers: \(String(decoding: payload.prefix(600), as: UTF8.self))")
+                }
+                waiter?.resume(returning: (code, json["msg"] as? String ?? ""))
             }
             return
         }
@@ -215,6 +222,7 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         guard parts.count >= 2, parts.last == "report" else { return }
         let type = String(parts[parts.count - 2])
         let data = json["data"] as? [String: Any] ?? [:]
+        locked { rawReports[type] = payload }
         if let code = jsonNumber(json["code"]), code != 200, code != 0 {
             log(.error, "\(type): \(json["msg"] as? String ?? "Fehler") (Code \(Int(code)))")
         }
@@ -267,9 +275,18 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
 
     /// Publishes and waits for the printer's acknowledgement on /response.
     private func command(type: String, action: String, data: Any?, topic: String? = nil) async throws {
+        let answer = try await commandResult(type: type, action: action, data: data, topic: topic)
+        if answer.code != 0 && answer.code != 200 {
+            log(.error, "\(type)/\(action) abgelehnt (Code \(answer.code)\(answer.message.isEmpty ? "" : ": \(answer.message)"))")
+            throw PrinterError.http(answer.code, "Befehl \(action) abgelehnt\(answer.message.isEmpty ? "" : " (\(answer.message))")")
+        }
+    }
+
+    /// Like `command`, but hands back the printer's answer instead of throwing when it says no.
+    private func commandResult(type: String, action: String, data: Any?, topic: String? = nil) async throws -> (code: Int, message: String) {
         try await ensureConnected()
         let msgid = UUID().uuidString.lowercased()
-        let code: Int = try await withCheckedThrowingContinuation { cont in
+        let answer: (code: Int, message: String) = try await withCheckedThrowingContinuation { cont in
             locked { responseWaiters[msgid] = cont }
             let message: [String: Any] = ["type": type, "action": action, "timestamp": Int64(Date().timeIntervalSince1970 * 1000),
                                           "msgid": msgid, "data": data ?? NSNull()]
@@ -277,14 +294,37 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
                 send(MQTTCodec.publish(topic: t, payload: body))
             }
             queue.asyncAfter(deadline: .now() + 10) { [weak self] in
-                let waiter: CheckedContinuation<Int, Error>? = self?.locked { self?.responseWaiters.removeValue(forKey: msgid) }
+                let waiter: CheckedContinuation<(code: Int, message: String), Error>? = self?.locked { self?.responseWaiters.removeValue(forKey: msgid) }
                 waiter?.resume(throwing: PrinterError.unreachable("Keine Bestätigung vom Drucker"))
             }
         }
-        if code != 0 && code != 200 {
-            log(.error, "\(type)/\(action) abgelehnt (Code \(code))")
-            throw PrinterError.http(code, "Befehl \(action) abgelehnt")
+        return answer
+    }
+
+    /// After a start: true when the job is still there ~20 s later; false when the printer dropped it again (back to idle).
+    private func jobSurvives() async -> Bool {
+        var seenPrinting = false
+        for second in 0..<20 {
+            queryAll()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            let state = locked { cachedStatus.state }
+            if state == .printing || state == .paused { seenPrinting = true }
+            if [.standby, .error, .cancelled].contains(state), seenPrinting || second >= 10 { return false }
         }
+        return true
+    }
+
+    /// True when the printer really is working on `name` (it can answer a start command with an error code and still start).
+    private func startedPrinting(_ name: String) async -> Bool {
+        for _ in 0..<20 {
+            queryAll()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            let s = locked { cachedStatus }
+            let sameFile = s.fileName.map { $0.hasPrefix((name as NSString).deletingPathExtension) || name.hasPrefix(($0 as NSString).deletingPathExtension) } ?? false
+            let heating = (s.tools.first?.target ?? 0) > 0 || s.bed.target > 0
+            if s.state == .printing, sameFile || heating { return true }
+        }
+        return false
     }
 
     // MARK: - PrinterDriver
@@ -332,13 +372,47 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         }
         log(.info, "Datei \(name) hochgeladen (\(gcode.count / 1024) KB)")
         guard startPrint else { return }
+        // The printer writes the file to its storage after the upload; starting at once ends with "SD busy" (code 11535).
+        try await Task.sleep(nanoseconds: 5_000_000_000)
 
         let md5 = LANCrypto.md5([UInt8](gcode)).map { String(format: "%02x", $0) }.joined()
         let payload = AnycubicHandshake.startPayload(fileName: name, md5: md5, size: gcode.count, mapping: mapping,
                                                      msgID: UUID().uuidString.lowercased(),
-                                                     now: Int64(Date().timeIntervalSince1970 * 1000))
-        try await command(type: "print", action: "start", data: payload["data"], topic: slicerTopic("print"))
+                                                     now: Int64(Date().timeIntervalSince1970 * 1000), options: startOptions)
+        // Right after the upload the printer is still busy with the file (SD card write, preview) and may answer
+        // "SD busy" (code 11535). Wait and ask again a few times before giving up.
+        var attempt = 0
+        while true {
+            let answer = try await commandResult(type: "print", action: "start", data: payload["data"], topic: slicerTopic("print"))
+            var accepted = answer.code == 0 || answer.code == 200
+            if !accepted {
+                log(.warning, "print/start: Antwortcode \(answer.code)\(answer.message.isEmpty ? "" : " (\(answer.message))") – prüfe, ob der Druck trotzdem läuft")
+                accepted = await startedPrinting(name)
+            }
+            // The printer can accept the start, heat up and then drop the job again (SD still busy, filament problem).
+            // Starting again at once would repeat the filament loading and unloading, so that is not done blindly.
+            if accepted {
+                if await jobSurvives() { break }
+                log(.error, "Der Drucker hat den Auftrag nach dem Start wieder verworfen")
+                throw PrinterError.http(0, "Der Drucker hat den Auftrag nach dem Start wieder verworfen (Datei hochgeladen). Meist ist die Datei noch nicht fertig gespeichert (Code 11535 „SD busy“) oder das Filament lässt sich nicht einziehen. Meldung am Drucker-Display lesen, ggf. Filament prüfen, dann erneut „Drucken“ tippen.")
+            }
+            attempt += 1
+            let busy = Self.isBusyCode(answer.code, answer.message)
+            guard busy, attempt < 4 else {
+                log(.error, "print/start abgelehnt (Code \(answer.code))")
+                throw PrinterError.http(answer.code, busy
+                    ? "Der Drucker ist noch mit der Datei beschäftigt (SD-Karte, Code \(answer.code)). Kurz warten und „Drucken“ erneut tippen – die Datei ist hochgeladen."
+                    : "Der Drucker hat den Start abgelehnt\(answer.message.isEmpty ? "" : " (\(answer.message))"). Läuft noch ein anderer Auftrag oder ist einer pausiert?")
+            }
+            log(.info, "Drucker beschäftigt oder Auftrag verworfen – neuer Startversuch in 6 s (\(attempt)/3)")
+            try await Task.sleep(nanoseconds: 6_000_000_000)
+        }
         log(.info, "Druck von \(name) gestartet")
+    }
+
+    /// "SD busy" and similar: the printer is occupied with a file or another job and will accept the command later.
+    static func isBusyCode(_ code: Int, _ message: String) -> Bool {
+        code == 11535 || message.lowercased().contains("busy")
     }
 
     private func taskData() -> [String: Any] {
@@ -347,14 +421,69 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
 
     public func pause() async throws { try await command(type: "print", action: "pause", data: taskData()) }
     public func resume() async throws { try await command(type: "print", action: "resume", data: taskData()) }
-    public func cancel() async throws { try await command(type: "print", action: "stop", data: ["taskid": "-1"]) }
+    /// Stops the job. "stop" is the Kobra 3/S1 command; while a job is still starting the printer can refuse it, then the
+    /// older "cancel" is tried. Afterwards the status is checked, so the app never pretends something was stopped.
+    public func cancel() async throws {
+        try await ensureConnected()
+        let tasks = [taskData()["taskid"] as? String ?? "-1", "-1"].reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        var lastAnswer: (code: Int, message: String) = (-1, "")
+        for action in ["stop", "cancel"] {
+            for task in tasks {
+                lastAnswer = try await commandResult(type: "print", action: action, data: ["taskid": task])
+                if lastAnswer.code == 0 || lastAnswer.code == 200 {
+                    // Wait for the printer to leave the job.
+                    for _ in 0..<10 {
+                        queryAll()
+                        try await Task.sleep(nanoseconds: 800_000_000)
+                        let s = locked { cachedStatus }
+                        if s.isIdle || ![.printing, .paused].contains(s.state) { return }
+                    }
+                    log(.warning, "Abbrechen: Der Drucker hat den Befehl angenommen, arbeitet aber weiter")
+                }
+            }
+        }
+        log(.error, "Abbrechen abgelehnt (Code \(lastAnswer.code)\(lastAnswer.message.isEmpty ? "" : ": \(lastAnswer.message)"))")
+        let idle = locked { cachedStatus.isIdle }
+        throw PrinterError.http(lastAnswer.code, idle
+            ? "Es läuft kein Auftrag, der Drucker ist im Leerlauf – der Hinweis „Fehler“ ist nur das Ergebnis des letzten Drucks."
+            : "Der Drucker hat das Abbrechen nicht angenommen (Code \(lastAnswer.code)). Bitte am Drucker-Display abbrechen.")
+    }
 
     public func setBedTemperature(_ t: Int) async throws {
-        try await command(type: "print", action: "update", data: ["taskid": "-1", "settings": ["target_hotbed_temp": t]])
+        try await preheat(bed: t, nozzle: nil)
     }
 
     public func setToolTemperature(tool: Int, _ t: Int) async throws {
-        try await command(type: "print", action: "update", data: ["taskid": "-1", "settings": ["target_nozzle_temp": t]])
+        try await preheat(bed: nil, nozzle: t)
+    }
+
+    public func preheat(bed: Int, nozzle: Int) async throws {
+        try await preheat(bed: bed, nozzle: Optional(nozzle))
+    }
+
+    /// Both targets in one message, then a check that the printer really took them over. In LAN mode the Kobra only
+    /// accepts temperature changes as part of a job ("print/update"); when idle it can silently ignore them (the
+    /// community integrations report the same), so the app says so instead of pretending the nozzle heats.
+    private func preheat(bed: Int?, nozzle: Int?) async throws {
+        var settings: [String: Any] = [:]
+        if let bed { settings["target_hotbed_temp"] = bed }
+        if let nozzle { settings["target_nozzle_temp"] = nozzle }
+        try await command(type: "print", action: "update", data: ["taskid": "-1", "settings": settings])
+        for _ in 0..<6 {
+            queryAll()
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            let s = locked { cachedStatus }
+            let nozzleOK = nozzle.map { abs((s.tools.first?.target ?? 0) - Double($0)) < 1 } ?? true
+            let bedOK = bed.map { abs(s.bed.target - Double($0)) < 1 } ?? true
+            if nozzleOK && bedOK { return }
+        }
+        let s = locked { cachedStatus }
+        let nozzleMissing = nozzle.map { abs((s.tools.first?.target ?? 0) - Double($0)) >= 1 } ?? false
+        let bedMissing = bed.map { abs(s.bed.target - Double($0)) >= 1 } ?? false
+        log(.warning, "Temperatur nicht übernommen (Düse \(Int(s.tools.first?.target ?? 0)) °C, Bett \(Int(s.bed.target)) °C Ziel)")
+        if nozzleMissing || bedMissing {
+            throw PrinterError.http(0, (bedMissing ? "Bett" : "Düse") + " wurde vom Drucker nicht übernommen. Der Kobra S1 nimmt im LAN-Modus Temperaturen nur während eines Drucks an – ein Vorheizen im Leerlauf bietet Anycubic nicht an. Bitte am Drucker-Display vorheizen oder den Druck starten (er heizt dann selbst auf).")
+        }
     }
 
     public func setLight(_ on: Bool) async throws {
@@ -392,6 +521,38 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         case "pre_cancel_support": return "Abbruch vor Start"
         default: return key.replacingOccurrences(of: "_", with: " ")
         }
+    }
+
+    /// Starts the printer's camera so `cameraStreamURL` (FLV over HTTP) delivers video. Does not touch the print.
+    public func startCamera() async throws { try await command(type: "video", action: "startCapture", data: nil) }
+
+    /// Stops the camera again.
+    public func stopCamera() async throws { try await command(type: "video", action: "stopCapture", data: nil) }
+
+    /// Latest raw JSON report per message type (info, tempature, fan, light, …) – for diagnosing parser differences.
+    public func latestRawReports() -> [String: Data] { locked { rawReports } }
+
+    public var filamentControl: FilamentControlSupport {
+        FilamentControlSupport(loadSlot: true, unload: true, retract: true,
+                               note: "Laden, Zurückziehen und Entladen steuert das ACE Pro selbst. Der Befehl stammt aus einem Community-Projekt und ist noch nicht von Anycubic bestätigt: beim ersten Mal am Drucker zusehen. Von Hand Vorschieben mit heißer Düse geht im LAN-Modus nicht (die Düse heizt im Leerlauf nicht auf).")
+    }
+
+    /// ACE Pro "feedFilament": type 1 = load the slot to the nozzle, 2 = unload, 3 = pull back into the box.
+    private func feed(slot: Int, type: Int) async throws {
+        guard (0..<4).contains(slot) else { throw PrinterError.unsupported("Ungültiger Slot.") }
+        let s = try await status()
+        guard s.state != .printing && s.state != .paused else { throw PrinterError.unsupported("Während eines Drucks lässt sich das Filament nicht bewegen.") }
+        try await command(type: "multiColorBox", action: "feedFilament",
+                          data: ["multi_color_box": [["id": 0, "feed_status": ["slot_index": slot, "type": type]]]])
+        queryAll()
+    }
+
+    public func loadSlot(_ slot: Int) async throws { try await feed(slot: slot, type: 1) }
+    public func retractSlot(_ slot: Int) async throws { try await feed(slot: slot, type: 3) }
+    /// Unloads the slot that is currently loaded (the box reports it), slot 1 if nothing is known.
+    public func unloadFilament() async throws {
+        let active = locked { cachedStatus.filamentBox?.activeSlot } ?? 0
+        try await feed(slot: active, type: 2)
     }
 
     public func recentEvents() async throws -> [PrinterEvent] {

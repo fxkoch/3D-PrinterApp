@@ -117,9 +117,22 @@ struct AdvancedSettingsView: View {
                 }
                 if settings.printer == .snapmakerU1 {
                     toggle(.enableTimelapse, $settings.enableTimelapse)
-                    toggle(.enableBedLeveling, $settings.enableBedLeveling)
+                }
+                toggle(.enableBedLeveling, $settings.enableBedLeveling)
+                if settings.printer == .kobraS1 {
+                    toggle(.startVibrationCompensation, $settings.startVibrationCompensation)
+                    toggle(.startFlowCalibration, $settings.startFlowCalibration)
                 }
                 LabeledContent("Bauraum", value: "\(Int(settings.bedSize)) × \(Int(settings.bedSize)) × \(Int(settings.maxHeight)) mm")
+            }
+            Section {
+                NavigationLink {
+                    SlicerOptionsView(settings: $settings)
+                } label: {
+                    LabeledContent("Alle Slicer-Einstellungen", value: settings.extraOptions.isEmpty ? "" : "\(settings.extraOptions.count) geändert")
+                }
+            } footer: {
+                Text("Die komplette Einstellungsliste von \(SlicerOptionAdvisor.slicerName(settings.printer)) – mit Erklärung und Empfehlung für \(settings.printer.displayName) und dein Material.")
             }
             Section {
                 Button("Auf Standard zurücksetzen", role: .destructive) {

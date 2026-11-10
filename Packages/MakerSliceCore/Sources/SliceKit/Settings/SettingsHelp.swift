@@ -37,7 +37,7 @@ public enum SettingKey: String, CaseIterable, Sendable {
     case primeTower, primeTowerWidth
     case zHop, retractSpeed, retractMinTravel
     case spiralVase, fuzzySkin, fuzzySkinThickness, fuzzySkinPointDistance
-    case plateType, enableTimelapse, enableBedLeveling
+    case plateType, enableTimelapse, enableBedLeveling, startVibrationCompensation, startFlowCalibration
     // Filament
     case nozzleTemp, firstLayerNozzleTemp, bedTemp, firstLayerBedTemp, smoothPlateBedTemp
     case fanSpeed, overhangFanSpeed, fanOffLayers, filamentMinLayerTime
@@ -287,14 +287,24 @@ public enum SettingsHelp {
         // MARK: Machine
         .plateType: SettingHelp(
             "Druckplatte", "Bestimmt die Betttemperatur je Filament.",
-            tip: "Strukturiertes PEI: universell, PETG löst sich gut. Glattes PEI: glänzende Unterseite, PETG kann die Beschichtung beschädigen."),
+            tip: "Strukturiertes PEI: universell, PETG löst sich gut. Glattes PEI: glänzende Unterseite, PETG kann die Beschichtung beschädigen. Cool Plate: PLA bei niedriger Temperatur, löst sich leicht. Engineering Plate: für ABS, ASA, PC und Nylon, mit Klebestift. Die Z-Offset-Einstellung des Druckers bleibt unverändert."),
         .enableTimelapse: SettingHelp(
             "Zeitraffer", "Der U1 nimmt pro Schicht ein Kamerabild auf.",
             decrease: "Spart wenige Sekunden pro Schicht."),
         .enableBedLeveling: SettingHelp(
-            "Automatisches Bett-Leveling", "Der U1 vermisst vor dem Druck das Bett im Bereich des Modells.",
-            increase: "Perfekte erste Schicht.",
-            decrease: "Startet ca. 1–2 Minuten schneller; nur ausschalten, wenn kürzlich gelevelt wurde."),
+            "Bett-Nivellierung vor dem Druck", "Der Drucker vermisst vor dem Druck das Bett. U1 und P1S messen nur im Bereich des Modells, der Kobra S1 misst selbst (die App kann nur an oder aus sagen).",
+            increase: "Perfekte erste Schicht, auch wenn sich etwas verstellt hat.",
+            decrease: "Startet 2–5 Minuten schneller; nur ausschalten, wenn kürzlich nivelliert wurde und Platte und Betttemperatur gleich sind.",
+            tip: "Nach einem Plattenwechsel oder wenn die erste Schicht nicht haftet: wieder einschalten."),
+        .startVibrationCompensation: SettingHelp(
+            "Vibrationskompensation (Kobra S1)", "Der Drucker misst vor dem Druck die Eigenschwingung der Achsen und gleicht Ringe (Ghosting) hinter Ecken aus.",
+            increase: "Glattere Oberflächen bei hohem Tempo.",
+            decrease: "Spart einige Minuten; ohne bleiben die zuletzt gemessenen Werte aktiv.",
+            tip: "Nur nach Umbauten oder einmal im Monat nötig."),
+        .startFlowCalibration: SettingHelp(
+            "Flusskalibrierung (Kobra S1)", "Der Drucker prüft vor dem Druck, ob die Filamentmenge stimmt.",
+            increase: "Gleichmäßigere Linien bei neuem Filament.",
+            decrease: "Spart Zeit und etwas Filament; mit dem Flusstest der App und gespeichertem Wert ist sie meist unnötig."),
 
         // MARK: Filament
         .nozzleTemp: SettingHelp(
