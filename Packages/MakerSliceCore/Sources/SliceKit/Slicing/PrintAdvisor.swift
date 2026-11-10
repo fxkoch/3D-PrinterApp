@@ -21,6 +21,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case retraction(slot: Int, length: Double)
         case elephantFoot(Double)
         case supportTopZ(Double)
+        case supportDistances(z: Double, xy: Double)
+        case outerWallSpeed(Double)
         case spiralVase(Bool)
         case leveling(Bool)
     }
@@ -196,6 +198,23 @@ public enum PrintAdvisor {
             }
         }
 
+        // Support from PETG sticks to itself: more distance keeps it from welding to the part (0.28–0.30 mm Z, 0.6 mm XY).
+        if s.support != .off, materials.contains(where: { $0.type.hasPrefix("PETG") }),
+           s.supportTopZDistance < 0.28 || s.supportXYDistance < 0.6 {
+            result.append(Recommendation(
+                id: "support-petg", title: "PETG-Stützen: mehr Abstand",
+                detail: "PETG verschweißt mit sich selbst. Mit 0,28 mm Abstand oben und 0,6 mm zur Seite lassen sich die Stützen sauber abbrechen und die Unterseite bleibt glatt.",
+                icon: "building.columns", severity: .suggestion,
+                action: .supportDistances(z: max(0.28, s.supportTopZDistance), xy: max(0.6, s.supportXYDistance))))
+        }
+        // Clean surface on fine prints: a fast outer wall shows ringing and wobble; 100 mm/s (inner walls stay fast).
+        if s.layerHeight <= 0.16, s.outerWallSpeed > 120, !s.spiralVase {
+            result.append(Recommendation(
+                id: "surface-speed", title: "Glattere Außenwand",
+                detail: String(format: "Bei feinen Schichten zeigt eine schnelle Außenwand Wellen und Ringe. Mit %.0f mm/s außen (innen darf es schnell bleiben) wird die sichtbare Fläche sauberer. Das kostet nur wenig Zeit.", 100),
+                icon: "sparkles", severity: .suggestion, action: .outerWallSpeed(100)))
+        }
+
         // Ironing for flat tops.
         let flatTop = analyses.map(\.flatTopArea).reduce(0, +)
         if flatTop > 400, !s.ironing, !materials.contains(where: \.isFlexible) {
@@ -313,6 +332,8 @@ public enum PrintAdvisor {
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
         case .elephantFoot(let value): s.elephantFootCompensation = value
         case .supportTopZ(let value): s.supportTopZDistance = value
+        case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
+        case .outerWallSpeed(let v): s.outerWallSpeed = v
         case .spiralVase(let on): s.spiralVase = on
         case .useLoadedFilament(let slot, let type):
             if slot < s.filaments.count, var f = FilamentLibrary.bestMatch(type: type, printer: s.printer) {

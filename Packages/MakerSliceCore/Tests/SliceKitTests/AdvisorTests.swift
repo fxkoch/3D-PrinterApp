@@ -78,4 +78,26 @@ final class AdvisorTests: XCTestCase {
         try PrintAdvisor.apply(gap.action!, settings: &s, objects: &objects)
         XCTAssertEqual(s.elephantFootCompensation, 0)
     }
+
+    func testSurfaceAndPETGSupportTips() throws {
+        let t = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "T", mesh: Fixtures.tShape())], bedSize: 270))
+        var s = PrintSettings()
+        s.layerHeight = 0.12
+        s.outerWallSpeed = 200
+        var objects = t
+        var recs = PrintAdvisor.recommendations(objects: t, settings: s)
+        let speed = try XCTUnwrap(recs.first { $0.id == "surface-speed" })
+        try PrintAdvisor.apply(speed.action!, settings: &s, objects: &objects)
+        XCTAssertEqual(s.outerWallSpeed, 100)
+        s.layerHeight = 0.2
+        recs = PrintAdvisor.recommendations(objects: t, settings: s)
+        XCTAssertNil(recs.first { $0.id == "surface-speed" }, "not asked for normal layers")
+        s.support = .buildPlateOnly
+        s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
+        recs = PrintAdvisor.recommendations(objects: t, settings: s)
+        let petg = try XCTUnwrap(recs.first { $0.id == "support-petg" })
+        try PrintAdvisor.apply(petg.action!, settings: &s, objects: &objects)
+        XCTAssertEqual(s.supportTopZDistance, 0.28, accuracy: 1e-9)
+        XCTAssertEqual(s.supportXYDistance, 0.6, accuracy: 1e-9)
+    }
 }
