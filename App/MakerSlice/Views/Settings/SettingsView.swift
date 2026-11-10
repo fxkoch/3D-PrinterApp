@@ -1,3 +1,4 @@
+import ClaudeKit
 import SliceKit
 import PrinterKit
 import SwiftUI
@@ -17,6 +18,17 @@ struct SettingsView: View {
                 }
                 NotificationSettingsSection()
                 if app.expertMode {
+                Section {
+                    NavigationLink {
+                        ClaudeSetupView()
+                    } label: {
+                        LabeledContent("Claude-Assistent", value: app.assistant.isConfigured ? app.assistant.config.model.displayName : "Aus")
+                    }
+                } header: {
+                    Text("KI-Assistent")
+                } footer: {
+                    Text("Claude sieht deine Drucker und Projekte live und gestaltet mit – Druckerbefehle nur nach deiner Bestätigung.")
+                }
                 Section {
                     NavigationLink {
                         CloudSetupView()

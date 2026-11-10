@@ -10,7 +10,7 @@ struct PrinterRef: Identifiable, Equatable {
 }
 
 enum AppTab: Hashable {
-    case discover, library, printers, settings
+    case discover, library, printers, assistant, settings
 }
 
 @MainActor
@@ -21,6 +21,8 @@ final class AppModel {
     let log = EventLog()
     /// Kept for the app's lifetime so the MakerWorld page and login survive tab switches.
     let browser = MakerWorldBrowser()
+    /// Chat with Claude, which reads and changes the app through `AssistantHost`.
+    let assistant = AssistantSession()
 
     var tab: AppTab = .discover
     /// Printer whose filament check is shown (after tapping a filament notification).
@@ -92,6 +94,7 @@ final class AppModel {
         if ProcessInfo.processInfo.arguments.contains("-uiTestSampleModel") || ProcessInfo.processInfo.arguments.contains("-uiTestProfileModel") || ProcessInfo.processInfo.arguments.contains("-uiTestPlates") || ProcessInfo.processInfo.arguments.contains("-uiTestMultiColorModel") {
             loadSample()
         }
+        assistant.attach(self)
     }
 
     // MARK: - Calibration

@@ -55,6 +55,9 @@ struct RootView: View {
                 .tabItem { Label("Drucker", systemImage: "printer") }
                 .tag(AppTab.printers)
                 .badge(model.log.errorCount > 0 ? Text("!") : nil)
+            AssistantView()
+                .tabItem { Label("Claude", systemImage: "sparkles") }
+                .tag(AppTab.assistant)
             SettingsView()
                 .tabItem { Label("Einstellungen", systemImage: "gearshape") }
                 .tag(AppTab.settings)
