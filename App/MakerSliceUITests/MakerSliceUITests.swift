@@ -54,13 +54,16 @@ final class MakerSliceUITests: XCTestCase {
             expert.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
         }
         sleep(1)
+        let after = expert.value as? String
         snapshot("49-Expertenmodus-an")
         // Expert mode adds several sections (assistant, cloud slicing, …) above the defaults: the form only
-        // builds rows that are on screen, so scroll down until the section exists.
-        let defaults = app.staticTexts["Standard-Einstellungen"]
+        // builds rows that are on screen, so scroll down until the section exists. Section headers may be
+        // reported in capitals, so compare without case.
+        let defaults = app.staticTexts.matching(NSPredicate(format: "label ==[c] 'Standard-Einstellungen'")).firstMatch
         for _ in 0..<6 where !defaults.exists { app.swipeUp(); sleep(1) }
+        snapshot("49b-Standard-Einstellungen")
         XCTAssertTrue(defaults.waitForExistence(timeout: 5),
-                      "expert mode should reveal the default settings (switch was \(before ?? "nil"), is \(expert.value as? String ?? "nil"))")
+                      "expert mode should reveal the default settings (switch was \(before ?? "nil"), is \(after ?? "nil"))")
         for (i, model) in ["Snapmaker U1", "Anycubic Kobra S1"].enumerated() {
             let row = app.staticTexts[model].firstMatch
             for _ in 0..<4 { app.swipeDown() }
