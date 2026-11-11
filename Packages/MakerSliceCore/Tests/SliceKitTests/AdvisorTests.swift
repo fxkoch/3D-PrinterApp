@@ -126,6 +126,26 @@ final class AdvisorTests: XCTestCase {
         XCTAssertTrue(kobra.contains { $0.id == "kobra-spaghetti" })
     }
 
+    /// With a brim the advisor must not ask for elephant-foot compensation and then for removing it again.
+    func testElephantFootAndBrimTipsDoNotAlternate() throws {
+        var objs = [ModelObject(name: "A", mesh: Fixtures.box(8, 8, 40))]
+        var s = PrintSettings(printer: .snapmakerU1)
+        s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
+        s.elephantFootCompensation = 0
+        s.brimWidth = 0
+        XCTAssertTrue(ids(PrintAdvisor.recommendations(objects: objs, settings: s)).contains("petg-foot"))
+        s.brimWidth = 10
+        for _ in 0..<3 {
+            let recs = PrintAdvisor.recommendations(objects: objs, settings: s)
+            XCTAssertFalse(ids(recs).contains("petg-foot"))
+            guard let gap = recs.first(where: { $0.id == "brim-gap" }) else { break }
+            try PrintAdvisor.apply(gap.action!, settings: &s, objects: &objs)
+        }
+        let recs = ids(PrintAdvisor.recommendations(objects: objs, settings: s))
+        XCTAssertFalse(recs.contains("brim-gap")); XCTAssertFalse(recs.contains("petg-foot"))
+        XCTAssertEqual(s.elephantFootCompensation, 0)
+    }
+
     func testIroningIsOnlyAHintForPETG() throws {
         let cube = [ModelObject(name: "A", mesh: Fixtures.box(40, 40, 10))]
         var s = PrintSettings(printer: .snapmakerU1)

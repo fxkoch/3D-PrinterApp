@@ -472,7 +472,8 @@ public enum PrintAdvisor {
                 id: "petg-tips", title: "PETG: Fäden vermeiden",
                 detail: "Bei Fäden die Düse in 5-°C-Schritten kühler stellen (230–240 °C), Rückzug 0,8–2 mm, Lüfter 30–50 %. Stützen mit 0,25 mm Abstand – PETG klebt sonst fest.",
                 icon: "scribble", severity: .info))
-            if s.elephantFootCompensation < 0.15 {
+            // Not with a brim: there the compensation opens a gap between brim and part (see "brim-gap"), the two tips would alternate.
+            if s.elephantFootCompensation < 0.15, s.brimWidth == 0 {
                 result.append(Recommendation(
                     id: "petg-foot", title: "Elefantenfuß ausgleichen",
                     detail: "PETG läuft auf der heißen ersten Schicht breiter. 0,2 mm Ausgleich hält die Unterkante maßhaltig.",
@@ -481,7 +482,7 @@ public enum PrintAdvisor {
         }
 
         // Connectors need an accurate first layer.
-        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1 {
+        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1, s.brimWidth == 0 {
             result.append(Recommendation(
                 id: "connector-foot", title: "Passgenaue Steckverbindungen",
                 detail: "Geteilte Teile mit Zapfen/Dübeln passen nur, wenn die erste Schicht nicht ausbeult. Elefantenfuß-Ausgleich auf 0,15 mm setzen.",
