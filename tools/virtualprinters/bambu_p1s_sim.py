@@ -5,7 +5,7 @@ What a real printer offers in LAN mode (OpenBambuAPI, bambulabs_api, ha-bambulab
 
   * MQTT 3.1.1 over TLS  user "bblp", password = access code
       subscribe  device/<serial>/report      request  device/<serial>/request
-      pushall / get_version / project_file / pause / resume / stop / gcode_line / ledctrl
+      pushall / get_version / project_file / pause / resume / stop / print_speed / gcode_line / ledctrl
   * FTPS implicit (TLS from the first byte), passive mode, protected data channel; files land in the root folder
 
 The print is simulated (progress, layers, temperatures move over time; pause/resume/stop work). An uploaded
@@ -48,6 +48,7 @@ class Printer:
         self.nozzle, self.bed = 25.0, 25.0
         self.nozzle_target, self.bed_target = 0.0, 0.0
         self.light = True
+        self.spd_lvl = 2
         self.error = 0
         self.tray_now = 0
         self.received: list[dict] = []
@@ -72,7 +73,7 @@ class Printer:
             "nozzle_temper": round(self.nozzle, 1), "nozzle_target_temper": self.nozzle_target,
             "bed_temper": round(self.bed, 1), "bed_target_temper": self.bed_target,
             "chamber_temper": 31.0, "cooling_fan_speed": "15" if self.state == "RUNNING" else "0", "big_fan1_speed": "8",
-            "spd_lvl": 2, "print_error": self.error, "gcode_file": self.file, "subtask_name": self.file,
+            "spd_lvl": self.spd_lvl, "print_error": self.error, "gcode_file": self.file, "subtask_name": self.file,
             "lights_report": [{"node": "chamber_light", "mode": "on" if self.light else "off"}],
         }
         if full:
@@ -119,6 +120,8 @@ class Printer:
                     return self.ack(cmd, seq, False, "printing")
                 self.tray_now = int(p.get("target", 255))
                 self.ack(cmd, seq)
+            elif cmd == "print_speed":
+                self.spd_lvl = int(p.get("param", 2)); self.ack(cmd, seq)
             elif cmd == "gcode_line":
                 line = str(p.get("param", ""))
                 for token in line.split():

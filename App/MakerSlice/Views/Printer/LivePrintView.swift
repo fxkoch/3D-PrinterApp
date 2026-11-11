@@ -18,6 +18,7 @@ struct LivePrintView: View {
                     cameraPanel
                     if let status {
                         phasePanel(status)
+                        SpeedPanel(printer: printer, status: status)
                         statsPanel(status)
                     } else {
                         ProgressView("Verbinde …").padding(.top, 30)
@@ -128,13 +129,72 @@ struct LivePrintView: View {
                 Metric(value: "\(Int(s.bed.temperature))° / \(Int(s.bed.target))°", caption: "Bett", systemImage: "square.fill")
                 if let fan = s.fanPercent { Metric(value: "\(Int(fan)) %", caption: "Lüfter", systemImage: "fan") }
                 if let mode = s.speedMode {
-                    Metric(value: ["", "Leise", "Standard", "Sport"][min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+                    Metric(value: SpeedControl.modeNames[min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+                } else if let percent = s.speedPercent {
+                    Metric(value: "\(Int(percent)) %", caption: "Tempo", systemImage: "speedometer")
                 }
                 if let slot = s.filamentBox?.activeSlot ?? s.activeTool, s.filaments.indices.contains(slot) {
                     let f = s.filaments[slot]
                     Metric(value: "\(slot + 1): \(f.type ?? "?")", caption: "Filament", systemImage: "circle.hexagongrid")
                 }
             }
+        }
+    }
+}
+
+/// Changes the speed of the running print: fixed levels (Kobra, Bambu) or a percentage of the sliced speed (Klipper).
+struct SpeedPanel: View {
+    @Environment(AppModel.self) private var app
+    let printer: PrinterConnection
+    let status: PrinterStatus
+    @State private var busy = false
+
+    private var control: SpeedControl { app.printers.driver(for: printer).speedControl }
+
+    var body: some View {
+        if control != .none, status.state == .printing || status.state == .paused {
+            Panel(title: "Tempo", systemImage: "speedometer") {
+                switch control {
+                case .modes:
+                    Picker("Tempo", selection: Binding(get: { status.speedMode ?? 2 }, set: { mode in
+                        run("Tempo \(SpeedControl.modeNames[mode])") { try await $0.setSpeedMode(mode) }
+                    })) {
+                        ForEach(1...3, id: \.self) { Text(SpeedControl.modeNames[$0]).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("speedMode")
+                    Text("Leise druckt langsamer und mit weniger Lärm, der Druck dauert länger.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                case .percent:
+                    let current = Int(status.speedPercent ?? 100)
+                    HStack {
+                        ForEach(SpeedControl.percentPresets, id: \.percent) { preset in
+                            Button(preset.name) { set(preset.percent) }
+                                .buttonStyle(.bordered)
+                                .tint(current == preset.percent ? .accentColor : .secondary)
+                        }
+                    }
+                    .accessibilityIdentifier("speedPresets")
+                    Stepper(value: Binding(get: { current }, set: { set($0) }), in: SpeedControl.percentRange, step: 10) {
+                        Text("\(current) % der geplanten Geschwindigkeit")
+                    }
+                    Text("Leise ist halbes Tempo: ruhigere Bewegungen, der Druck dauert etwa doppelt so lang. Lüfter bleiben unverändert.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                case .none:
+                    EmptyView()
+                }
+            }
+            .disabled(busy)
+        }
+    }
+
+    private func set(_ percent: Int) { run("Tempo \(percent) %") { try await $0.setSpeedPercent(percent) } }
+
+    private func run(_ name: String, _ action: @escaping (PrinterDriver) async throws -> Void) {
+        busy = true
+        Task {
+            await app.printers.perform(on: printer, name, action)
+            busy = false
         }
     }
 }

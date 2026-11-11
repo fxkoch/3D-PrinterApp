@@ -141,6 +141,7 @@ class Printer:
         self.bed = [23.0, 0.0]
         self.light = True
         self.fan = 0
+        self.speed_mode = 2
         self.dry = {"status": 0, "target_temp": 0, "duration": 0, "remain_time": 0}
         self.slots = [
             {"index": 0, "type": "PLA", "color": [245, 245, 240], "sku": "HPLW", "status": 5},
@@ -175,13 +176,13 @@ class Printer:
         return {"taskid": t["taskid"], "filename": t["filename"], "progress": int(progress),
                 "curr_layer": layer, "total_layers": t["layers"], "print_time": int(t["elapsed"] / 60),
                 "remain_time": int(max(0, t["duration"] - t["elapsed"]) / 60), "state": self.state,
-                "pause": 1 if self.state == "paused" else 0, "print_speed_mode": 2}
+                "pause": 1 if self.state == "paused" else 0, "print_speed_mode": self.speed_mode}
 
     def info(self) -> dict:
         data = {
             "printerName": "Kobra S1 (virtuell)", "model": "Anycubic Kobra S1", "version": "2.5.8.3-sim",
             "state": "busy" if self.state in ("printing", "paused") else "free", "temp": self.temps(),
-            "fan_speed_pct": self.fan, "aux_fan_speed_pct": 0, "print_speed_mode": 2,
+            "fan_speed_pct": self.fan, "aux_fan_speed_pct": 0, "print_speed_mode": self.speed_mode,
             "urls": {"fileUploadurl": f"http://{self.host}:18910/gcode_upload?s={self.upload_secret}",
                      "rtspUrl": f"http://{self.host}:18088/flv"},
             "features": {"auto_leveling_support": 1, "drying_first_support": 1, "camera_timelapse_support": 1,
@@ -282,6 +283,8 @@ class Printer:
                 self.nozzle[1] = float(settings["target_nozzle_temp"])
             if "target_hotbed_temp" in settings:
                 self.bed[1] = float(settings["target_hotbed_temp"])
+            if "print_speed_mode" in settings:
+                self.speed_mode = int(settings["print_speed_mode"])
             self.report("tempature", self.temps())
         else:
             return 10001

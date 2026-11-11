@@ -372,10 +372,13 @@ struct PrinterDetailView: View {
                     if let fan = s.fanPercent { Metric(value: "\(Int(fan)) %", caption: "Bauteillüfter", systemImage: "fan") }
                     if let aux = s.auxFanPercent { Metric(value: "\(Int(aux)) %", caption: "Zusatzlüfter", systemImage: "wind") }
                     if let mode = s.speedMode {
-                        Metric(value: ["", "Leise", "Standard", "Sport"][min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+                        Metric(value: SpeedControl.modeNames[min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+                    } else if let percent = s.speedPercent {
+                        Metric(value: "\(Int(percent)) %", caption: "Tempo", systemImage: "speedometer")
                     }
                 }
             }
+            SpeedPanel(printer: printer, status: s)
             Toggle(isOn: Binding(get: { s.lightOn ?? false }, set: { on in
                 Task { await app.printers.perform(on: printer, on ? "Licht an" : "Licht aus") { try await $0.setLight(on) } }
             })) {

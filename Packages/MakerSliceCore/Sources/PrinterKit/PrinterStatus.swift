@@ -112,6 +112,8 @@ public struct PrinterStatus: Sendable, Equatable {
     public var auxFanPercent: Double?
     /// 1 silent, 2 standard, 3 sport (Anycubic).
     public var speedMode: Int?
+    /// Speed in percent of the sliced speed (Klipper speed factor).
+    public var speedPercent: Double?
     public var lightOn: Bool?
     public var filamentBox: FilamentBox?
     /// Set when the multiACE add-on runs on the printer.
@@ -137,7 +139,7 @@ public struct PrinterStatus: Sendable, Equatable {
     /// Object names to request from Klipper.
     public static let queryObjects = [
         "print_stats", "virtual_sdcard", "display_status", "heater_bed",
-        "extruder", "extruder1", "extruder2", "extruder3", "toolhead", "print_task_config", "ace", "purifier",
+        "extruder", "extruder1", "extruder2", "extruder3", "toolhead", "gcode_move", "print_task_config", "ace", "purifier",
     ]
 
     /// Parses the `status` dictionary of `/printer/objects/query`.
@@ -166,6 +168,7 @@ public struct PrinterStatus: Sendable, Equatable {
             tools[i] = Heater(temperature: number(e["temperature"]) ?? tools[i].temperature,
                               target: number(e["target"]) ?? tools[i].target)
         }
+        if let gm = status["gcode_move"] as? [String: Any], let f = number(gm["speed_factor"]) { speedPercent = (f * 100).rounded() }
         if let th = status["toolhead"] as? [String: Any] {
             if let ext = th["extruder"] as? String {
                 activeTool = ext == "extruder" ? 0 : Int(ext.dropFirst("extruder".count))
