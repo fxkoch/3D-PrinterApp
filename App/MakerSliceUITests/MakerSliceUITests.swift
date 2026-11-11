@@ -55,7 +55,11 @@ final class MakerSliceUITests: XCTestCase {
         }
         sleep(1)
         snapshot("49-Expertenmodus-an")
-        XCTAssertTrue(app.staticTexts["Standard-Einstellungen"].waitForExistence(timeout: 5),
+        // Expert mode adds several sections (assistant, cloud slicing, …) above the defaults: the form only
+        // builds rows that are on screen, so scroll down until the section exists.
+        let defaults = app.staticTexts["Standard-Einstellungen"]
+        for _ in 0..<6 where !defaults.exists { app.swipeUp(); sleep(1) }
+        XCTAssertTrue(defaults.waitForExistence(timeout: 5),
                       "expert mode should reveal the default settings (switch was \(before ?? "nil"), is \(expert.value as? String ?? "nil"))")
         for (i, model) in ["Snapmaker U1", "Anycubic Kobra S1"].enumerated() {
             let row = app.staticTexts[model].firstMatch
@@ -323,9 +327,12 @@ final class MakerSliceUITests: XCTestCase {
         app.launchArguments += ["-uiTestPhotoShape"]
         app.launch()
         app.tabBars.buttons["Bibliothek"].tap()
+        XCTAssertTrue(app.navigationBars["Bibliothek"].waitForExistence(timeout: 10))
         let add = app.buttons["libraryAdd"]
         XCTAssertTrue(add.waitForExistence(timeout: 10))
-        add.tap()
+        // The menu in the navigation bar is not reported as hittable, and the plain tap then fails while
+        // trying to scroll it into view: tap its centre instead.
+        add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let entry = app.buttons["libraryPhotoShape"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         entry.tap()
