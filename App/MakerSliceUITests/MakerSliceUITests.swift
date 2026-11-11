@@ -55,12 +55,17 @@ final class MakerSliceUITests: XCTestCase {
         }
         sleep(1)
         snapshot("49-Expertenmodus-an")
+        let after = expert.value as? String   // read now: the switch leaves the screen while scrolling
         // Expert mode adds several sections (assistant, cloud slicing, …) above the defaults: the form only
-        // builds rows that are on screen, so scroll down until the section exists.
+        // builds rows that are on screen, so scroll down until the section exists. Short drags instead of swipes:
+        // a full swipe can jump past the short section in one go, and then it no longer exists either.
         let defaults = app.staticTexts["Standard-Einstellungen"]
-        for _ in 0..<6 where !defaults.exists { app.swipeUp(); sleep(1) }
+        for _ in 0..<16 where !defaults.exists {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+        }
         XCTAssertTrue(defaults.waitForExistence(timeout: 5),
-                      "expert mode should reveal the default settings (switch was \(before ?? "nil"), is \(expert.value as? String ?? "nil"))")
+                      "expert mode should reveal the default settings (switch was \(before ?? "nil"), is \(after ?? "nil"))")
         for (i, model) in ["Snapmaker U1", "Anycubic Kobra S1"].enumerated() {
             let row = app.staticTexts[model].firstMatch
             for _ in 0..<4 { app.swipeDown() }
