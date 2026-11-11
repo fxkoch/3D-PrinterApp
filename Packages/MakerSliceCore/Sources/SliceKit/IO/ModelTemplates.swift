@@ -26,10 +26,10 @@ public enum ModelTemplates {
     public static let all: [ModelTemplate] = [
         ModelTemplate(id: "zwiebelspender_modul", name: "Zwiebelspender – Modul",
                       note: "Schacht mit Zunge, 100 × 182 × 240 mm. Stützen „Überall“ für den Bogen der Öffnung.",
-                      wallLoops: 3, infillDensity: 0.15, needsSupport: true),
+                      wallLoops: 2, infillDensity: 0.15, needsSupport: true),
         ModelTemplate(id: "zwiebelspender_deckel", name: "Zwiebelspender – Deckel mit Schale",
                       note: "Geschlossene Schale, z. B. für Knoblauch. Druckt ohne Stützen.",
-                      wallLoops: 3, infillDensity: 0.15, needsSupport: false),
+                      wallLoops: 2, infillDensity: 0.15, needsSupport: false),
         ModelTemplate(id: "zwiebelspender_fuesse", name: "Zwiebelspender – Füße (4 Stück)",
                       note: "Unter das Modul kleben: so kommt Luft von unten durch den Rost.",
                       wallLoops: 2, infillDensity: 0.15, needsSupport: false),
