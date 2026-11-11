@@ -284,7 +284,7 @@ public enum PrintAdvisor {
         }
 
         // Multi-material on the Kobra.
-        if usedTools.count > 1, s.machine.multiMaterial == .filamentSwitcher, !s.primeTower {
+        if usedTools.count > 1, s.machine.multiMaterial == .filamentSwitcher, !s.usesPrimeTower {
             result.append(Recommendation(
                 id: "tower", title: "Reinigungsturm einschalten",
                 detail: "Beim Farbwechsel über die ACE bleibt Restmaterial in der Düse. Der Turm verhindert vermischte Farben am Modell.",
@@ -294,7 +294,7 @@ public enum PrintAdvisor {
         // Snapmaker U1 forum: the tower stays on (without it: strings and blobs), but a narrow tower with a small purge volume
         // saves most of the waste ("minimal purge" 10–15 mm³ instead of 60).
         if usedTools.count > 1, s.printer == .snapmakerU1 {
-            if !s.primeTower {
+            if !s.usesPrimeTower {
                 result.append(Recommendation(
                     id: "u1-tower", title: "Reinigungsturm nicht ganz weglassen",
                     detail: "Beim U1 hat jeder Farbe einen eigenen Druckkopf, der Turm ist klein. Ohne ihn berichten Nutzer im Snapmaker-Forum von Fäden und Klümpchen am Modell.",
@@ -375,7 +375,7 @@ public enum PrintAdvisor {
             if let q = PrintSettings.Quality.allCases.first(where: { $0.layerHeight == h }) { s.apply(q) } else { s.layerHeight = h }
         case .walls(let n): s.wallLoops = n
         case .plate(let p): s.plateType = p
-        case .primeTower(let on): s.primeTower = on
+        case .primeTower(let on): s.primeTower = on; s.primeTowerAuto = on
         case .leveling(let on): s.enableBedLeveling = on
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }

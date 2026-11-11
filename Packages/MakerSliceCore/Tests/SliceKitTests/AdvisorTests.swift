@@ -51,7 +51,7 @@ final class AdvisorTests: XCTestCase {
 
     func testMultiColorKobraWithoutTowerWarns() throws {
         var s = PrintSettings(printer: .kobraS1)
-        s.primeTower = false
+        s.primeTower = false; s.primeTowerAuto = false
         let objs = try XCTUnwrap(PlateArranger.arrange([
             ModelObject(name: "A", mesh: Fixtures.box(20, 20, 5), tool: 0),
             ModelObject(name: "B", mesh: Fixtures.box(20, 20, 5), tool: 1),
@@ -113,7 +113,7 @@ final class AdvisorTests: XCTestCase {
         try PrintAdvisor.apply(waste.action!, settings: &s, objects: &o)
         XCTAssertEqual(s.primeTowerWidth, 25)
         XCTAssertEqual(s.purgeVolume, 15)
-        s.primeTower = false
+        s.primeTower = false; s.primeTowerAuto = false
         recs = PrintAdvisor.recommendations(objects: objs, settings: s)
         XCTAssertEqual(recs.first { $0.id == "u1-tower" }?.action, .primeTower(true))
         s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))

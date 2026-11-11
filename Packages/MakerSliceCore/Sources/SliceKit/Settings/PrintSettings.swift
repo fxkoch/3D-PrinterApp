@@ -178,6 +178,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     // Multi-material
     /// Purge tower for single-nozzle multi-material (Kobra S1 + ACE).
     public var primeTower: Bool = false
+    /// Builds the tower automatically as soon as a print uses more than one filament (switch off via the tower toggle).
+    public var primeTowerAuto: Bool = true
+    public var usesPrimeTower: Bool { primeTower || primeTowerAuto }
     public var primeTowerWidth: Double = 30
     /// Material purged at the tower per colour change in mm³ (0 = default dense strip).
     public var purgeVolume: Double = 0
@@ -224,6 +227,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public init(printer: PrinterModel) {
         self.printer = printer
         printer.machine.applyDefaults(to: &self)
+        // Smallest sensible tower: the U1 has one nozzle per colour (only a short wipe), the ACE needs more purge.
+        if printer.machine.multiMaterial == .toolChanger { primeTowerWidth = 20; purgeVolume = 15 }
+        else { primeTowerWidth = 30; purgeVolume = 40 }
         let filament = FilamentLibrary.defaultFilament(for: printer)
         filaments = (0..<printer.machine.toolCount).map { i in
             var f = filament
@@ -353,7 +359,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.supportXYDistance, &supportXYDistance); d(.supportSpacing, &supportSpacing)
         d(.supportSlot, &supportSlot); d(.supportInterfaceSlot, &supportInterfaceSlot)
         d(.brimWidth, &brimWidth); d(.skirtLoops, &skirtLoops); d(.skirtDistance, &skirtDistance)
-        d(.primeTower, &primeTower); d(.primeTowerWidth, &primeTowerWidth); d(.purgeVolume, &purgeVolume)
+        d(.primeTower, &primeTower); d(.primeTowerAuto, &primeTowerAuto); d(.primeTowerWidth, &primeTowerWidth); d(.purgeVolume, &purgeVolume)
         d(.retractSpeed, &retractSpeed); d(.retractMinTravel, &retractMinTravel); d(.zHop, &zHop)
         d(.topSurfacePattern, &topSurfacePattern); d(.bottomSurfacePattern, &bottomSurfacePattern)
         d(.seamPosition, &seamPosition); d(.wallOrder, &wallOrder); d(.elephantFootCompensation, &elephantFootCompensation)

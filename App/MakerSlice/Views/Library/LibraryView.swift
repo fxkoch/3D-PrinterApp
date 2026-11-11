@@ -1,4 +1,5 @@
 import SwiftUI
+import SliceKit
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
@@ -75,6 +76,14 @@ struct LibraryView: View {
                         Button { showScan = true } label: { Label("3D-Scan (genau, dauert Minuten)", systemImage: "camera.viewfinder") }
                             .accessibilityIdentifier("libraryScan")
                         Button { app.loadSample() } label: { Label("Testwürfel", systemImage: "cube") }
+                        Menu {
+                            ForEach(ModelTemplates.all) { template in
+                                Button { app.open(template: template) } label: { Text(template.name); Text(template.note) }
+                            }
+                        } label: {
+                            Label("Vorlagen", systemImage: "square.stack.3d.up")
+                        }
+                        .accessibilityIdentifier("libraryTemplates")
                     } label: {
                         Image(systemName: "plus")
                     }

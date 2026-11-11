@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SliceKit
 
 /// A model file stored in the app's library.
 /// What the strength check recommends for printing this part; applied when the item is opened for printing.
@@ -7,6 +8,8 @@ struct PrintHints: Codable, Hashable {
     var wallLoops: Int
     var infillDensity: Double
     var material: String?
+    /// Overhangs above the model itself (e.g. an arch over a floor): supports are switched to "everywhere".
+    var supportEverywhere: Bool?
 }
 
 struct LibraryItem: Codable, Identifiable, Hashable {
@@ -21,7 +24,7 @@ struct LibraryItem: Codable, Identifiable, Hashable {
     var hints: PrintHints?
 
     enum Source: String, Codable {
-        case file, makerWorld, printables, web
+        case file, makerWorld, printables, web, template
     }
 }
 
@@ -68,6 +71,15 @@ final class Library {
         items.insert(item, at: 0)
         save()
         return item
+    }
+
+    /// Adds a built-in model with its print hints; a template that is already in the library is reused.
+    func add(template: ModelTemplate) throws -> LibraryItem {
+        if let existing = items.first(where: { $0.source == .template && $0.name == template.name }) { return existing }
+        guard let data = template.data() else { throw CocoaError(.fileNoSuchFile) }
+        let hints = PrintHints(wallLoops: template.wallLoops, infillDensity: template.infillDensity,
+                               supportEverywhere: template.needsSupport ? true : nil)
+        return try add(data: data, fileName: template.fileName, name: template.name, origin: .template, hints: hints)
     }
 
     func delete(_ item: LibraryItem) {
