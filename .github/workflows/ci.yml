@@ -87,6 +87,11 @@ jobs:
           pkill -f "[k]obra_s1_sim.py" || true   # a self-hosted Mac may still run one from an earlier job
           nohup python3 tools/virtualprinters/kobra_s1_sim.py --speed 30 --duration 1800 > kobra.log 2>&1 &
           for i in $(seq 1 20); do curl -sf http://127.0.0.1:18910/info >/dev/null && break; sleep 1; done
+      - name: Start virtual Snapmaker U1 with multiACE
+        run: |
+          pkill -f "[u]1_multiace_sim.py" || true
+          nohup python3 tools/virtualprinters/u1_multiace_sim.py > u1ace.log 2>&1 &
+          for i in $(seq 1 20); do curl -sf http://127.0.0.1:17125/sim/state >/dev/null && break; sleep 1; done
       - name: UI tests on simulator
         run: |
           set +e
@@ -117,6 +122,6 @@ jobs:
         env:
           KOBRA_HOST: 127.0.0.1
         run: swift test
-      - name: Kobra simulator log
+      - name: Simulator logs
         if: failure()
-        run: tail -60 kobra.log || true
+        run: tail -60 kobra.log u1ace.log || true
