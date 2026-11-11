@@ -4,7 +4,7 @@ import XCTest
 /// The built-in models load, are closed solids and fit on the printers.
 final class ModelTemplateTests: XCTestCase {
     func testTemplatesLoadAndFitTheBeds() throws {
-        XCTAssertEqual(ModelTemplates.all.count, 4)
+        XCTAssertEqual(ModelTemplates.all.count, 5)
         for template in ModelTemplates.all {
             let data = try XCTUnwrap(template.data(), template.id)
             let mesh = try STLReader.read(data)

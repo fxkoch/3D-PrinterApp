@@ -24,6 +24,9 @@ public enum ModelTemplates {
     /// Onion dispenser set: a column with a tongue (onions are refilled on top and taken out at the bottom), a lid with a bowl,
     /// feet (air from below) and a connector that joins two modules at the back.
     public static let all: [ModelTemplate] = [
+        ModelTemplate(id: "zwiebelspender_set", name: "Zwiebelspender – Set auf einer Platte",
+                      note: "Modul, Deckel und Füße zusammen, 228 × 182 × 240 mm. Stützen „Überall“ für den Bogen der Öffnung.",
+                      wallLoops: 2, infillDensity: 0.15, needsSupport: true),
         ModelTemplate(id: "zwiebelspender_modul", name: "Zwiebelspender – Modul",
                       note: "Schacht mit Zunge, 100 × 182 × 240 mm. Stützen „Überall“ für den Bogen der Öffnung.",
                       wallLoops: 2, infillDensity: 0.15, needsSupport: true),
