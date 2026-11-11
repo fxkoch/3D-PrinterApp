@@ -11,6 +11,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case support(SupportMode)
         case brim(Double)
         case ironing(Bool)
+        /// Ironing on with values that suit the material (speed mm/s, flow 0…1, line spacing mm).
+        case ironingTuned(speed: Double, flow: Double, spacing: Double)
         case infill(InfillPattern, Double)
         case layerHeight(Double)
         case walls(Int)
@@ -221,10 +223,19 @@ public enum PrintAdvisor {
         // Ironing for flat tops.
         let flatTop = analyses.map(\.flatTopArea).reduce(0, +)
         if flatTop > 400, !s.ironing, !materials.contains(where: \.isFlexible) {
-            result.append(Recommendation(
-                id: "ironing", title: "Oberseite glätten (Ironing)",
-                detail: String(format: "%.0f cm² flache Oberseite. Glätten macht sie spiegelglatt (Druck dauert etwas länger).", flatTop / 100),
-                icon: "sparkles", severity: .suggestion, action: .ironing(true)))
+            // Common starting point of the OrcaSlicer guides (Printago, Sovol, community): about 10 % flow and 0.1 mm line spacing,
+            // 15–30 mm/s. PETG is sticky and smears at the nozzle: slower, and only as a hint to test first.
+            if materials.contains(where: { $0.type.hasPrefix("PETG") }) {
+                result.append(Recommendation(
+                    id: "ironing-petg", title: "Glätten (Ironing) bei PETG nur mit Vorsicht",
+                    detail: String(format: "%.0f cm² flache Oberseite. PETG klebt an der Düse, Glätten kann Schlieren oder Klümpchen geben. Mit 15 mm/s, 10 %% Fluss und 0,1 mm Linienabstand klappt es oft. Am besten erst an einem kleinen Teil testen.", flatTop / 100),
+                    icon: "sparkles", severity: .info, action: .ironingTuned(speed: 15, flow: 0.10, spacing: 0.1)))
+            } else {
+                result.append(Recommendation(
+                    id: "ironing", title: "Oberseite glätten (Ironing)",
+                    detail: String(format: "%.0f cm² flache Oberseite. Glätten macht sie spiegelglatt (Druck dauert etwas länger). Eingestellt werden 20 mm/s, 10 %% Fluss und 0,1 mm Linienabstand.", flatTop / 100),
+                    icon: "sparkles", severity: .suggestion, action: .ironingTuned(speed: 20, flow: 0.10, spacing: 0.1)))
+            }
         }
 
         // Infill pattern and density.
@@ -368,6 +379,8 @@ public enum PrintAdvisor {
         case .support(let mode): s.support = mode
         case .brim(let width): s.brimWidth = width
         case .ironing(let on): s.ironing = on
+        case .ironingTuned(let speed, let flow, let spacing):
+            s.ironing = true; s.ironingSpeed = speed; s.ironingFlow = flow; s.ironingSpacing = spacing
         case .infill(let pattern, let density):
             s.infillPattern = pattern
             s.infillDensity = density

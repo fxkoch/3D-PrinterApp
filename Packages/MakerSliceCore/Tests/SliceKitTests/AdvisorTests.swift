@@ -126,6 +126,22 @@ final class AdvisorTests: XCTestCase {
         XCTAssertTrue(kobra.contains { $0.id == "kobra-spaghetti" })
     }
 
+    func testIroningIsOnlyAHintForPETG() throws {
+        let cube = [ModelObject(name: "A", mesh: Fixtures.box(40, 40, 10))]
+        var s = PrintSettings(printer: .snapmakerU1)
+        var recs = PrintAdvisor.recommendations(objects: cube, settings: s)
+        let pla = try XCTUnwrap(recs.first { $0.id == "ironing" })
+        XCTAssertEqual(pla.action, .ironingTuned(speed: 20, flow: 0.10, spacing: 0.1))
+        s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
+        recs = PrintAdvisor.recommendations(objects: cube, settings: s)
+        XCTAssertFalse(recs.contains { $0.id == "ironing" })
+        let petg = try XCTUnwrap(recs.first { $0.id == "ironing-petg" })
+        XCTAssertEqual(petg.severity, .info)
+        var o = cube
+        try PrintAdvisor.apply(petg.action!, settings: &s, objects: &o)
+        XCTAssertTrue(s.ironing); XCTAssertEqual(s.ironingSpeed, 15); XCTAssertEqual(s.ironingSpacing, 0.1)
+    }
+
     func testFanAdviceForPETGAndABS() throws {
         let objs = [ModelObject(name: "A", mesh: Fixtures.box(20, 20, 20))]
         var s = PrintSettings()
