@@ -25,7 +25,7 @@ public enum ModelTemplates {
     /// feet (air from below) and a connector that joins two modules at the back.
     public static let all: [ModelTemplate] = [
         ModelTemplate(id: "zwiebelspender_set", name: "Zwiebelspender – Set auf einer Platte",
-                      note: "Modul, Deckel und Füße zusammen, 228 × 182 × 240 mm. Stützen „Überall“ für den Bogen der Öffnung.",
+                      note: "Modul, Deckel und Steckfüße zusammen, 234 × 182 × 240 mm. Stützen „Überall“ für den Bogen der Öffnung.",
                       wallLoops: 2, infillDensity: 0.15, needsSupport: true),
         ModelTemplate(id: "zwiebelspender_modul", name: "Zwiebelspender – Modul",
                       note: "Schacht mit Zunge, 100 × 182 × 240 mm. Stützen „Überall“ für den Bogen der Öffnung.",
@@ -33,8 +33,8 @@ public enum ModelTemplates {
         ModelTemplate(id: "zwiebelspender_deckel", name: "Zwiebelspender – Deckel mit Schale",
                       note: "Geschlossene Schale, z. B. für Knoblauch. Druckt ohne Stützen.",
                       wallLoops: 2, infillDensity: 0.15, needsSupport: false),
-        ModelTemplate(id: "zwiebelspender_fuesse", name: "Zwiebelspender – Füße (4 Stück)",
-                      note: "Unter das Modul kleben: so kommt Luft von unten durch den Rost.",
+        ModelTemplate(id: "zwiebelspender_fuesse", name: "Zwiebelspender – Füße zum Stecken (2 Kufen)",
+                      note: "Von unten in die äußeren Schlitze des Rosts stecken: so kommt Luft von unten durch den Rost.",
                       wallLoops: 2, infillDensity: 0.15, needsSupport: false),
         ModelTemplate(id: "zwiebelspender_verbinder", name: "Zwiebelspender – Verbinder",
                       note: "Leiste für zwei Module: von oben über die beiden Schienen auf der Rückseite schieben.",
