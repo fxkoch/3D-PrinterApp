@@ -49,12 +49,19 @@ final class MakerSliceUITests: XCTestCase {
         let expert = app.switches["expertToggle"]
         XCTAssertTrue(expert.waitForExistence(timeout: 5))
         let before = expert.value as? String
-        if before != "1" {
-            // The switch sits at the right end of its row: tap there, not in the middle of the label.
-            expert.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        // A tap does not always flip the switch (run 43103180482: "switch was 0, is 0"). Tap the inner switch
+        // when the row exposes one, otherwise the right end of the row, and check that the value changed.
+        for _ in 0..<3 where (expert.value as? String) != "1" {
+            let inner = expert.switches.firstMatch
+            if inner.exists {
+                inner.tap()
+            } else {
+                expert.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            }
+            sleep(1)
         }
-        sleep(1)
         let after = expert.value as? String
+        XCTAssertEqual(after, "1", "expert mode should be switched on (was \(before ?? "nil"))")
         snapshot("49-Expertenmodus-an")
         // Expert mode adds several sections (assistant, cloud slicing, …) above the defaults: the form only
         // builds rows that are on screen, so scroll down until the section exists. Section headers may be
