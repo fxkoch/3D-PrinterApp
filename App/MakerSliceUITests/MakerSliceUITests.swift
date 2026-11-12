@@ -59,7 +59,8 @@ final class MakerSliceUITests: XCTestCase {
         // Expert mode adds several sections (assistant, cloud slicing, …) above the defaults: the form only
         // builds rows that are on screen, so scroll down until the section exists. Short drags instead of swipes:
         // a full swipe can jump past the short section in one go, and then it no longer exists either.
-        let defaults = app.staticTexts["Standard-Einstellungen"]
+        // Depending on the iOS version the section header is reported in capitals ("STANDARD-EINSTELLUNGEN").
+        let defaults = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Standard-Einstellungen")).firstMatch
         for _ in 0..<16 where !defaults.exists {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
                 .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
