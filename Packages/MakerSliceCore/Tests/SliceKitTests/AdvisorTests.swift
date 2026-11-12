@@ -146,6 +146,22 @@ final class AdvisorTests: XCTestCase {
         XCTAssertEqual(s.elephantFootCompensation, 0)
     }
 
+    /// PLA supports on a PETG part fall over: body from the part's material, PLA only as contact layer.
+    func testSupportBodyOfAMaterialThatDoesNotBond() throws {
+        var objs = [ModelObject(name: "A", mesh: Fixtures.box(20, 20, 20), tool: 0)]
+        var s = PrintSettings(printer: .snapmakerU1)
+        s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
+        s.support = .everywhere
+        s.supportSlot = 1   // PLA
+        let rec = try XCTUnwrap(PrintAdvisor.recommendations(objects: objs, settings: s).first { $0.id == "support-body" })
+        XCTAssertEqual(rec.severity, .warning)
+        try PrintAdvisor.apply(rec.action!, settings: &s, objects: &objs)
+        XCTAssertNil(s.supportSlot); XCTAssertEqual(s.supportInterfaceSlot, 1); XCTAssertEqual(s.supportTopZDistance, 0)
+        XCTAssertFalse(ids(PrintAdvisor.recommendations(objects: objs, settings: s)).contains("support-body"))
+        s.supportSlot = 2; s.filaments[2] = s.filaments[0]   // PETG supports on PETG are fine
+        XCTAssertFalse(ids(PrintAdvisor.recommendations(objects: objs, settings: s)).contains("support-body"))
+    }
+
     func testIroningIsOnlyAHintForPETG() throws {
         let cube = [ModelObject(name: "A", mesh: Fixtures.box(40, 40, 10))]
         var s = PrintSettings(printer: .snapmakerU1)

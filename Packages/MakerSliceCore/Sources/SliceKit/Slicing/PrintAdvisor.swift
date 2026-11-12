@@ -24,6 +24,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case elephantFoot(Double)
         case supportTopZ(Double)
         case supportDistances(z: Double, xy: Double)
+        /// Support body and contact layer from these slots (nil = material of the part), contact without a gap.
+        case supportMaterials(body: Int?, interface: Int?)
         case outerWallSpeed(Double)
         case zHop(Double)
         case filamentFan(slot: Int, speed: Double)
@@ -188,6 +190,16 @@ public enum PrintAdvisor {
         // Supports: Snapmaker forum users print organic supports with Z distance = layer height + 0.05 mm
         // (0.25 mm at 0.2 mm layers); with a different material as interface 0 mm works and leaves a clean surface.
         if s.support != .off {
+            // A support body of a material that does not weld to the part (PLA on PETG) finds no hold where it stands
+            // on the part and falls over. Body from the part's material, only the contact layer from the other one.
+            let partGroups = Set(materials.map { PrimeTower.bondGroup($0.type) })
+            if let slot = s.supportSlot, !partGroups.contains(PrimeTower.bondGroup(s.filament(for: slot).type)) {
+                let body = s.filament(for: slot).type, part = materials.first?.type ?? "Teil"
+                result.append(Recommendation(
+                    id: "support-body", title: "Stützen aus \(body) halten nicht auf \(part)",
+                    detail: "\(body) haftet nicht auf \(part): Stützen, die auf dem Teil stehen, lösen sich und fallen um. Besser: den Stützkörper aus \(part) drucken und nur die Kontaktschicht zum Teil aus \(body), ohne Abstand. So stehen die Stützen fest und lassen sich trotzdem sauber lösen.",
+                    icon: "building.columns", severity: .warning, action: .supportMaterials(body: nil, interface: slot)))
+            }
             if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0 {
                 result.append(Recommendation(
                     id: "support-z0", title: "Stützen: Abstand 0 mm bei anderem Material",
@@ -401,6 +413,8 @@ public enum PrintAdvisor {
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
         case .elephantFoot(let value): s.elephantFootCompensation = value
+        case .supportMaterials(let body, let interface):
+            s.supportSlot = body; s.supportInterfaceSlot = interface; s.supportTopZDistance = 0
         case .supportTopZ(let value): s.supportTopZDistance = value
         case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
         case .outerWallSpeed(let v): s.outerWallSpeed = v
