@@ -3,11 +3,16 @@ import Foundation
 /// Simple vertical (grid-style) supports below overhangs.
 struct SupportGenerator {
     let settings: PrintSettings
+    /// Support of a material that does not weld to the part (PLA on PETG): where it stands on the part it gets a dense
+    /// foot, otherwise the few thin lines find no hold and the support falls over. It still comes off cleanly.
+    var denseFoot = false
 
     struct Result {
         var areas: [Polygons]
         /// Dense contact layers directly below the model.
         var interfaces: [Polygons]
+        /// Dense first layers where the support stands on the part (only with `denseFoot`).
+        var feet: [Polygons] = []
     }
 
     func generate(layers: [Polygons], tops: [Double]) -> Result {
@@ -67,7 +72,18 @@ struct SupportGenerator {
             let contact = Polygons(recent.flatMap(\.paths)).union()
             interfaces[i] = area.intersection(contact)
         }
-        return Result(areas: areas, interfaces: interfaces)
+        var feet = [Polygons](repeating: Polygons(), count: n)
+        if denseFoot {
+            for i in 0..<(n - 1) where !areas[i + 1].isEmpty && !layers[i].isEmpty {
+                let landing = areas[i + 1].intersection(layers[i])
+                guard !landing.isEmpty else { continue }
+                let zone = landing.offset(1.5)   // a little wider than the contact: more hold
+                for k in (i + 1)...min(i + 2, n - 1) {
+                    feet[k] = (feet[k] + areas[k].intersection(zone)).union()
+                }
+            }
+        }
+        return Result(areas: areas, interfaces: interfaces, feet: feet)
     }
 }
 

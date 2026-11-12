@@ -188,7 +188,18 @@ public enum PrintAdvisor {
         // Supports: Snapmaker forum users print organic supports with Z distance = layer height + 0.05 mm
         // (0.25 mm at 0.2 mm layers); with a different material as interface 0 mm works and leaves a clean surface.
         if s.support != .off {
-            if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0 {
+            // Supports of a material that does not weld to the part (PLA on PETG) come off easily – that is the point of
+            // the second material – but thin support lines find no hold where they stand on the part.
+            let partGroups = Set(materials.map { PrimeTower.bondGroup($0.type) })
+            if let slot = s.supportInterfaceSlot ?? s.supportSlot, !partGroups.contains(PrimeTower.bondGroup(s.filament(for: slot).type)) {
+                let other = s.filament(for: slot).type, part = materials.first?.type ?? "Teil"
+                result.append(Recommendation(
+                    id: "support-foot", title: "Stützen aus \(other) auf \(part): fester Fuß",
+                    detail: "\(other) haftet kaum auf \(part). So lösen sich die Stützen leicht, aber dünne Stützlinien fallen um, wo sie auf dem Teil stehen. Dort druckt die App deshalb die ersten zwei Schichten der Stütze geschlossen, etwas breiter und langsam. Zusätzlich hilft 0 mm Abstand.",
+                    icon: "building.columns", severity: .info, action: s.supportTopZDistance > 0 ? .supportTopZ(0) : nil))
+            }
+            let footTip = result.last?.id == "support-foot"
+            if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0, !footTip {
                 result.append(Recommendation(
                     id: "support-z0", title: "Stützen: Abstand 0 mm bei anderem Material",
                     detail: "Die Kontaktschicht der Stützen besteht aus einem anderen Material (z. B. PETG unter PLA). Dann haftet sie kaum, und Nutzer im Snapmaker-Forum stellen den oberen Abstand auf 0 mm – die Unterseite wird so glatter. Erst mit einem kleinen Teil testen; verschmilzt es, wieder 0,2 mm.",
@@ -300,6 +311,14 @@ public enum PrintAdvisor {
                 id: "tower", title: "Reinigungsturm einschalten",
                 detail: "Beim Farbwechsel über die ACE bleibt Restmaterial in der Düse. Der Turm verhindert vermischte Farben am Modell.",
                 icon: "square.stack.3d.up", severity: .warning, action: .primeTower(true)))
+        }
+
+        // A tower of materials that do not weld splits apart and falls over.
+        if s.usesPrimeTower, PrimeTower.mixesMaterials(Set(usedTools), settings: s) {
+            result.append(Recommendation(
+                id: "tower-mixed", title: "Reinigungsturm aus zwei Materialien",
+                detail: "\(Set(materials.map(\.type)).sorted().joined(separator: " und ")) haften nicht aneinander. Der Turm bekommt deshalb einen durchgehenden Rahmen aus dem Material, das auf den meisten Schichten druckt, dazu eine breitere Basis und einen Rand auf der ersten Schicht. Das andere Material spült nur innen.",
+                icon: "square.stack.3d.up", severity: .info))
         }
 
         // Snapmaker U1 forum: the tower stays on (without it: strings and blobs), but a narrow tower with a small purge volume
