@@ -24,8 +24,6 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case elephantFoot(Double)
         case supportTopZ(Double)
         case supportDistances(z: Double, xy: Double)
-        /// Support body and contact layer from these slots (nil = material of the part), contact without a gap.
-        case supportMaterials(body: Int?, interface: Int?)
         case outerWallSpeed(Double)
         case zHop(Double)
         case filamentFan(slot: Int, speed: Double)
@@ -190,17 +188,18 @@ public enum PrintAdvisor {
         // Supports: Snapmaker forum users print organic supports with Z distance = layer height + 0.05 mm
         // (0.25 mm at 0.2 mm layers); with a different material as interface 0 mm works and leaves a clean surface.
         if s.support != .off {
-            // A support body of a material that does not weld to the part (PLA on PETG) finds no hold where it stands
-            // on the part and falls over. Body from the part's material, only the contact layer from the other one.
+            // Supports of a material that does not weld to the part (PLA on PETG) come off easily – that is the point of
+            // the second material – but thin support lines find no hold where they stand on the part.
             let partGroups = Set(materials.map { PrimeTower.bondGroup($0.type) })
-            if let slot = s.supportSlot, !partGroups.contains(PrimeTower.bondGroup(s.filament(for: slot).type)) {
-                let body = s.filament(for: slot).type, part = materials.first?.type ?? "Teil"
+            if let slot = s.supportInterfaceSlot ?? s.supportSlot, !partGroups.contains(PrimeTower.bondGroup(s.filament(for: slot).type)) {
+                let other = s.filament(for: slot).type, part = materials.first?.type ?? "Teil"
                 result.append(Recommendation(
-                    id: "support-body", title: "Stützen aus \(body) halten nicht auf \(part)",
-                    detail: "\(body) haftet nicht auf \(part): Stützen, die auf dem Teil stehen, lösen sich und fallen um. Besser: den Stützkörper aus \(part) drucken und nur die Kontaktschicht zum Teil aus \(body), ohne Abstand. So stehen die Stützen fest und lassen sich trotzdem sauber lösen.",
-                    icon: "building.columns", severity: .warning, action: .supportMaterials(body: nil, interface: slot)))
+                    id: "support-foot", title: "Stützen aus \(other) auf \(part): fester Fuß",
+                    detail: "\(other) haftet kaum auf \(part). So lösen sich die Stützen leicht, aber dünne Stützlinien fallen um, wo sie auf dem Teil stehen. Dort druckt die App deshalb die ersten zwei Schichten der Stütze geschlossen, etwas breiter und langsam. Zusätzlich hilft 0 mm Abstand.",
+                    icon: "building.columns", severity: .info, action: s.supportTopZDistance > 0 ? .supportTopZ(0) : nil))
             }
-            if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0 {
+            let footTip = result.last?.id == "support-foot"
+            if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0, !footTip {
                 result.append(Recommendation(
                     id: "support-z0", title: "Stützen: Abstand 0 mm bei anderem Material",
                     detail: "Die Kontaktschicht der Stützen besteht aus einem anderen Material (z. B. PETG unter PLA). Dann haftet sie kaum, und Nutzer im Snapmaker-Forum stellen den oberen Abstand auf 0 mm – die Unterseite wird so glatter. Erst mit einem kleinen Teil testen; verschmilzt es, wieder 0,2 mm.",
@@ -413,8 +412,6 @@ public enum PrintAdvisor {
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
         case .elephantFoot(let value): s.elephantFootCompensation = value
-        case .supportMaterials(let body, let interface):
-            s.supportSlot = body; s.supportInterfaceSlot = interface; s.supportTopZDistance = 0
         case .supportTopZ(let value): s.supportTopZDistance = value
         case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
         case .outerWallSpeed(let v): s.outerWallSpeed = v

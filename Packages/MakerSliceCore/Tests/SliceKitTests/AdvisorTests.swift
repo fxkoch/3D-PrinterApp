@@ -146,20 +146,41 @@ final class AdvisorTests: XCTestCase {
         XCTAssertEqual(s.elephantFootCompensation, 0)
     }
 
-    /// PLA supports on a PETG part fall over: body from the part's material, PLA only as contact layer.
-    func testSupportBodyOfAMaterialThatDoesNotBond() throws {
-        var objs = [ModelObject(name: "A", mesh: Fixtures.box(20, 20, 20), tool: 0)]
+    /// PLA supports on a PETG part stay PLA (easy to remove) but get a dense foot where they stand on the part.
+    func testSupportOfAMaterialThatDoesNotBondGetsADenseFoot() throws {
+        // A table: the support under the top stands on the base plate of the part.
+        var table = TriangleMesh()
+        for part in [Fixtures.box(30, 30, 2), Fixtures.box(6, 30, 13, at: Vec3(0, 0, 1.5)), Fixtures.box(30, 30, 2, at: Vec3(0, 0, 14))] {
+            table.indices += part.indices.map { $0 + UInt32(table.vertices.count) }
+            table.vertices += part.vertices
+        }
+        var objs = [ModelObject(name: "A", mesh: table, tool: 0)]
         var s = PrintSettings(printer: .snapmakerU1)
         s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
         s.support = .everywhere
         s.supportSlot = 1   // PLA
-        let rec = try XCTUnwrap(PrintAdvisor.recommendations(objects: objs, settings: s).first { $0.id == "support-body" })
-        XCTAssertEqual(rec.severity, .warning)
+        let rec = try XCTUnwrap(PrintAdvisor.recommendations(objects: objs, settings: s).first { $0.id == "support-foot" })
+        XCTAssertEqual(rec.severity, .info)
         try PrintAdvisor.apply(rec.action!, settings: &s, objects: &objs)
-        XCTAssertNil(s.supportSlot); XCTAssertEqual(s.supportInterfaceSlot, 1); XCTAssertEqual(s.supportTopZDistance, 0)
-        XCTAssertFalse(ids(PrintAdvisor.recommendations(objects: objs, settings: s)).contains("support-body"))
-        s.supportSlot = 2; s.filaments[2] = s.filaments[0]   // PETG supports on PETG are fine
-        XCTAssertFalse(ids(PrintAdvisor.recommendations(objects: objs, settings: s)).contains("support-body"))
+        XCTAssertEqual(s.supportSlot, 1, "the supports keep their own material"); XCTAssertEqual(s.supportTopZDistance, 0)
+
+        func footLength(_ s: PrintSettings) throws -> Double {
+            let arranged = try XCTUnwrap(PlateArranger.arrange(objs, bedSize: s.bedSize))
+            let layers = try Slicer(settings: s).slice(arranged)
+            // Support lines in the two layers right above the base plate (z 2…2.5).
+            var length = 0.0
+            for layer in layers where layer.z > 2.05 && layer.z < 2.5 {
+                for e in layer.islands.flatMap(\.extrusions) where e.role == .support || e.role == .supportInterface {
+                    for (p, q) in zip(e.points, e.points.dropFirst()) { length += hypot(q.mmX - p.mmX, q.mmY - p.mmY) }
+                }
+            }
+            return length
+        }
+        let dense = try footLength(s)
+        s.supportSlot = nil   // same material as the part: the usual thin lines
+        let thin = try footLength(s)
+        XCTAssertGreaterThan(thin, 0)
+        XCTAssertGreaterThan(dense, thin * 2.5, "closed foot instead of thin lines")
     }
 
     func testIroningIsOnlyAHintForPETG() throws {

@@ -129,7 +129,12 @@ public final class Slicer: @unchecked Sendable {
 
         // 2. Support areas (need the full stack, so done up-front).
         progress(SliceProgress(phase: "Stützen berechnen", fraction: 0.3))
-        let support = s.support == .off ? nil : SupportGenerator(settings: s).generate(layers: all, tops: tops)
+        // Contact material of the supports (their own slot or the part's material): does it weld to the part?
+        let contactTool = s.supportInterfaceSlot ?? s.supportSlot ?? tools.first ?? 0
+        let partGroups = Set(tools.map { PrimeTower.bondGroup(s.filament(for: $0).type) })
+        var supportGenerator = SupportGenerator(settings: s)
+        supportGenerator.denseFoot = !partGroups.contains(PrimeTower.bondGroup(s.filament(for: contactTool).type))
+        let support = s.support == .off ? nil : supportGenerator.generate(layers: all, tops: tops)
         if isCancelled() { throw SliceError.cancelled }
 
         // 3. Walls and infill per layer, in parallel.
@@ -153,7 +158,7 @@ public final class Slicer: @unchecked Sendable {
                 }
                 if let support, !support.areas[i].isEmpty {
                     let gen = LayerToolpathGenerator(settings: s, layerIndex: i, z: tops[i], height: height)
-                    let supportPaths = gen.supportPaths(area: support.areas[i], interface: support.interfaces[i])
+                    let supportPaths = gen.supportPaths(area: support.areas[i], interface: support.interfaces[i], foot: support.feet[i])
                     // Support (and its contact layers) may use their own slots, e.g. a soluble or cheaper material.
                     let supportTool = s.supportSlot ?? tools.first ?? 0
                     let interfaceTool = s.supportInterfaceSlot ?? supportTool

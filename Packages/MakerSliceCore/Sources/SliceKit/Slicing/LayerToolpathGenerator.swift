@@ -122,17 +122,24 @@ struct LayerToolpathGenerator {
         return extrusions
     }
 
-    func supportPaths(area: Polygons, interface: Polygons) -> [Extrusion] {
+    func supportPaths(area: Polygons, interface: Polygons, foot: Polygons = Polygons()) -> [Extrusion] {
         let s = settings
         let w = isFirstLayer ? s.firstLayerLineWidth : s.lineWidth
         let speed = isFirstLayer ? s.firstLayerSpeed : s.supportSpeed
         var result: [Extrusion] = []
-        let base = area.difference(interface)
+        let interface = foot.isEmpty ? interface : interface.difference(foot)
+        let base = foot.isEmpty ? area.difference(interface) : area.difference(interface).difference(foot)
         if !base.isEmpty {
             // First layer gets denser support for adhesion.
             let spacing = isFirstLayer ? w * 2 : s.supportSpacing
             result += lines(in: base, angle: 0, spacing: spacing, phase: 0).map {
                 Extrusion(role: .support, points: $0, closed: false, width: w, speed: speed)
+            }
+        }
+        if !foot.isEmpty {
+            // Closed and slow: the foot of a support that stands on a material it does not weld to.
+            result += lines(in: foot, angle: layerIndex % 2 == 0 ? 0 : 90, spacing: w, phase: 0).map {
+                Extrusion(role: .supportInterface, points: $0, closed: false, width: w, speed: speed * 0.5)
             }
         }
         if !interface.isEmpty {
