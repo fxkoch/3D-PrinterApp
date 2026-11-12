@@ -72,7 +72,8 @@ final class FeatureTests: XCTestCase {
             let b = ModelObject(name: "B", mesh: Fixtures.box(20, 20, 4), tool: 1)
             let arranged = try XCTUnwrap(PlateArranger.arrange([a, b], bedSize: s.bedSize))
             let layers = try Slicer(settings: s).slice(arranged)
-            let xs = layers.flatMap { $0.islands.flatMap(\.extrusions) }.filter { $0.role == .primeTower }.flatMap { $0.points.map(\.mmX) }
+            // Without the first layer: it carries a few brim loops around the tower.
+            let xs = layers.dropFirst().flatMap { $0.islands.flatMap(\.extrusions) }.filter { $0.role == .primeTower }.flatMap { $0.points.map(\.mmX) }
             return try XCTUnwrap(xs.max()) - XCTUnwrap(xs.min()) + s.lineWidth
         }
         var s = PrintSettings(printer: .snapmakerU1)
@@ -84,6 +85,32 @@ final class FeatureTests: XCTestCase {
         XCTAssertEqual(try towerSide(s), 20, accuracy: 1.0, "without a purge volume the whole tower is filled")
         s.purgeVolume = 15; s.primeTowerWidth = 11
         XCTAssertLessThanOrEqual(try towerSide(s), 11.5, "the setting is the upper limit")
+    }
+
+    /// PLA and PETG do not weld: one material builds the walls of the tower on every layer, the other only purges inside.
+    func testPrimeTowerWithMaterialsThatDoNotBondHasAFrameOfOneMaterial() throws {
+        var s = PrintSettings(printer: .snapmakerU1)
+        s.filaments[1] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
+        XCTAssertTrue(PrimeTower.mixesMaterials([0, 1], settings: s))
+        XCTAssertFalse(PrimeTower.mixesMaterials([0, 2], settings: s))
+        XCTAssertEqual(PrimeTower.bondGroup("PLA-CF"), PrimeTower.bondGroup("PLA+"))
+        XCTAssertNotEqual(PrimeTower.bondGroup("PCTG"), PrimeTower.bondGroup("PC"))
+        let a = ModelObject(name: "A", mesh: Fixtures.box(20, 20, 6), tool: 0)
+        let b = ModelObject(name: "B", mesh: Fixtures.box(20, 20, 3), tool: 1)
+        let arranged = try XCTUnwrap(PlateArranger.arrange([a, b], bedSize: s.bedSize))
+        let layers = try Slicer(settings: s).slice(arranged)
+        var towerLayers = 0
+        for layer in layers {
+            let tower = layer.islands.flatMap { island in island.extrusions.filter { $0.role == .primeTower }.map { (island.tool, $0) } }
+            guard !tower.isEmpty else { continue }
+            towerLayers += 1
+            let walls = tower.filter { $0.1.closed }
+            XCTAssertGreaterThanOrEqual(walls.count, 2, "two walls at z=\(layer.z)")
+            XCTAssertEqual(Set(walls.map(\.0)), [0], "the walls are always the frame material (tool 0 prints on every layer)")
+        }
+        XCTAssertGreaterThan(towerLayers, 5)
+        let xs = layers.dropFirst().flatMap { $0.islands.flatMap(\.extrusions) }.filter { $0.role == .primeTower }.flatMap { $0.points.map(\.mmX) }
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(xs.max()) - XCTUnwrap(xs.min()) + s.lineWidth, 13.5, "wider base for a tower of two materials")
     }
 
     func testIroningAndGyroid() throws {

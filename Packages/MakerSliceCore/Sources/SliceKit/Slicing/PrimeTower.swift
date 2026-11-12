@@ -19,6 +19,9 @@ struct PrimeTower {
         let rect = try placement(footprint: footprint, size: fittedSize(layers, lastChange: lastChange))
         let w = settings.lineWidth
         var previousTool = layers.first?.islands.first?.tool
+        // Materials that do not weld to each other (PLA on PETG, …) would split the tower at every change. Then one
+        // material builds the frame: walls and fill on every layer it prints, the others only purge inside it.
+        let frameTool = frameTool(layers, lastChange: lastChange)
 
         for i in 0...lastChange {
             let height = layers[i].height
@@ -37,20 +40,35 @@ struct PrimeTower {
             previousTool = islands.last?.tool
 
             let outer = Polygons.rectangle(minX: rect.minX, minY: rect.minY, maxX: rect.maxX, maxY: rect.maxY)
-            let perimeter = Extrusion(role: .primeTower, points: outer.offset(-width / 2).paths.first ?? [],
-                                      closed: true, width: width, speed: speed)
-            let inner = outer.offset(-width)
+            // The island that prints walls and fill: the frame material when it prints on this layer.
+            let frameIsland = frameTool.flatMap { tool in islands.firstIndex { $0.tool == tool } }
+            let walls = frameTool == nil ? 1 : 2
+            var frame: [Extrusion] = (0..<walls).compactMap { k in
+                outer.offset(-width * (Double(k) + 0.5)).paths.first.map {
+                    Extrusion(role: .primeTower, points: $0, closed: true, width: width, speed: speed)
+                }
+            }
+            if first {
+                // A few brim loops keep a slim tower on the bed.
+                frame += (0..<4).compactMap { k in
+                    outer.offset(width * (Double(k) + 0.5), join: .round).paths.first.map {
+                        Extrusion(role: .primeTower, points: $0, closed: true, width: width, speed: speed)
+                    }
+                }
+            }
+            let inner = outer.offset(-width * Double(walls))
             let gen = LayerToolpathGenerator(settings: settings, layerIndex: i, z: layers[i].z, height: height)
             let angle = i % 2 == 0 ? 45.0 : 135.0
 
             var additions: [Int: [Extrusion]] = [:]
-            additions[0, default: []].append(perimeter)
-            if changeIslands.isEmpty {
-                // Keep the tower growing with a light fill (dense on the first layer for adhesion).
-                let spacing = first ? width : 3
-                additions[0, default: []] += gen.lines(in: inner, angle: angle, spacing: spacing, phase: 0).map {
+            // Light fill that keeps the tower growing (dense on the first layer for adhesion).
+            func fill(_ area: Polygons) -> [Extrusion] {
+                gen.lines(in: area, angle: angle, spacing: first ? width : 3, phase: 0).map {
                     Extrusion(role: .primeTower, points: $0, closed: false, width: width, speed: speed)
                 }
+            }
+            if changeIslands.isEmpty {
+                frame += fill(inner)
             } else {
                 let strips = changeIslands.count
                 var stripDepth = (rect.maxY - rect.minY) / Double(strips)
@@ -67,11 +85,41 @@ struct PrimeTower {
                         Extrusion(role: .primeTower, points: $0, closed: false, width: width, speed: speed)
                     }
                 }
+                if frameIsland != nil {
+                    // The frame material also fills what the purge strips leave free, so its layers stay connected.
+                    let y0 = rect.minY + Double(strips) * stripDepth
+                    frame += fill(inner.intersection(Polygons.rectangle(minX: rect.minX, minY: y0, maxX: rect.maxX, maxY: rect.maxY)))
+                }
             }
+            // Purge strips first (they prime the nozzle), then walls and fill.
+            additions[frameIsland ?? 0, default: []] += frame
             for (j, extra) in additions {
                 layers[i].islands[j].extrusions.insert(contentsOf: extra, at: 0)
             }
         }
+    }
+
+    /// Materials that weld to each other share a group.
+    static func bondGroup(_ type: String) -> String {
+        let t = type.uppercased()
+        let groups = [("PLA", "PLA"), ("PETG", "PETG"), ("PCTG", "PETG"), ("PET", "PETG"), ("ABS", "ABS"), ("ASA", "ABS"),
+                      ("TPU", "TPU"), ("TPE", "TPU"), ("PVA", "PVA"), ("PA", "PA"), ("PC", "PC")]
+        return groups.first { t.hasPrefix($0.0) }?.1 ?? t
+    }
+
+    /// True when the filaments of `tools` do not all weld to each other.
+    static func mixesMaterials(_ tools: Set<Int>, settings: PrintSettings) -> Bool {
+        Set(tools.map { bondGroup(settings.filament(for: $0).type) }).count > 1
+    }
+
+    /// With materials that do not bond: the tool that prints on most layers builds the frame of the tower.
+    func frameTool(_ layers: [SlicedLayer], lastChange: Int) -> Int? {
+        var count: [Int: Int] = [:]
+        for layer in layers[...lastChange] {
+            for tool in Set(layer.islands.map(\.tool)) { count[tool, default: 0] += 1 }
+        }
+        guard PrimeTower.mixesMaterials(Set(count.keys), settings: settings) else { return nil }
+        return count.max { ($0.value, -$0.key) < ($1.value, -$1.key) }?.key
     }
 
     /// Side of the tower: just large enough for the purge strips of the busiest layer. `primeTowerWidth` is the upper
@@ -92,8 +140,10 @@ struct PrimeTower {
             thinnest = min(thinnest, layer.height)
         }
         let area = Double(mostChanges) * settings.purgeVolume / max(thinnest, 0.04)
-        let needed = area.squareRoot() + 2 * settings.lineWidth + 1
-        let stable = max(10, layers[lastChange].z * 0.12)
+        let mixed = frameTool(layers, lastChange: lastChange) != nil
+        // With a frame material: second wall, and a third of the tower stays free for its fill.
+        let needed = (mixed ? (area * 1.5).squareRoot() + 4 * settings.lineWidth : area.squareRoot() + 2 * settings.lineWidth) + 1
+        let stable = max(mixed ? 14 : 10, layers[lastChange].z * (mixed ? 0.16 : 0.12))
         return min(limit, max(needed, stable))
     }
 

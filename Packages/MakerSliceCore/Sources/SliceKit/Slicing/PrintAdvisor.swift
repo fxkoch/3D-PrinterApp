@@ -302,6 +302,14 @@ public enum PrintAdvisor {
                 icon: "square.stack.3d.up", severity: .warning, action: .primeTower(true)))
         }
 
+        // A tower of materials that do not weld splits apart and falls over.
+        if s.usesPrimeTower, PrimeTower.mixesMaterials(Set(usedTools), settings: s) {
+            result.append(Recommendation(
+                id: "tower-mixed", title: "Reinigungsturm aus zwei Materialien",
+                detail: "\(Set(materials.map(\.type)).sorted().joined(separator: " und ")) haften nicht aneinander. Der Turm bekommt deshalb einen durchgehenden Rahmen aus dem Material, das auf den meisten Schichten druckt, dazu eine breitere Basis und einen Rand auf der ersten Schicht. Das andere Material spült nur innen.",
+                icon: "square.stack.3d.up", severity: .info))
+        }
+
         // Snapmaker U1 forum: the tower stays on (without it: strings and blobs), but a narrow tower with a small purge volume
         // saves most of the waste ("minimal purge" 10–15 mm³ instead of 60).
         if usedTools.count > 1, s.printer == .snapmakerU1 {
