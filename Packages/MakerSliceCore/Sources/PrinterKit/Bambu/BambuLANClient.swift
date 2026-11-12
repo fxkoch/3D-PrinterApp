@@ -267,6 +267,12 @@ public final class BambuLANClient: PrinterDriver, @unchecked Sendable {
 
     private func gcodeLine(_ line: String) async throws { try await printCommand("gcode_line", extra: ["param": line + "\n"]) }
 
+    public var speedControl: SpeedControl { .modes }
+    /// "print_speed": 1 silent, 2 standard, 3 sport (4 "ludicrous" is not offered).
+    public func setSpeedMode(_ mode: Int) async throws {
+        try await printCommand("print_speed", extra: ["param": String(min(max(mode, 1), 3))])
+    }
+
     public func setBedTemperature(_ t: Int) async throws { try await gcodeLine("M140 S\(t)") }
     public func setToolTemperature(tool: Int, _ t: Int) async throws { try await gcodeLine("M104 S\(t)") }
 

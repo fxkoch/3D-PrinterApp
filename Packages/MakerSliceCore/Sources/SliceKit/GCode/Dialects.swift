@@ -17,13 +17,17 @@ struct U1Dialect: MachineDialect {
         let f = ctx.initialFilament
         let bed = f.bedTemp(for: s.plateType, firstLayer: true)
         let nozzle = f.nozzleTemp
+        // Quiet air: exhaust fan starts low (the printer raises it by itself above the desired chamber temperature),
+        // the filter (inner) fan runs at a fixed low speed. Hot materials already use the inner fan only.
+        let inner = String(format: "%.2f", s.quietInnerFanSpeed)
+        let coolStart = s.quietAir ? "0.30" : "0.6"
         let purifier: String
         if f.vitrificationTemp <= 50 {
-            purifier = "SET_PURIFIER_MODE MODE=1 DESIRE_TEMP=42 ALARM_TEMP=48 FAN_SPEED=0.6 DELAY_OFF=0 ; strong cooling"
+            purifier = "SET_PURIFIER_MODE MODE=1 DESIRE_TEMP=42 ALARM_TEMP=48 FAN_SPEED=\(coolStart) DELAY_OFF=0 ; strong cooling"
         } else if f.vitrificationTemp <= 70 {
-            purifier = "SET_PURIFIER_MODE MODE=1 DESIRE_TEMP=45 ALARM_TEMP=51 FAN_SPEED=0.6 DELAY_OFF=0 ; weak cooling"
+            purifier = "SET_PURIFIER_MODE MODE=1 DESIRE_TEMP=45 ALARM_TEMP=51 FAN_SPEED=\(coolStart) DELAY_OFF=0 ; weak cooling"
         } else {
-            purifier = "SET_PURIFIER_MODE MODE=3 DESIRE_TEMP=45 FAN_SPEED=0.6 DELAY_OFF=600 ; keep warm"
+            purifier = "SET_PURIFIER_MODE MODE=3 DESIRE_TEMP=45 FAN_SPEED=\(s.quietAir ? inner : "0.6") DELAY_OFF=600 ; keep warm"
         }
         let highTemp = s.plateType == .highTemp
         var lines: [String] = [
@@ -40,6 +44,7 @@ struct U1Dialect: MachineDialect {
             "M204 S10000",
             ";===== top cover purifier =====",
             purifier,
+        ] + (s.quietAir && f.vitrificationTemp <= 70 ? ["SET_PURIFIER FAN=inner SPEED=\(inner) ; filter fan, quiet"] : []) + [
             "G28 X Y",
             "DEFECT_DETECT_NOODLE_FIRST",
             ";===== bed foreign object detection =====",

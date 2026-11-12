@@ -229,6 +229,7 @@ final class AppModel {
         var settings = settings(for: model)
         settings.filaments = printers.suggestedFilaments(for: printer, current: settings.filaments, model: model)
         if let hints { settings.wallLoops = hints.wallLoops; settings.infillDensity = hints.infillDensity }
+        if hints?.supportEverywhere == true { settings.support = .everywhere }
         let loaded = printers.loadedTypes(printer)
         let humidity = printers.status(of: printer)?.filamentBox?.humidity
         Task {
@@ -249,6 +250,15 @@ final class AppModel {
                 alert = error.localizedDescription
                 log.add(.error, "Import fehlgeschlagen: \(error.localizedDescription)", source: "App")
             }
+        }
+    }
+
+    /// Puts a built-in model into the library and opens it for printing.
+    func open(template: ModelTemplate) {
+        do {
+            open(try library.add(template: template))
+        } catch {
+            alert = "Vorlage konnte nicht geladen werden: \(error.localizedDescription)"
         }
     }
 
@@ -336,6 +346,7 @@ extension LibraryItem.Source {
         case .makerWorld: return "MakerWorld"
         case .printables: return "Printables"
         case .web: return "Web-Portal"
+        case .template: return "Vorlage"
         }
     }
 }

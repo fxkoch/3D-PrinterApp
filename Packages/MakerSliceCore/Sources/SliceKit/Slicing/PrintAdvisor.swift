@@ -11,6 +11,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case support(SupportMode)
         case brim(Double)
         case ironing(Bool)
+        /// Ironing on with values that suit the material (speed mm/s, flow 0…1, line spacing mm).
+        case ironingTuned(speed: Double, flow: Double, spacing: Double)
         case infill(InfillPattern, Double)
         case layerHeight(Double)
         case walls(Int)
@@ -20,6 +22,12 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case useLoadedFilament(slot: Int, type: String)
         case retraction(slot: Int, length: Double)
         case elephantFoot(Double)
+        case supportTopZ(Double)
+        case supportDistances(z: Double, xy: Double)
+        case outerWallSpeed(Double)
+        case zHop(Double)
+        case filamentFan(slot: Int, speed: Double)
+        case primeTowerTuning(width: Double, volume: Double)
         case spiralVase(Bool)
         case leveling(Bool)
     }
@@ -161,21 +169,73 @@ public enum PrintAdvisor {
                 let reason = warpProne ? "\(materials.first { $0.needsEnclosure }!.type) neigt zum Verziehen."
                     : slender ? "„\(object.name)“ ist hoch und steht auf kleiner Fläche."
                     : "„\(object.name)“ hat wenig Kontaktfläche zum Bett."
+                // Snapmaker forum (U1 "model does not stick"): 2 mm is too narrow, 10 mm or more for tall / small parts.
+                let width: Double = slender || a.footprintArea < 150 ? 10 : 5
                 result.append(Recommendation(
                     id: "brim", title: "Brim für bessere Haftung",
-                    detail: reason + " Ein 5-mm-Rand verhindert Ablösen und lässt sich danach leicht abziehen.",
-                    icon: "square.dashed", severity: .suggestion, action: .brim(5)))
+                    detail: reason + String(format: " Ein %.0f-mm-Rand verhindert Ablösen und lässt sich danach leicht abziehen. Hilft es nicht: Filament trocknen, Platte mit warmem Wasser und Spülmittel reinigen (kein Aceton), Betttemperatur 5 °C höher, Z-Hop an.", width),
+                    icon: "square.dashed", severity: .suggestion, action: .brim(width)))
                 break
             }
+        }
+        // Orca leaves a gap between brim and part when the elephant-foot compensation is set (Snapmaker forum: set it to 0).
+        if s.brimWidth > 0, s.elephantFootCompensation > 0 {
+            result.append(Recommendation(
+                id: "brim-gap", title: "Brim ohne Abstand zum Teil",
+                detail: "Mit Elefantenfuß-Ausgleich lässt der Slicer einen kleinen Spalt zwischen Brim und Teil – dann hält der Brim das Teil nicht. Im Snapmaker-Forum behob 0 mm Ausgleich das. Der Ausgleich ist nur ohne Brim sinnvoll.",
+                icon: "square.dashed.inset.filled", severity: .suggestion, action: .elephantFoot(0)))
+        }
+        // Supports: Snapmaker forum users print organic supports with Z distance = layer height + 0.05 mm
+        // (0.25 mm at 0.2 mm layers); with a different material as interface 0 mm works and leaves a clean surface.
+        if s.support != .off {
+            if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0 {
+                result.append(Recommendation(
+                    id: "support-z0", title: "Stützen: Abstand 0 mm bei anderem Material",
+                    detail: "Die Kontaktschicht der Stützen besteht aus einem anderen Material (z. B. PETG unter PLA). Dann haftet sie kaum, und Nutzer im Snapmaker-Forum stellen den oberen Abstand auf 0 mm – die Unterseite wird so glatter. Erst mit einem kleinen Teil testen; verschmilzt es, wieder 0,2 mm.",
+                    icon: "building.columns", severity: .info, action: .supportTopZ(0)))
+            } else if s.supportInterfaceSlot == nil, s.supportTopZDistance < s.layerHeight + 0.04 {
+                let value = ((s.layerHeight + 0.05) * 100).rounded() / 100
+                result.append(Recommendation(
+                    id: "support-z", title: "Stützen lassen sich leichter lösen",
+                    detail: String(format: "Bei %.2f mm Schichten nutzen Snapmaker-Anwender %.2f mm Abstand zwischen Stütze und Teil: Die Stützen gehen \"wie Butter\" ab. Für sehr hohe Stützen zusätzlich die Erweiterung der ersten Schicht auf 5–7 mm stellen.",
+                                   s.layerHeight, value),
+                    icon: "building.columns", severity: .suggestion, action: .supportTopZ(value)))
+            }
+        }
+
+        // Support from PETG sticks to itself: more distance keeps it from welding to the part (0.28–0.30 mm Z, 0.6 mm XY).
+        if s.support != .off, materials.contains(where: { $0.type.hasPrefix("PETG") }),
+           s.supportTopZDistance < 0.28 || s.supportXYDistance < 0.6 {
+            result.append(Recommendation(
+                id: "support-petg", title: "PETG-Stützen: mehr Abstand",
+                detail: "PETG verschweißt mit sich selbst. Mit 0,28 mm Abstand oben und 0,6 mm zur Seite lassen sich die Stützen sauber abbrechen und die Unterseite bleibt glatt.",
+                icon: "building.columns", severity: .suggestion,
+                action: .supportDistances(z: max(0.28, s.supportTopZDistance), xy: max(0.6, s.supportXYDistance))))
+        }
+        // Clean surface on fine prints: a fast outer wall shows ringing and wobble; 100 mm/s (inner walls stay fast).
+        if s.layerHeight <= 0.16, s.outerWallSpeed > 120, !s.spiralVase {
+            result.append(Recommendation(
+                id: "surface-speed", title: "Glattere Außenwand",
+                detail: String(format: "Bei feinen Schichten zeigt eine schnelle Außenwand Wellen und Ringe. Mit %.0f mm/s außen (innen darf es schnell bleiben) wird die sichtbare Fläche sauberer. Das kostet nur wenig Zeit.", 100),
+                icon: "sparkles", severity: .suggestion, action: .outerWallSpeed(100)))
         }
 
         // Ironing for flat tops.
         let flatTop = analyses.map(\.flatTopArea).reduce(0, +)
         if flatTop > 400, !s.ironing, !materials.contains(where: \.isFlexible) {
-            result.append(Recommendation(
-                id: "ironing", title: "Oberseite glätten (Ironing)",
-                detail: String(format: "%.0f cm² flache Oberseite. Glätten macht sie spiegelglatt (Druck dauert etwas länger).", flatTop / 100),
-                icon: "sparkles", severity: .suggestion, action: .ironing(true)))
+            // Common starting point of the OrcaSlicer guides (Printago, Sovol, community): about 10 % flow and 0.1 mm line spacing,
+            // 15–30 mm/s. PETG is sticky and smears at the nozzle: slower, and only as a hint to test first.
+            if materials.contains(where: { $0.type.hasPrefix("PETG") }) {
+                result.append(Recommendation(
+                    id: "ironing-petg", title: "Glätten (Ironing) bei PETG nur mit Vorsicht",
+                    detail: String(format: "%.0f cm² flache Oberseite. PETG klebt an der Düse, Glätten kann Schlieren oder Klümpchen geben. Mit 15 mm/s, 10 %% Fluss und 0,1 mm Linienabstand klappt es oft. Am besten erst an einem kleinen Teil testen.", flatTop / 100),
+                    icon: "sparkles", severity: .info, action: .ironingTuned(speed: 15, flow: 0.10, spacing: 0.1)))
+            } else {
+                result.append(Recommendation(
+                    id: "ironing", title: "Oberseite glätten (Ironing)",
+                    detail: String(format: "%.0f cm² flache Oberseite. Glätten macht sie spiegelglatt (Druck dauert etwas länger). Eingestellt werden 20 mm/s, 10 %% Fluss und 0,1 mm Linienabstand.", flatTop / 100),
+                    icon: "sparkles", severity: .suggestion, action: .ironingTuned(speed: 20, flow: 0.10, spacing: 0.1)))
+            }
         }
 
         // Infill pattern and density.
@@ -235,11 +295,57 @@ public enum PrintAdvisor {
         }
 
         // Multi-material on the Kobra.
-        if usedTools.count > 1, s.machine.multiMaterial == .filamentSwitcher, !s.primeTower {
+        if usedTools.count > 1, s.machine.multiMaterial == .filamentSwitcher, !s.usesPrimeTower {
             result.append(Recommendation(
                 id: "tower", title: "Reinigungsturm einschalten",
                 detail: "Beim Farbwechsel über die ACE bleibt Restmaterial in der Düse. Der Turm verhindert vermischte Farben am Modell.",
                 icon: "square.stack.3d.up", severity: .warning, action: .primeTower(true)))
+        }
+
+        // Snapmaker U1 forum: the tower stays on (without it: strings and blobs), but a narrow tower with a small purge volume
+        // saves most of the waste ("minimal purge" 10–15 mm³ instead of 60).
+        if usedTools.count > 1, s.printer == .snapmakerU1 {
+            if !s.usesPrimeTower {
+                result.append(Recommendation(
+                    id: "u1-tower", title: "Reinigungsturm nicht ganz weglassen",
+                    detail: "Beim U1 hat jeder Farbe einen eigenen Druckkopf, der Turm ist klein. Ohne ihn berichten Nutzer im Snapmaker-Forum von Fäden und Klümpchen am Modell.",
+                    icon: "square.stack.3d.up", severity: .suggestion, action: .primeTower(true)))
+            } else if s.purgeVolume == 0 || s.purgeVolume > 40 || s.primeTowerWidth > 30 {
+                result.append(Recommendation(
+                    id: "u1-tower-waste", title: "Weniger Abfall am Reinigungsturm",
+                    detail: "Nutzer im Snapmaker-Forum kommen mit 15 mm³ Spülmenge und etwa 25 mm Turmbreite aus. Das spart Filament und Zeit. Je dünner die Schichten, desto mehr Spülmenge braucht der Turm.",
+                    icon: "square.stack.3d.up", severity: .suggestion, action: .primeTowerTuning(width: 25, volume: 15)))
+            }
+        }
+        // PETG strings when the nozzle lifts: Z-hop pulls the soft strand up (Snapmaker PETG guide, community checklists).
+        if materials.contains(where: { $0.type.hasPrefix("PETG") }), s.zHop > 0 {
+            result.append(Recommendation(
+                id: "petg-zhop", title: "PETG: Z-Hop aus",
+                detail: "Beim Anheben der Düse zieht PETG Fäden. Ohne Z-Hop (0 mm) gibt es weniger Fäden und Klümpchen. Zuerst Filament trocknen (65 °C, 6 Stunden), dann Düse in 5-°C-Schritten kühler.",
+                icon: "scribble", severity: .suggestion, action: .zHop(0)))
+        }
+        // Cooling (OrcaSlicer wiki and community): PETG 30–50 % (more weakens layer bonding and makes it brittle),
+        // ABS/ASA 0–30 % (more warps and splits layers).
+        for tool in usedTools.sorted() where tool < s.filaments.count {
+            let f = s.filaments[tool]
+            if f.type.hasPrefix("PETG"), f.fanSpeed > 0.6 {
+                result.append(Recommendation(
+                    id: "fan-petg-\(tool)", title: "PETG: Lüfter zu stark",
+                    detail: String(format: "Slot %d kühlt mit %.0f %%. PETG hält bei 30–50 %% besser zwischen den Schichten zusammen und bricht nicht so leicht. Nur bei hängenden Überhängen etwas mehr.", tool + 1, f.fanSpeed * 100),
+                    icon: "fan", severity: .suggestion, action: .filamentFan(slot: tool, speed: 0.4)))
+            } else if f.type.hasPrefix("ABS") || f.type.hasPrefix("ASA"), f.fanSpeed > 0.3 {
+                result.append(Recommendation(
+                    id: "fan-abs-\(tool)", title: "\(f.type): Lüfter niedriger",
+                    detail: String(format: "Slot %d kühlt mit %.0f %%. ABS/ASA verzieht und reißt zwischen den Schichten bei starker Kühlung; 0–30 %% in geschlossenem Raum sind üblich.", tool + 1, f.fanSpeed * 100),
+                    icon: "fan", severity: .suggestion, action: .filamentFan(slot: tool, speed: 0.2)))
+            }
+        }
+        // Kobra S1: the camera's spaghetti detection sometimes pauses a good print.
+        if s.printer == .kobraS1 {
+            result.append(Recommendation(
+                id: "kobra-spaghetti", title: "Kobra S1: Fehlalarm der Spaghetti-Erkennung",
+                detail: "Die KI-Erkennung pausiert gelegentlich gute Drucke, besonders bei dunklem, durchscheinendem oder glänzendem Filament, mit Resten auf dem Bett oder mit sich lösender erster Schicht. Bett freiräumen, einen Skirt drucken, die Empfindlichkeit im Display senken und die Firmware aktuell halten. Mit „Fortsetzen“ läuft der Druck weiter.",
+                icon: "camera.metering.unknown", severity: .info))
         }
 
         result += materialAdvice(objects: objects, settings: s, usedTools: usedTools, dryerHumidity: dryerHumidity)
@@ -273,6 +379,8 @@ public enum PrintAdvisor {
         case .support(let mode): s.support = mode
         case .brim(let width): s.brimWidth = width
         case .ironing(let on): s.ironing = on
+        case .ironingTuned(let speed, let flow, let spacing):
+            s.ironing = true; s.ironingSpeed = speed; s.ironingFlow = flow; s.ironingSpacing = spacing
         case .infill(let pattern, let density):
             s.infillPattern = pattern
             s.infillDensity = density
@@ -280,11 +388,18 @@ public enum PrintAdvisor {
             if let q = PrintSettings.Quality.allCases.first(where: { $0.layerHeight == h }) { s.apply(q) } else { s.layerHeight = h }
         case .walls(let n): s.wallLoops = n
         case .plate(let p): s.plateType = p
-        case .primeTower(let on): s.primeTower = on
+        case .primeTower(let on): s.primeTower = on; s.primeTowerAuto = on
         case .leveling(let on): s.enableBedLeveling = on
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
         case .elephantFoot(let value): s.elephantFootCompensation = value
+        case .supportTopZ(let value): s.supportTopZDistance = value
+        case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
+        case .outerWallSpeed(let v): s.outerWallSpeed = v
+        case .zHop(let v): s.zHop = v
+        case .filamentFan(let slot, let speed):
+            if slot < s.filaments.count { s.filaments[slot].fanSpeed = speed; s.filaments[slot].fanMinSpeed = min(s.filaments[slot].fanMinSpeed, speed) }
+        case .primeTowerTuning(let width, let volume): s.primeTowerWidth = width; s.purgeVolume = volume
         case .spiralVase(let on): s.spiralVase = on
         case .useLoadedFilament(let slot, let type):
             if slot < s.filaments.count, var f = FilamentLibrary.bestMatch(type: type, printer: s.printer) {
@@ -357,7 +472,8 @@ public enum PrintAdvisor {
                 id: "petg-tips", title: "PETG: Fäden vermeiden",
                 detail: "Bei Fäden die Düse in 5-°C-Schritten kühler stellen (230–240 °C), Rückzug 0,8–2 mm, Lüfter 30–50 %. Stützen mit 0,25 mm Abstand – PETG klebt sonst fest.",
                 icon: "scribble", severity: .info))
-            if s.elephantFootCompensation < 0.15 {
+            // Not with a brim: there the compensation opens a gap between brim and part (see "brim-gap"), the two tips would alternate.
+            if s.elephantFootCompensation < 0.15, s.brimWidth == 0 {
                 result.append(Recommendation(
                     id: "petg-foot", title: "Elefantenfuß ausgleichen",
                     detail: "PETG läuft auf der heißen ersten Schicht breiter. 0,2 mm Ausgleich hält die Unterkante maßhaltig.",
@@ -366,7 +482,7 @@ public enum PrintAdvisor {
         }
 
         // Connectors need an accurate first layer.
-        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1 {
+        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1, s.brimWidth == 0 {
             result.append(Recommendation(
                 id: "connector-foot", title: "Passgenaue Steckverbindungen",
                 detail: "Geteilte Teile mit Zapfen/Dübeln passen nur, wenn die erste Schicht nicht ausbeult. Elefantenfuß-Ausgleich auf 0,15 mm setzen.",

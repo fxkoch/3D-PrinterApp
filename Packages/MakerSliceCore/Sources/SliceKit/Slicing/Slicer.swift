@@ -207,7 +207,7 @@ public final class Slicer: @unchecked Sendable {
 
         // 6. Purge tower for single-nozzle multi-material printers.
         let toolsInPrint = Set(result.flatMap { $0.islands.map(\.tool) })
-        if s.primeTower, s.machine.multiMaterial == .filamentSwitcher, toolsInPrint.count > 1 {
+        if s.usesPrimeTower, toolsInPrint.count > 1 {
             try PrimeTower(settings: s).insert(into: &result, footprint: all)
         }
         progress(SliceProgress(phase: "Fertig", fraction: 1))

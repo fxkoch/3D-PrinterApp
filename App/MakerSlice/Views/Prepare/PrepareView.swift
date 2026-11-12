@@ -446,11 +446,13 @@ struct PrepareView: View {
                     .font(.subheadline)
                     .accessibilityIdentifier("openColorSetup")
             }
-            if machine.multiMaterial == .filamentSwitcher, app.expertMode {
+            if app.expertMode {
                 HelpRow(key: .primeTower) {
-                    Toggle("Reinigungsturm", isOn: $project.settings.primeTower)
+                    Toggle("Reinigungsturm", isOn: Binding(
+                        get: { project.settings.usesPrimeTower },
+                        set: { project.settings.primeTower = $0; project.settings.primeTowerAuto = $0 }))
                 }
-                if project.settings.primeTower {
+                if project.settings.usesPrimeTower {
                     HStack {
                         Text("Spülmenge je Wechsel")
                         Spacer()
