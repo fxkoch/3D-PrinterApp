@@ -16,7 +16,7 @@ struct PrimeTower {
 
     func insert(into layers: inout [SlicedLayer], footprint: [Polygons]) throws {
         guard let lastChange = lastChangeLayer(layers) else { return }
-        let rect = try placement(footprint: footprint)
+        let rect = try placement(footprint: footprint, size: fittedSize(layers, lastChange: lastChange))
         let w = settings.lineWidth
         var previousTool = layers.first?.islands.first?.tool
 
@@ -74,6 +74,29 @@ struct PrimeTower {
         }
     }
 
+    /// Side of the tower: just large enough for the purge strips of the busiest layer. `primeTowerWidth` is the upper
+    /// limit; a tall tower keeps a wider base so it does not get knocked over (about an eighth of its height).
+    func fittedSize(_ layers: [SlicedLayer], lastChange: Int) -> Double {
+        let limit = max(10, settings.primeTowerWidth)
+        guard settings.purgeVolume > 0 else { return limit }   // "default dense strip" fills the whole tower
+        var previous = layers.first?.islands.first?.tool
+        var mostChanges = 1
+        var thinnest = Double.greatestFiniteMagnitude
+        for layer in layers[...lastChange] where !layer.islands.isEmpty {
+            var changes = 0
+            for island in layer.islands {
+                if let p = previous, p != island.tool { changes += 1 }
+                previous = island.tool
+            }
+            mostChanges = max(mostChanges, changes)
+            thinnest = min(thinnest, layer.height)
+        }
+        let area = Double(mostChanges) * settings.purgeVolume / max(thinnest, 0.04)
+        let needed = area.squareRoot() + 2 * settings.lineWidth + 1
+        let stable = max(10, layers[lastChange].z * 0.12)
+        return min(limit, max(needed, stable))
+    }
+
     /// Last layer on which the filament changes (the tower only needs to reach it).
     func lastChangeLayer(_ layers: [SlicedLayer]) -> Int? {
         var last: Int?
@@ -88,8 +111,8 @@ struct PrimeTower {
     }
 
     /// Picks a free bed corner for the tower.
-    func placement(footprint: [Polygons]) throws -> (minX: Double, minY: Double, maxX: Double, maxY: Double) {
-        let size = max(10, settings.primeTowerWidth)
+    func placement(footprint: [Polygons], size: Double? = nil) throws -> (minX: Double, minY: Double, maxX: Double, maxY: Double) {
+        let size = size ?? max(10, settings.primeTowerWidth)
         let bed = settings.bedSize
         let margin = 8.0
         var used = Polygons()

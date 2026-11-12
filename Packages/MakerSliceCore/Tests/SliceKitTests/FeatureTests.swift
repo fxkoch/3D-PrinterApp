@@ -65,6 +65,27 @@ final class FeatureTests: XCTestCase {
         XCTAssertEqual(out.estimate.toolChanges, out.layers.count)
     }
 
+    /// The tower is only as large as the purge strips of the busiest layer need (the width setting is the upper limit).
+    func testPrimeTowerShrinksToWhatThePurgeNeeds() throws {
+        func towerSide(_ s: PrintSettings) throws -> Double {
+            let a = ModelObject(name: "A", mesh: Fixtures.box(20, 20, 4), tool: 0)
+            let b = ModelObject(name: "B", mesh: Fixtures.box(20, 20, 4), tool: 1)
+            let arranged = try XCTUnwrap(PlateArranger.arrange([a, b], bedSize: s.bedSize))
+            let layers = try Slicer(settings: s).slice(arranged)
+            let xs = layers.flatMap { $0.islands.flatMap(\.extrusions) }.filter { $0.role == .primeTower }.flatMap { $0.points.map(\.mmX) }
+            return try XCTUnwrap(xs.max()) - XCTUnwrap(xs.min()) + s.lineWidth
+        }
+        var s = PrintSettings(printer: .snapmakerU1)
+        XCTAssertEqual(s.primeTowerWidth, 20)
+        let small = try towerSide(s)
+        XCTAssertLessThan(small, 14, "15 mm³ per change need far less than 20 mm")
+        XCTAssertGreaterThanOrEqual(small, 9.5)
+        s.purgeVolume = 0
+        XCTAssertEqual(try towerSide(s), 20, accuracy: 1.0, "without a purge volume the whole tower is filled")
+        s.purgeVolume = 15; s.primeTowerWidth = 11
+        XCTAssertLessThanOrEqual(try towerSide(s), 11.5, "the setting is the upper limit")
+    }
+
     func testIroningAndGyroid() throws {
         var s = PrintSettings(printer: .snapmakerU1)
         s.ironing = true
