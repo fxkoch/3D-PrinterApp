@@ -75,7 +75,7 @@ final class PaintTests: XCTestCase {
         XCTAssertEqual(Set(middle.islands.map(\.tool)), [0, 1], "both colours print on a painted side")
         // The coloured strip is narrow (about the wall thickness) and sits on the painted side (x = 120).
         let painted = middle.islands.first { $0.tool == 1 }!
-        let xs = painted.extrusions.flatMap { $0.points.map(\.mmX) }
+        let xs = painted.extrusions.filter { $0.role != .primeTower }.flatMap { $0.points.map(\.mmX) } // the tower stands beside the part
         XCTAssertGreaterThan(xs.min()!, 117.5)
         XCTAssertLessThan(xs.max()!, 120.5)
     }

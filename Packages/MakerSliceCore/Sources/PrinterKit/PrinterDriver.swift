@@ -129,10 +129,30 @@ public protocol PrinterDriver: AnyObject, Sendable {
     /// ACE: pulls the filament of `slot` back into the box.
     func retractSlot(_ slot: Int) async throws
     func setLight(_ on: Bool) async throws
+    /// How the speed of a running print can be changed on this printer.
+    var speedControl: SpeedControl { get }
+    /// Speed level of the maker: 1 silent, 2 standard, 3 sport.
+    func setSpeedMode(_ mode: Int) async throws
+    /// Speed in percent of the sliced speed.
+    func setSpeedPercent(_ percent: Int) async throws
     func calibration() async throws -> CalibrationData
     /// Recent messages from the printer (console, errors).
     func recentEvents() async throws -> [PrinterEvent]
     func disconnect()
+}
+
+/// How the app can change the speed of a running print.
+public enum SpeedControl: Sendable, Equatable {
+    case none
+    /// Fixed levels of the maker (1 silent, 2 standard, 3 sport) – Anycubic and Bambu.
+    case modes
+    /// Any percentage of the sliced speed (Klipper `M220`).
+    case percent
+
+    public static let modeNames = ["", "Leise", "Standard", "Sport"]
+    /// Presets for printers with a free percentage; "Leise" is half speed.
+    public static let percentPresets: [(name: String, percent: Int)] = [("Leise", 50), ("Normal", 100), ("Schnell", 125)]
+    public static let percentRange = 30...150
 }
 
 /// What the app may do with the filament on a printer.
@@ -179,6 +199,10 @@ extension PrinterDriver {
     public var filamentControl: FilamentControlSupport {
         FilamentControlSupport(note: "Dieser Drucker lässt sich vom Handy aus nicht beim Filament bedienen.")
     }
+
+    public var speedControl: SpeedControl { .none }
+    public func setSpeedMode(_ mode: Int) async throws { throw PrinterError.unsupported("Dieser Drucker lässt das Tempo nicht vom Handy aus ändern.") }
+    public func setSpeedPercent(_ percent: Int) async throws { throw PrinterError.unsupported("Dieser Drucker lässt das Tempo nicht vom Handy aus ändern.") }
 
     public func extrude(millimetres: Double) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
     public func loadSlot(_ slot: Int) async throws { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }

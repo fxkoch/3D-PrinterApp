@@ -38,6 +38,7 @@ public enum SettingKey: String, CaseIterable, Sendable {
     case zHop, retractSpeed, retractMinTravel
     case spiralVase, fuzzySkin, fuzzySkinThickness, fuzzySkinPointDistance
     case plateType, enableTimelapse, enableBedLeveling, startVibrationCompensation, startFlowCalibration
+    case quietAir, quietInnerFanSpeed
     // Filament
     case nozzleTemp, firstLayerNozzleTemp, bedTemp, firstLayerBedTemp, smoothPlateBedTemp
     case fanSpeed, overhangFanSpeed, fanOffLayers, filamentMinLayerTime
@@ -291,6 +292,16 @@ public enum SettingsHelp {
         .enableTimelapse: SettingHelp(
             "Zeitraffer", "Der U1 nimmt pro Schicht ein Kamerabild auf.",
             decrease: "Spart wenige Sekunden pro Schicht."),
+        .quietAir: SettingHelp(
+            "Leise Luftführung (U1-Haube)", "Der Haubenlüfter (Umluft durch den Filter) läuft leise mit fester Stufe. Die Abluft startet niedrig; der Drucker erhöht sie nur, wenn die Kammer zu warm wird.",
+            increase: "Mehr Filterung im Raum, etwas mehr Geräusch.",
+            decrease: "Ausgeschaltet gilt die Standardeinstellung von Snapmaker (Abluft stärker).",
+            tip: "Der Filter arbeitet nur im Umluftbetrieb. PLA und PETG brauchen Abluft, damit die Kammer nicht zu heiß wird: sie bleibt vorhanden, wird aber nur so stark wie nötig. ABS, ASA, PC und PA laufen ohnehin über den Filter."),
+        .quietInnerFanSpeed: SettingHelp(
+            "Haubenlüfter-Stufe", "Geschwindigkeit des inneren Filterlüfters in Prozent.",
+            increase: "Mehr Luftdurchsatz durch den Filter, lauter.",
+            decrease: "Leiser, weniger Luftaustausch.",
+            tip: "35 % gelten als leise genug."),
         .enableBedLeveling: SettingHelp(
             "Bett-Nivellierung vor dem Druck", "Der Drucker vermisst vor dem Druck das Bett. U1 und P1S messen nur im Bereich des Modells, der Kobra S1 misst selbst (die App kann nur an oder aus sagen).",
             increase: "Perfekte erste Schicht, auch wenn sich etwas verstellt hat.",

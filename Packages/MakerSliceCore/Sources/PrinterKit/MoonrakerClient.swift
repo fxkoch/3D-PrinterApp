@@ -220,6 +220,15 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         try await runGCode(FilamentMove.script(millimetres: millimetres))
     }
 
+    public var speedControl: SpeedControl { .percent }
+    /// `M220` scales every move of the running job; it does not change accelerations or fans.
+    public func setSpeedPercent(_ percent: Int) async throws {
+        try await runGCode("M220 S\(min(max(percent, SpeedControl.percentRange.lowerBound), SpeedControl.percentRange.upperBound))")
+    }
+    public func setSpeedMode(_ mode: Int) async throws {
+        try await setSpeedPercent(SpeedControl.percentPresets[min(max(mode, 1), 3) - 1].percent)
+    }
+
     public func setBedTemperature(_ t: Int) async throws { try await runGCode("M140 S\(t)") }
     public func setToolTemperature(tool: Int, _ t: Int) async throws { try await runGCode("M104 T\(tool) S\(t)") }
 

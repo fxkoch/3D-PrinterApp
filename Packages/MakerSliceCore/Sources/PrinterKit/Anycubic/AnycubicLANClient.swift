@@ -486,6 +486,25 @@ public final class AnycubicLANClient: PrinterDriver, @unchecked Sendable {
         }
     }
 
+    public var speedControl: SpeedControl { .modes }
+
+    /// The speed level is a setting of the running job ("print/update", like the temperatures); the printer reports it
+    /// back as `print_speed_mode`, so the app checks that it really changed.
+    public func setSpeedMode(_ mode: Int) async throws {
+        let mode = min(max(mode, 1), 3)
+        guard locked({ cachedStatus.state == .printing || cachedStatus.state == .paused }) else {
+            throw PrinterError.unsupported("Das Tempo lässt sich nur während eines Drucks ändern.")
+        }
+        try await command(type: "print", action: "update", data: ["taskid": "-1", "settings": ["print_speed_mode": mode]])
+        for _ in 0..<5 {
+            queryAll()
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            if locked({ cachedStatus.speedMode }) == mode { return }
+        }
+        log(.warning, "Tempo-Stufe \(mode) nicht übernommen")
+        throw PrinterError.http(0, "Der Drucker hat die Tempo-Stufe nicht übernommen. Bitte am Drucker-Display umstellen.")
+    }
+
     public func setLight(_ on: Bool) async throws {
         try await command(type: "light", action: "control", data: ["type": 2, "status": on ? 1 : 0, "brightness": on ? 100 : 0])
     }

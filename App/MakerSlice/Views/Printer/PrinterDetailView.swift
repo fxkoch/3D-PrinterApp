@@ -231,6 +231,20 @@ struct PrinterDetailView: View {
                     Metric(value: Format.temp(chamber.temperature), caption: "Kammer", systemImage: "cube.transparent")
                 }
             }
+            if let air = s.purifier {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Haube: \(air.mode)", systemImage: "wind")
+                        .font(.subheadline.weight(.semibold))
+                    HStack {
+                        Metric(value: "\(Int((air.innerSpeed * 100).rounded())) %", caption: "Filterlüfter", systemImage: "fanblades")
+                        Metric(value: "\(Int((air.exhaustSpeed * 100).rounded())) %", caption: "Abluft", systemImage: "arrow.up.right.square")
+                    }
+                    .accessibilityIdentifier("purifierStatus")
+                    Text(String(format: "Filter: %.0f von 720 Betriebsstunden.", air.innerHours))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if app.expertMode, s.state != .printing, s.state != .paused {
                 Menu {
                     ForEach(["PLA", "PETG", "ABS", "TPU"], id: \.self) { type in
@@ -358,10 +372,13 @@ struct PrinterDetailView: View {
                     if let fan = s.fanPercent { Metric(value: "\(Int(fan)) %", caption: "Bauteillüfter", systemImage: "fan") }
                     if let aux = s.auxFanPercent { Metric(value: "\(Int(aux)) %", caption: "Zusatzlüfter", systemImage: "wind") }
                     if let mode = s.speedMode {
-                        Metric(value: ["", "Leise", "Standard", "Sport"][min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+                        Metric(value: SpeedControl.modeNames[min(max(mode, 0), 3)], caption: "Tempo", systemImage: "speedometer")
+                    } else if let percent = s.speedPercent {
+                        Metric(value: "\(Int(percent)) %", caption: "Tempo", systemImage: "speedometer")
                     }
                 }
             }
+            SpeedPanel(printer: printer, status: s)
             Toggle(isOn: Binding(get: { s.lightOn ?? false }, set: { on in
                 Task { await app.printers.perform(on: printer, on ? "Licht an" : "Licht aus") { try await $0.setLight(on) } }
             })) {

@@ -64,10 +64,14 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertEqual(after, "1", "expert mode should be switched on (was \(before ?? "nil"))")
         snapshot("49-Expertenmodus-an")
         // Expert mode adds several sections (assistant, cloud slicing, …) above the defaults: the form only
-        // builds rows that are on screen, so scroll down until the section exists. Section headers may be
-        // reported in capitals, so compare without case.
-        let defaults = app.staticTexts.matching(NSPredicate(format: "label ==[c] 'Standard-Einstellungen'")).firstMatch
-        for _ in 0..<6 where !defaults.exists { app.swipeUp(); sleep(1) }
+        // builds rows that are on screen, so scroll down until the section exists. Short drags instead of swipes:
+        // a full swipe can jump past the short section in one go, and then it no longer exists either.
+        // Depending on the iOS version the section header is reported in capitals ("STANDARD-EINSTELLUNGEN").
+        let defaults = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Standard-Einstellungen")).firstMatch
+        for _ in 0..<16 where !defaults.exists {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+        }
         snapshot("49b-Standard-Einstellungen")
         XCTAssertTrue(defaults.waitForExistence(timeout: 5),
                       "expert mode should reveal the default settings (switch was \(before ?? "nil"), is \(after ?? "nil"))")

@@ -117,6 +117,8 @@ struct AdvancedSettingsView: View {
                 }
                 if settings.printer == .snapmakerU1 {
                     toggle(.enableTimelapse, $settings.enableTimelapse)
+                    toggle(.quietAir, $settings.quietAir)
+                    if settings.quietAir { number(.quietInnerFanSpeed, $settings.quietInnerFanSpeed, "", 0.2...0.8, step: 0.05) }
                 }
                 toggle(.enableBedLeveling, $settings.enableBedLeveling)
                 if settings.printer == .kobraS1 {
