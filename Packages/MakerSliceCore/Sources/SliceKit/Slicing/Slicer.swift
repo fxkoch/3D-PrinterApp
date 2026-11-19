@@ -135,6 +135,7 @@ public final class Slicer: @unchecked Sendable {
         var supportGenerator = SupportGenerator(settings: s)
         supportGenerator.denseFoot = !partGroups.contains(PrimeTower.bondGroup(s.filament(for: contactTool).type))
         let support = s.support == .off ? nil : supportGenerator.generate(layers: all, tops: tops)
+        let denseContact = supportGenerator.denseFoot
         if isCancelled() { throw SliceError.cancelled }
 
         // 3. Walls and infill per layer, in parallel.
@@ -158,7 +159,8 @@ public final class Slicer: @unchecked Sendable {
                 }
                 if let support, !support.areas[i].isEmpty {
                     let gen = LayerToolpathGenerator(settings: s, layerIndex: i, z: tops[i], height: height)
-                    let supportPaths = gen.supportPaths(area: support.areas[i], interface: support.interfaces[i], foot: support.feet[i])
+                    let supportPaths = gen.supportPaths(area: support.areas[i], interface: support.interfaces[i], foot: support.feet[i],
+                                                        dense: denseContact)
                     // Support (and its contact layers) may use their own slots, e.g. a soluble or cheaper material.
                     let supportTool = s.supportSlot ?? tools.first ?? 0
                     let interfaceTool = s.supportInterfaceSlot ?? supportTool

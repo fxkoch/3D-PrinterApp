@@ -122,7 +122,8 @@ struct LayerToolpathGenerator {
         return extrusions
     }
 
-    func supportPaths(area: Polygons, interface: Polygons, foot: Polygons = Polygons()) -> [Extrusion] {
+    /// - Parameter dense: contact layers of a support that does not weld to the part: 100 % lines, slower, so they hold.
+    func supportPaths(area: Polygons, interface: Polygons, foot: Polygons = Polygons(), dense: Bool = false) -> [Extrusion] {
         let s = settings
         let w = isFirstLayer ? s.firstLayerLineWidth : s.lineWidth
         let speed = isFirstLayer ? s.firstLayerSpeed : s.supportSpeed
@@ -143,8 +144,10 @@ struct LayerToolpathGenerator {
             }
         }
         if !interface.isEmpty {
-            result += lines(in: interface, angle: layerIndex % 2 == 0 ? 0 : 90, spacing: w * 1.6, phase: 0).map {
-                Extrusion(role: .supportInterface, points: $0, closed: false, width: w, speed: speed * 0.6)
+            let spacing = dense ? w : w * 1.6
+            let factor = dense ? 0.5 : 0.6
+            result += lines(in: interface, angle: layerIndex % 2 == 0 ? 0 : 90, spacing: spacing, phase: 0).map {
+                Extrusion(role: .supportInterface, points: $0, closed: false, width: w, speed: speed * factor)
             }
         }
         return result

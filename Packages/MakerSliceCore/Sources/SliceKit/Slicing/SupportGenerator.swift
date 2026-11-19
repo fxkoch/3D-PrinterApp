@@ -6,6 +6,8 @@ struct SupportGenerator {
     /// Support of a material that does not weld to the part (PLA on PETG): where it stands on the part it gets a dense
     /// foot, otherwise the few thin lines find no hold and the support falls over. It still comes off cleanly.
     var denseFoot = false
+    /// Contact layers under the model: three for a support that does not weld (forum advice 2–3), otherwise two.
+    var interfaceLayers: Int { denseFoot ? 3 : 2 }
 
     struct Result {
         var areas: [Polygons]
@@ -37,8 +39,8 @@ struct SupportGenerator {
             }
         }
 
-        // Leave a gap of whole layers between support and model.
-        let gap = max(1, Int((s.supportTopZDistance / s.layerHeight).rounded()))
+        // Leave a gap of whole layers between support and model. 0 mm means the contact layers touch the model.
+        let gap = max(0, Int((s.supportTopZDistance / s.layerHeight).rounded()))
 
         // Shadow of the model as seen from below – used for "build plate only".
         var shadow = [Polygons](repeating: Polygons(), count: n)
@@ -51,12 +53,12 @@ struct SupportGenerator {
         }
 
         var carry = Polygons()
-        var recent: [Polygons] = [] // overhangs of the last two interface layers
+        var recent: [Polygons] = [] // overhangs of the last few interface layers
         for i in stride(from: n - 1, through: 0, by: -1) {
             let source = i + 1 + gap < n ? overhang[i + 1 + gap] : Polygons()
             if !source.isEmpty { carry = (carry + source).union() }
             recent.insert(source, at: 0)
-            if recent.count > 2 { recent.removeLast() }
+            if recent.count > interfaceLayers { recent.removeLast() }
             guard !carry.isEmpty else { continue }
 
             // Columns end where they land on the model.

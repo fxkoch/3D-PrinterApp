@@ -21,6 +21,7 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case autoSplit(objectID: UUID)
         case useLoadedFilament(slot: Int, type: String)
         case retraction(slot: Int, length: Double)
+        case filamentNozzle(slot: Int, temp: Int)
         case elephantFoot(Double)
         case supportTopZ(Double)
         case supportDistances(z: Double, xy: Double)
@@ -185,43 +186,36 @@ public enum PrintAdvisor {
                 detail: "Mit Elefantenfuß-Ausgleich lässt der Slicer einen kleinen Spalt zwischen Brim und Teil – dann hält der Brim das Teil nicht. Im Snapmaker-Forum behob 0 mm Ausgleich das. Der Ausgleich ist nur ohne Brim sinnvoll.",
                 icon: "square.dashed.inset.filled", severity: .suggestion, action: .elephantFoot(0)))
         }
-        // Supports: Snapmaker forum users print organic supports with Z distance = layer height + 0.05 mm
-        // (0.25 mm at 0.2 mm layers); with a different material as interface 0 mm works and leaves a clean surface.
+        // Supports: one rule per situation, decided by the material the supports are printed in (and its contact layer)
+        // compared with the part. Each rule proposes one value, so the tips cannot push each other back and forth.
         if s.support != .off {
-            // Supports of a material that does not weld to the part (PLA on PETG) come off easily – that is the point of
-            // the second material – but thin support lines find no hold where they stand on the part.
             let partGroups = Set(materials.map { PrimeTower.bondGroup($0.type) })
-            if let slot = s.supportInterfaceSlot ?? s.supportSlot, !partGroups.contains(PrimeTower.bondGroup(s.filament(for: slot).type)) {
-                let other = s.filament(for: slot).type, part = materials.first?.type ?? "Teil"
+            let bodyTool = s.supportSlot ?? usedTools.min() ?? 0
+            let contact = s.filament(for: s.supportInterfaceSlot ?? bodyTool).type
+            let part = materials.first?.type ?? "Teil"
+            let zNow = s.supportTopZDistance
+            if !partGroups.contains(PrimeTower.bondGroup(contact)) {
+                // PLA on PETG: the release is the point, but the support must still stand where it lands on the part.
                 result.append(Recommendation(
-                    id: "support-foot", title: "Stützen aus \(other) auf \(part): fester Fuß",
-                    detail: "\(other) haftet kaum auf \(part). So lösen sich die Stützen leicht, aber dünne Stützlinien fallen um, wo sie auf dem Teil stehen. Dort druckt die App deshalb die ersten zwei Schichten der Stütze geschlossen, etwas breiter und langsam. Zusätzlich hilft 0 mm Abstand.",
-                    icon: "building.columns", severity: .info, action: s.supportTopZDistance > 0 ? .supportTopZ(0) : nil))
-            }
-            let footTip = result.last?.id == "support-foot"
-            if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0, !footTip {
+                    id: "support-foot", title: "Stützen aus \(contact) auf \(part): fester Fuß",
+                    detail: "\(contact) haftet kaum auf \(part). So lösen sich die Stützen leicht. Damit sie nicht umfallen, druckt die App an der Auflage auf dem Teil einen geschlossenen Fuß, drei Kontaktschichten mit 100 % und langsamer. Abstand 0 mm, die Kontaktschicht liegt direkt am Teil.",
+                    icon: "building.columns", severity: .info, action: zNow != 0 ? .supportTopZ(0) : nil))
+            } else if contact.uppercased().hasPrefix("PETG"), zNow < 0.28 || s.supportXYDistance < 0.6 {
+                // PETG sticks to itself: more distance keeps it from welding to the part (0.28 mm Z, 0.6 mm XY).
                 result.append(Recommendation(
-                    id: "support-z0", title: "Stützen: Abstand 0 mm bei anderem Material",
-                    detail: "Die Kontaktschicht der Stützen besteht aus einem anderen Material (z. B. PETG unter PLA). Dann haftet sie kaum, und Nutzer im Snapmaker-Forum stellen den oberen Abstand auf 0 mm – die Unterseite wird so glatter. Erst mit einem kleinen Teil testen; verschmilzt es, wieder 0,2 mm.",
-                    icon: "building.columns", severity: .info, action: .supportTopZ(0)))
-            } else if s.supportInterfaceSlot == nil, s.supportTopZDistance < s.layerHeight + 0.04 {
+                    id: "support-petg", title: "PETG-Stützen: mehr Abstand",
+                    detail: "\(contact) verschweißt mit sich selbst. Mit 0,28 mm Abstand oben und 0,6 mm zur Seite lassen sich die Stützen sauber abbrechen und die Unterseite bleibt glatt.",
+                    icon: "building.columns", severity: .suggestion,
+                    action: .supportDistances(z: max(0.28, zNow), xy: max(0.6, s.supportXYDistance))))
+            } else if !contact.uppercased().hasPrefix("PETG"), zNow < s.layerHeight + 0.04 {
+                // Snapmaker forum: organic supports come off "like butter" with layer height + 0.05 mm.
                 let value = ((s.layerHeight + 0.05) * 100).rounded() / 100
                 result.append(Recommendation(
                     id: "support-z", title: "Stützen lassen sich leichter lösen",
-                    detail: String(format: "Bei %.2f mm Schichten nutzen Snapmaker-Anwender %.2f mm Abstand zwischen Stütze und Teil: Die Stützen gehen \"wie Butter\" ab. Für sehr hohe Stützen zusätzlich die Erweiterung der ersten Schicht auf 5–7 mm stellen.",
-                                   s.layerHeight, value),
+                    detail: String(format: "Bei %.2f mm Schichten nutzen Snapmaker-Anwender %.2f mm Abstand zwischen Stütze und Teil: Die Stützen aus %@ gehen \"wie Butter\" ab. Für sehr hohe Stützen zusätzlich die Erweiterung der ersten Schicht auf 5–7 mm stellen.",
+                                   s.layerHeight, value, contact),
                     icon: "building.columns", severity: .suggestion, action: .supportTopZ(value)))
             }
-        }
-
-        // Support from PETG sticks to itself: more distance keeps it from welding to the part (0.28–0.30 mm Z, 0.6 mm XY).
-        if s.support != .off, materials.contains(where: { $0.type.hasPrefix("PETG") }),
-           s.supportTopZDistance < 0.28 || s.supportXYDistance < 0.6 {
-            result.append(Recommendation(
-                id: "support-petg", title: "PETG-Stützen: mehr Abstand",
-                detail: "PETG verschweißt mit sich selbst. Mit 0,28 mm Abstand oben und 0,6 mm zur Seite lassen sich die Stützen sauber abbrechen und die Unterseite bleibt glatt.",
-                icon: "building.columns", severity: .suggestion,
-                action: .supportDistances(z: max(0.28, s.supportTopZDistance), xy: max(0.6, s.supportXYDistance))))
         }
         // Clean surface on fine prints: a fast outer wall shows ringing and wobble; 100 mm/s (inner walls stay fast).
         if s.layerHeight <= 0.16, s.outerWallSpeed > 120, !s.spiralVase {
@@ -411,6 +405,8 @@ public enum PrintAdvisor {
         case .leveling(let on): s.enableBedLeveling = on
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
+        case .filamentNozzle(let slot, let temp):
+            if slot < s.filaments.count { s.filaments[slot].nozzleTemp = temp; s.filaments[slot].firstLayerNozzleTemp = temp }
         case .elephantFoot(let value): s.elephantFootCompensation = value
         case .supportTopZ(let value): s.supportTopZDistance = value
         case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
@@ -485,12 +481,23 @@ public enum PrintAdvisor {
                 icon: "drop.triangle", severity: .info))
         }
 
-        // PETG.
+        // PETG: the tips quote the PETG set in each slot and its current values, not a generic range.
+        for tool in tools where s.filament(for: tool).type.uppercased().hasPrefix("PETG") {
+            let f = s.filament(for: tool)
+            if f.nozzleTemp > 240 {
+                result.append(Recommendation(
+                    id: "petg-temp-\(tool)", title: "\(label(tool)) \(f.name): Düse 240 °C",
+                    detail: "Eingestellt sind \(f.nozzleTemp) °C. Beim Temperaturturm war mit PETG 240 °C am saubersten, bei 270 °C hingen die meisten Fäden. Erst danach Rückzug prüfen.",
+                    icon: "thermometer.medium", severity: .suggestion, action: .filamentNozzle(slot: tool, temp: 240)))
+            }
+            if f.retractLength > 0.8 {
+                result.append(Recommendation(
+                    id: "petg-retract-\(tool)", title: "\(label(tool)) \(f.name): Rückzug 0,6 mm",
+                    detail: String(format: "Eingestellt sind %.1f mm. Beim Rückzug-Test mit diesem PETG war 0,2 mm sauberer als 1,6 mm. Fehlen dann Stellen im Druck, Rückzug in 0,2-mm-Schritten wieder erhöhen.", f.retractLength),
+                    icon: "arrow.uturn.backward", severity: .suggestion, action: .retraction(slot: tool, length: 0.6)))
+            }
+        }
         if types.contains(where: { $0.hasPrefix("PETG") }) {
-            result.append(Recommendation(
-                id: "petg-tips", title: "PETG: Fäden vermeiden",
-                detail: "Bei Fäden die Düse in 5-°C-Schritten kühler stellen (230–240 °C), Rückzug 0,8–2 mm, Lüfter 30–50 %. Stützen mit 0,25 mm Abstand – PETG klebt sonst fest.",
-                icon: "scribble", severity: .info))
             // Not with a brim: there the compensation opens a gap between brim and part (see "brim-gap"), the two tips would alternate.
             if s.elephantFootCompensation < 0.15, s.brimWidth == 0 {
                 result.append(Recommendation(
@@ -500,8 +507,9 @@ public enum PrintAdvisor {
             }
         }
 
-        // Connectors need an accurate first layer.
-        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1, s.brimWidth == 0 {
+        // Connectors need an accurate first layer. Not next to the PETG tip, which sets the same setting to 0.2 mm.
+        let petgFootShown = types.contains(where: { $0.hasPrefix("PETG") }) && s.elephantFootCompensation < 0.15 && s.brimWidth == 0
+        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1, s.brimWidth == 0, !petgFootShown {
             result.append(Recommendation(
                 id: "connector-foot", title: "Passgenaue Steckverbindungen",
                 detail: "Geteilte Teile mit Zapfen/Dübeln passen nur, wenn die erste Schicht nicht ausbeult. Elefantenfuß-Ausgleich auf 0,15 mm setzen.",
