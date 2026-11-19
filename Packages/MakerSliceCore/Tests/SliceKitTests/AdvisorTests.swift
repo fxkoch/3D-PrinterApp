@@ -162,6 +162,22 @@ final class AdvisorTests: XCTestCase {
         XCTAssertNil(PrintAdvisor.recommendations(objects: t, settings: s).first { $0.id == "petg-temp-1" })
     }
 
+    /// Vase mode: the advice to switch supports off must not be undone by the advice to switch them on.
+    func testVaseModeDoesNotTurnSupportsBackOn() throws {
+        var objs = [ModelObject(name: "Overhang", mesh: Fixtures.tShape())]
+        var s = PrintSettings()
+        s.support = .buildPlateOnly
+        s.spiralVase = true
+        let recs = PrintAdvisor.recommendations(objects: objs, settings: s)
+        let off = try XCTUnwrap(recs.first { $0.id == "vase-support" })
+        XCTAssertEqual(off.action, .support(.off))
+        try PrintAdvisor.apply(off.action!, settings: &s, objects: &objs)
+        let after = PrintAdvisor.recommendations(objects: objs, settings: s).map(\.id)
+        XCTAssertFalse(after.contains("support"))
+        XCTAssertFalse(after.contains("support-everywhere"))
+        XCTAssertFalse(after.contains("vase-support"))
+    }
+
     func testSurfaceAndPETGSupportTips() throws {
         let t = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "T", mesh: Fixtures.tShape())], bedSize: 270))
         var s = PrintSettings()

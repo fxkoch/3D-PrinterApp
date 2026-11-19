@@ -137,14 +137,15 @@ public enum PrintAdvisor {
 
         // Supports.
         let overhang = analyses.map(\.overhangArea).reduce(0, +)
-        if overhang > 30, s.support == .off {
+        // Vase mode has no supports ("Stützen im Vasenmodus" turns them off): the support tips must not turn them back on.
+        if overhang > 30, s.support == .off, !s.spiralVase {
             let mode: SupportMode = analyses.contains(where: \.overhangOverModel) ? .everywhere : .buildPlateOnly
             result.append(Recommendation(
                 id: "support", title: "Stützen einschalten",
                 detail: String(format: "Etwa %.0f mm² hängen frei in der Luft (flacher als %.0f°). Ohne Stützen hängen diese Stellen durch.",
                                overhang, s.supportAngle) + (mode == .everywhere ? " Einige Überhänge liegen über dem Modell – Stützen „Überall“." : ""),
                 icon: "building.columns", severity: .warning, action: .support(mode)))
-        } else if overhang > 30, s.support == .buildPlateOnly, analyses.contains(where: \.overhangOverModel) {
+        } else if overhang > 30, s.support == .buildPlateOnly, !s.spiralVase, analyses.contains(where: \.overhangOverModel) {
             result.append(Recommendation(
                 id: "support-everywhere", title: "Stützen „Überall“ nötig",
                 detail: "Einige Überhänge liegen über dem Modell selbst. Mit „Nur vom Druckbett“ entstehen dort keine Stützen und die Stellen hängen durch.",
