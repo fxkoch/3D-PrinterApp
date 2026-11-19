@@ -564,7 +564,7 @@ public enum PrintAdvisor {
             if s.support != .off {
                 result.append(Recommendation(
                     id: "vase-support", title: "Stützen im Vasenmodus",
-                    detail: "Stützen unterbrechen die Spirale. Vasenmodelle sollten ohne Überhänge auskommen.",
+                    detail: "Der Vasenmodus ist eingeschaltet. Stützen unterbrechen die Spirale, und Vasenmodelle sollten ohne Überhänge auskommen. Oft ist der Modus eine Altlast aus einer Kalibrierung (Max-Volumenstrom druckt als Vase). Hat das Modell Überhänge, Vasenmodus ausschalten.",
                     icon: "building.columns", severity: .suggestion, action: .support(.off)))
             }
         }

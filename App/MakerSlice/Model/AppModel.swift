@@ -330,7 +330,8 @@ final class AppModel {
             if startPrint, project.settings.enableBedLeveling { LevelingLog.record(printer: project.settings.printer, plate: project.settings.plateType) }
             log.add(.info, startPrint ? "Druck gestartet: \(project.gcodeFileName)" : "Hochgeladen: \(project.gcodeFileName)",
                     source: printer.name)
-            remember(project.settings)
+            // A calibration print has its own settings (e.g. vase mode for the flow test): they must not become the defaults.
+            if project.calibration == nil { remember(project.settings) }
             await printers.refresh(printer)
         } catch {
             sendState = .failed(error.localizedDescription)
