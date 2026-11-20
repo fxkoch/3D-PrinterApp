@@ -4,6 +4,8 @@ import SwiftUI
 /// Expert mode: every slicer parameter, each with an explanation (ⓘ).
 struct AdvancedSettingsView: View {
     @Binding var settings: PrintSettings
+    /// Editing the printer's defaults: what belongs to one print only (vase mode) is not offered.
+    var forDefaults = false
     @AppStorage("showInlineHelp") private var inlineHelp = false
 
     var body: some View {
@@ -56,7 +58,7 @@ struct AdvancedSettingsView: View {
                 }
             }
             Section {
-                toggle(.spiralVase, $settings.spiralVase)
+                if !forDefaults { toggle(.spiralVase, $settings.spiralVase) }
                 toggle(.fuzzySkin, $settings.fuzzySkin)
                 if settings.fuzzySkin {
                     number(.fuzzySkinThickness, $settings.fuzzySkinThickness, "mm", 0.1...1, step: 0.05)
@@ -65,7 +67,9 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("Spezialmodi")
             } footer: {
-                if settings.spiralVase {
+                if forDefaults {
+                    Text("Den Vasenmodus gibt es nur für einen einzelnen Druck, nicht als Vorgabe: als Vorgabe würde jedes Modell nur eine Wand bekommen.")
+                } else if settings.spiralVase {
                     Text("Vasenmodus aktiv: 1 Wand, keine Füllung, kein Deckel. Die \(settings.bottomLayers) unteren Schichten bilden den Boden.")
                 }
             }

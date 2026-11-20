@@ -75,7 +75,7 @@ private struct DefaultSettingsEditor: View {
     @State private var settings = PrintSettings()
 
     var body: some View {
-        AdvancedSettingsView(settings: $settings)
+        AdvancedSettingsView(settings: $settings, forDefaults: true)
             .navigationTitle(model.displayName)
             .onAppear { settings = app.settings(for: model) }
             .onDisappear { app.remember(settings) }
