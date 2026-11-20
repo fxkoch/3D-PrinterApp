@@ -55,6 +55,11 @@ final class AppModel {
         didSet { UserDefaults.standard.set(expertMode, forKey: "expertMode") }
     }
 
+    /// New models get the advisor's safe settings at once (supports, brim, layer height, material tips), with undo.
+    var autoOptimize: Bool = UserDefaults.standard.object(forKey: "autoOptimize") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoOptimize, forKey: "autoOptimize") }
+    }
+
     /// Settings the user last used per printer model; new projects start from these.
     @ObservationIgnored private var savedSettings: [PrinterModel: PrintSettings] = [:]
 
@@ -260,7 +265,7 @@ final class AppModel {
                 let p = PrintProject(name: name, imported: model, settings: settings, useModelMaterials: loaded.allSatisfy { ($0 ?? "").isEmpty || $0 == "NONE" })
                 p.loadedTypes = loaded
                 p.dryerHumidity = humidity
-                p.refreshRecommendations()
+                if autoOptimize { p.autoOptimize() } else { p.refreshRecommendations() }
                 sendState = .idle
                 project = p
             case .failure(let error):

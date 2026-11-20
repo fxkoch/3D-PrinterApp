@@ -45,6 +45,7 @@ struct PrepareView: View {
                         if let plan = project.calibration {
                             calibrationPanel(plan)
                         } else {
+                            if project.autoTuning || project.autoTuned != nil { autoTunePanel }
                             if !project.openRecommendations.isEmpty { advicePanel }
                             printerPanel
                             materialPanel
@@ -263,6 +264,35 @@ struct PrepareView: View {
 
     // MARK: - Panels
 
+    /// What the app set for this model by itself, with undo.
+    @State private var showAutoDetails = false
+    private var autoTunePanel: some View {
+        Panel(title: "Für dieses Modell eingestellt", systemImage: "wand.and.stars.inverse") {
+            if project.autoTuning {
+                HStack { ProgressView(); Text("Modell wird analysiert …").font(.subheadline).foregroundStyle(.secondary) }
+            } else if let tuned = project.autoTuned {
+                ForEach(tuned.applied.prefix(showAutoDetails ? 50 : 4), id: \.id) { rec in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(rec.title, systemImage: rec.icon).font(.subheadline)
+                        if showAutoDetails { Text(rec.detail).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+                HStack {
+                    if tuned.applied.count > 4 || !showAutoDetails {
+                        Button(showAutoDetails ? "Weniger" : (tuned.applied.count > 4 ? "Alle \(tuned.applied.count) mit Begründung" : "Begründung")) {
+                            showAutoDetails.toggle()
+                        }
+                    }
+                    Spacer()
+                    Button("Rückgängig", role: .destructive) { project.undoAutoOptimize() }
+                        .accessibilityIdentifier("undoAutoTune")
+                }
+                .font(.caption)
+            }
+        }
+        .accessibilityIdentifier("autoTunePanel")
+    }
+
     private var advicePanel: some View {
         Panel(title: "Empfehlungen", systemImage: "wand.and.stars") {
             ForEach(project.openRecommendations.prefix(3)) { rec in
@@ -272,9 +302,18 @@ struct PrepareView: View {
                     project.dismissed.insert(rec.id)
                 }
             }
-            if project.openRecommendations.count > 3 {
-                Button("Alle \(project.openRecommendations.count) Empfehlungen") { showAdvice = true }.font(.subheadline)
+            HStack {
+                if project.openRecommendations.count > 3 {
+                    Button("Alle \(project.openRecommendations.count) Empfehlungen") { showAdvice = true }
+                }
+                Spacer()
+                if project.openRecommendations.contains(where: { $0.severity >= .suggestion && $0.action.map(AutoTune.isAutomatic) == true }) {
+                    Button("Alle übernehmen") { project.autoOptimize() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("applyAllRecommendations")
+                }
             }
+            .font(.subheadline)
         }
     }
 

@@ -118,11 +118,12 @@ public enum PrintAdvisor {
 
     /// - Parameter loadedTypes: material reported by the printer per slot (nil = unknown/empty).
     /// - Parameter dryerHumidity: relative humidity (%) reported by the ACE Pro, if known.
+    /// - Parameter analyses: precomputed `analyze` results for `objects` (same support angle), to skip the mesh work.
     public static func recommendations(objects: [ModelObject], settings s: PrintSettings,
                                        loadedTypes: [String?] = [], dryerHumidity: Double? = nil,
-                                       hoursSinceLeveling: Double? = nil) -> [Recommendation] {
+                                       hoursSinceLeveling: Double? = nil, analyses known: [ObjectAnalysis]? = nil) -> [Recommendation] {
         var result: [Recommendation] = []
-        let analyses = objects.map { analyze($0, supportAngle: s.supportAngle) }
+        let analyses = known?.count == objects.count ? known! : objects.map { analyze($0, supportAngle: s.supportAngle) }
         let usedTools = Set(objects.map(\.tool))
         let materials = usedTools.map { s.filament(for: $0) }
 

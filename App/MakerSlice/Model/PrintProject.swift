@@ -59,6 +59,9 @@ final class PrintProject: Identifiable {
 
     /// What is special in the profile the downloaded model brings along; shown to the user before anything is taken over.
     private(set) var profileReport: ProfileReport?
+    /// Settings the app picked for this model by itself (with the settings before, for undo).
+    private(set) var autoTuned: AutoTuneResult?
+    private(set) var autoTuning = false
 
     @ObservationIgnored private var sliceTasks: [Int: Task<Void, Never>] = [:]
     /// Plates still waiting while "alle Platten slicen" runs.
@@ -371,6 +374,42 @@ final class PrintProject: Identifiable {
     }
 
     // MARK: - Advice
+
+    /// Takes over every safe recommendation for the models on the plate (supports, brim, layer height, material tips …).
+    /// Calibration prints keep their fixed settings.
+    func autoOptimize() {
+        guard calibration == nil else { refreshRecommendations(); return }
+        let objects = self.objects, settings = self.settings, loaded = loadedTypes, humidity = dryerHumidity
+        autoTuning = true
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                AutoTune.run(objects: objects, settings: settings, loadedTypes: loaded, dryerHumidity: humidity)
+            }.value
+            guard let self else { return }
+            self.autoTuning = false
+            // The user changed something meanwhile: do not overwrite it.
+            guard self.settings == settings else { self.refreshRecommendations(); return }
+            if result.changed {
+                self.settings = result.settings
+                // Keep the first "before": a second run must not make its own result the undo target.
+                if let earlier = self.autoTuned {
+                    self.autoTuned = AutoTuneResult(original: earlier.original, settings: result.settings, applied: earlier.applied + result.applied)
+                } else {
+                    self.autoTuned = result
+                }
+            }
+            self.refreshRecommendations()
+        }
+    }
+
+    /// Back to the settings before the automatic tuning.
+    func undoAutoOptimize() {
+        guard let tuned = autoTuned else { return }
+        settings = tuned.original
+        autoTuned = nil
+        // The tips stay visible, now as suggestions to tap.
+        refreshRecommendations()
+    }
 
     func refreshRecommendations() {
         adviceTask?.cancel()

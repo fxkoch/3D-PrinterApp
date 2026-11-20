@@ -16,6 +16,12 @@ struct SettingsView: View {
                 } footer: {
                     Text("Zeigt zusätzlich alle Slicer-Einstellungen mit Erklärungen, Filament-Werte, Cloud-Slicing und Gerätedetails. Ohne Expertenmodus bleibt die App bewusst einfach – die App wählt passende Werte selbst.")
                 }
+                Section {
+                    Toggle("Einstellungen ans Modell anpassen", isOn: $app.autoOptimize)
+                        .accessibilityIdentifier("autoOptimizeToggle")
+                } footer: {
+                    Text("Beim Öffnen eines Modells übernimmt die App ihre Empfehlungen selbst: Stützen, Brim, Schichthöhe, Glätten, Material-Werte. Was sie geändert hat, steht im Vorbereiten-Bildschirm – mit „Rückgängig“.")
+                }
                 NotificationSettingsSection()
                 if app.expertMode {
                 Section {
