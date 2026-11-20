@@ -168,11 +168,16 @@ def propagate_plate_temps(f: dict) -> None:
                     f[k + suffix] = hot
 
 
-def find_resources(orca_bin: Path) -> Path:
-    for cand in (orca_bin.parent.parent / "resources", orca_bin.parent / "resources"):
-        if (cand / "profiles").is_dir():
+def find_resources(orca_bin: Path, vendor: str, explicit: Path | None = None) -> Path:
+    """Folder whose profiles/<vendor>/machine holds the JSON profiles.
+
+    Since OrcaSlicer 2.5 the AppImage packs every vendor into a <vendor>.opc container; the workflow then
+    checks out the JSON files of the same version from the OrcaSlicer repository and passes them here."""
+    candidates = ([explicit] if explicit else []) + [orca_bin.parent.parent / "resources", orca_bin.parent / "resources"]
+    for cand in candidates:
+        if (cand / "profiles" / vendor / "machine").is_dir():
             return cand
-    raise SystemExit(f"Orca-Ressourcen nicht gefunden neben {orca_bin}")
+    raise SystemExit(f"Orca-Profile ({vendor}) nicht gefunden: {', '.join(str(c) for c in candidates)}")
 
 
 def parse_metadata(gcode: Path) -> dict:
@@ -210,12 +215,14 @@ def main() -> int:
     ap.add_argument("job_dir", type=Path)
     ap.add_argument("--orca", type=Path, required=True)
     ap.add_argument("--timeout", type=int, default=1500)
+    ap.add_argument("--resources", type=Path, default=os.environ.get("ORCA_RESOURCES") or None,
+                    help="Orca resources folder with the JSON profiles (default: next to the binary)")
     args = ap.parse_args()
 
     job_dir: Path = args.job_dir
     job = json.loads((job_dir / "job.json").read_text(encoding="utf-8"))
     printer = PRINTERS[job.get("printer", "snapmakerU1")]
-    resources = find_resources(args.orca)
+    resources = find_resources(args.orca, printer["vendor"], args.resources)
     profiles = Profiles(resources, printer["vendor"])
 
     work = job_dir / "profiles"
