@@ -152,7 +152,7 @@ struct PrepareView: View {
     private func calibrationPanel(_ plan: CalibrationPlan) -> some View {
         Panel(title: "Kalibrierdruck: \(plan.kind.displayName)", systemImage: plan.kind.symbol) {
             Text(plan.note).font(.subheadline)
-            Text("Filament: \(plan.settings.filament(for: 0).name) · \(plan.settings.printer.displayName)").font(.caption).foregroundStyle(.secondary)
+            Text("Filament: \(plan.filament.name) · \(plan.settings.machine.slotLabel)\(plan.tool + 1) · \(plan.settings.printer.displayName)").font(.caption).foregroundStyle(.secondary)
             Text("Die Einstellungen dieses Tests sind fest, damit das Ergebnis aussagekräftig ist. Tippe auf „Slicen“, dann auf „Drucken“. Nach dem Druck trägst du hier ein, welche Stufe am besten aussieht.")
                 .font(.caption).foregroundStyle(.secondary)
             Button { showCalibrationResult = true } label: { Label("Ergebnis eintragen", systemImage: "checkmark.circle") }
@@ -524,6 +524,13 @@ struct PrepareView: View {
                 Text("Haftrand, Glätten und Reinigungsturm stellt die App bei Bedarf selbst vor (siehe Empfehlungen). Alle Einstellungen gibt es im Expertenmodus.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Divider()
+            NavigationLink {
+                TroubleshootView(printer: app.printers.selected, model: project.settings.printer)
+            } label: {
+                Label("Problem beim letzten Druck? Problem-Helfer", systemImage: "stethoscope").font(.subheadline)
+            }
+            .accessibilityIdentifier("troubleshootFromPrepare")
         }
     }
 

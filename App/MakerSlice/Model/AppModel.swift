@@ -131,8 +131,7 @@ final class AppModel {
 
     /// Starts another calibration print for the same printer and filament (closes the current project first).
     func startCalibration(_ kind: CalibrationKind, like plan: CalibrationPlan) {
-        let filament = plan.settings.filament(for: 0)
-        let next = CalibrationFactory.plan(kind, filament: filament, base: settings(for: plan.settings.printer))
+        let next = CalibrationFactory.plan(kind, filament: plan.filament, base: settings(for: plan.settings.printer), tool: plan.tool)
         project = nil
         Task {
             try? await Task.sleep(nanoseconds: 400_000_000)

@@ -407,6 +407,11 @@ struct PrinterDetailView: View {
             }
             .accessibilityIdentifier("calibrateLink")
             Divider().padding(.leading, 44)
+            NavigationLink { TroubleshootView(printer: printer, model: model) } label: {
+                LinkRow(title: "Druckproblem lösen", icon: "stethoscope")
+            }
+            .accessibilityIdentifier("troubleshootLink")
+            Divider().padding(.leading, 44)
             if app.expertMode {
                 NavigationLink { CalibrationView(printer: printer) } label: {
                     LinkRow(title: "Kalibrierdaten", icon: "level")

@@ -10,6 +10,8 @@ struct CalibrationOverviewView: View {
     @Environment(\.dismiss) private var dismiss
     let filament: Filament
     let settings: PrintSettings
+    /// Slot the tests print with.
+    var tool = 0
 
     /// The test prints as they were prepared: the steps shown for the result are the ones that were printed.
     @State private var plans: [CalibrationKind: CalibrationPlan] = [:]
@@ -23,7 +25,7 @@ struct CalibrationOverviewView: View {
     private var current: Filament { CalibrationBook.shared.apply(to: filament, printer: model) }
 
     private func plan(_ kind: CalibrationKind) -> CalibrationPlan {
-        plans[kind] ?? CalibrationFactory.plan(kind, filament: current, base: settings)
+        plans[kind] ?? CalibrationFactory.plan(kind, filament: current, base: settings, tool: tool)
     }
 
     var body: some View {
@@ -49,7 +51,7 @@ struct CalibrationOverviewView: View {
                     }
                     Text(kind.effort).font(.caption2).foregroundStyle(.tertiary)
                     Button {
-                        let p = CalibrationFactory.plan(kind, filament: current, base: settings)
+                        let p = CalibrationFactory.plan(kind, filament: current, base: settings, tool: tool)
                         plans[kind] = p
                         chosen[kind] = nil
                         app.openCalibration(p)

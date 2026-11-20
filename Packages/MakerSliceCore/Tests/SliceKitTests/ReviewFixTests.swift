@@ -163,6 +163,26 @@ final class ReviewFixTests: XCTestCase {
         XCTAssertEqual(gap.first, 26, "0.2 mm: one layer of air between block and support")
     }
 
+    // MARK: Calibration on the head that holds the filament
+
+    func testCalibrationPrintsWithTheChosenSlot() throws {
+        var base = PrintSettings()
+        base.filaments = [.pla, .pla, .petg, .pla]
+        let plan = CalibrationFactory.plan(.temperature, filament: .petg, base: base, tool: 2)
+        XCTAssertEqual(plan.tool, 2)
+        XCTAssertEqual(plan.object.tool, 2)
+        XCTAssertEqual(plan.filament.type, "PETG")
+        XCTAssertEqual(plan.filament.nozzleTemp, Int(plan.steps[0].value), "the tower's first step is set in the slot that prints")
+        XCTAssertEqual(plan.settings.filaments[0], base.filaments[0], "slot 0 keeps its own filament")
+        let arranged = try XCTUnwrap(PlateArranger.arrange([plan.object], bedSize: plan.settings.bedSize))
+        let output = try SliceJob(name: "turm", objects: arranged, settings: plan.settings).run()
+        XCTAssertEqual(output.layers.first?.islands.map(\.tool), [2])
+        XCTAssertTrue(output.gcode.contains("SM_PRINT_PREEXTRUDE_FILAMENT INDEX=2"), "the U1 primes head 3")
+        XCTAssertFalse(output.gcode.contains("\nT0\n"))
+        // Slot 0 stays the default.
+        XCTAssertEqual(CalibrationFactory.plan(.flow, filament: .petg, base: base).tool, 0)
+    }
+
     /// PETG part with PLA supports from another slot: the brim must be PETG, or it does not hold the part.
     func testBrimIsPrintedInThePartsMaterial() throws {
         var s = PrintSettings()

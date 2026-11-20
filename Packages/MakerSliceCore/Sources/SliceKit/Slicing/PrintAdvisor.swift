@@ -33,6 +33,15 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case leveling(Bool)
         /// Drops speed/flow factor commands at a height, retraction steps and calibration end commands.
         case removeLeftoverCommands
+        case firstLayerSpeed(Double)
+        /// Overhang slowdown on, at this speed (mm/s).
+        case overhangSlowdown(speed: Double)
+        case supportBottomZ(Double)
+        case supportSpacing(Double)
+        case seam(SeamPosition)
+        case atLeastWalls(Int)
+        /// Bed temperatures of a slot's filament up or down (all plates, first layer included).
+        case filamentBedDelta(slot: Int, delta: Int)
     }
 
     public var id: String
@@ -434,6 +443,18 @@ public enum PrintAdvisor {
             if slot < s.filaments.count { s.filaments[slot].fanSpeed = speed; s.filaments[slot].fanMinSpeed = min(s.filaments[slot].fanMinSpeed, speed) }
         case .primeTowerTuning(let width, let volume): s.primeTowerWidth = width; s.purgeVolume = volume
         case .spiralVase(let on): s.spiralVase = on
+        case .firstLayerSpeed(let v): s.firstLayerSpeed = v; s.firstLayerInfillSpeed = min(s.firstLayerInfillSpeed, v * 2)
+        case .overhangSlowdown(let speed): s.slowDownOverhangs = true; s.overhangSpeed = speed
+        case .supportBottomZ(let v): s.supportBottomZDistance = v
+        case .supportSpacing(let v): s.supportSpacing = v
+        case .seam(let position): s.seamPosition = position
+        case .atLeastWalls(let n): s.wallLoops = max(s.wallLoops, n)
+        case .filamentBedDelta(let slot, let delta):
+            if slot < s.filaments.count {
+                s.filaments[slot].bedTemp += delta
+                s.filaments[slot].firstLayerBedTemp += delta
+                s.filaments[slot].smoothPlateBedTemp += delta
+            }
         case .removeLeftoverCommands:
             s.layerGCodes = s.layerGCodes.compactMap { code in
                 let rest = code.lines.filter { line in

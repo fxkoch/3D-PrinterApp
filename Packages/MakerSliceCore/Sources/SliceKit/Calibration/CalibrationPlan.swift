@@ -20,6 +20,11 @@ public struct CalibrationPlan: Sendable {
     public var name: String
     /// Short note shown above the print ("Flow-Treppe: 9 Stufen …").
     public var note: String
+    /// Slot (0-based) the test prints with: the head or ACE slot that holds the filament.
+    public var tool = 0
+
+    /// The filament being calibrated.
+    public var filament: Filament { settings.filament(for: tool) }
 
     /// Step to the printed height (mm).
     public func step(atHeight z: Double) -> CalibrationStep? { steps.last { $0.zFrom <= z + 1e-6 } }
@@ -27,7 +32,24 @@ public struct CalibrationPlan: Sendable {
 
 /// Builds the calibration prints from the filament profile and the printer.
 public enum CalibrationFactory {
-    public static func plan(_ kind: CalibrationKind, filament: Filament, base: PrintSettings) -> CalibrationPlan {
+    /// - Parameter tool: slot that holds the filament. On the U1 every head has its own spool: a test of the PETG in
+    ///   head 3 must print with head 3, not with whatever head 1 holds.
+    public static func plan(_ kind: CalibrationKind, filament: Filament, base: PrintSettings, tool: Int = 0) -> CalibrationPlan {
+        var plan = slotZeroPlan(kind, filament: filament, base: base)
+        guard tool > 0, tool < max(base.machine.toolCount, 1) else { return plan }
+        // Built for slot 0 (the steps refer to it); move the tuned filament and the model to the chosen slot.
+        var s = plan.settings
+        while s.filaments.count <= tool { s.filaments.append(base.filament(for: s.filaments.count)) }
+        s.filaments[tool] = s.filaments[0]
+        s.filaments[0] = base.filament(for: 0)
+        plan.settings = s
+        plan.object.tool = tool
+        plan.object.colorChanges = []
+        plan.tool = tool
+        return plan
+    }
+
+    private static func slotZeroPlan(_ kind: CalibrationKind, filament: Filament, base: PrintSettings) -> CalibrationPlan {
         var s = base
         s.filaments = [filament] + Array(base.filaments.dropFirst())
         s.support = .off

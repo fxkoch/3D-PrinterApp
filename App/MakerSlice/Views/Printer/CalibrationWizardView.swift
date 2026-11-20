@@ -10,6 +10,8 @@ struct CalibrationHomeView: View {
     @State private var settings: PrintSettings
     @State private var showPicker = false
     @State private var refresh = 0
+    /// Slot the tests print with (the head or ACE slot that holds the filament).
+    @State private var tool = 0
 
     init(printer: PrinterConnection, model: PrinterModel) {
         self.printer = printer
@@ -43,8 +45,17 @@ struct CalibrationHomeView: View {
                             var f = match
                             f.color = spool.color ?? f.color
                             settings.filaments[0] = f
+                            tool = i
                         } label: { Label("Eingelegtes Filament nehmen – Slot \(i + 1): \(spool.displayName)", systemImage: "dot.radiowaves.left.and.right") }
                     }
+                }
+                if settings.machine.toolCount > 1 {
+                    Picker("Gedruckt wird mit", selection: $tool) {
+                        ForEach(0..<settings.machine.toolCount, id: \.self) { i in
+                            Text("\(settings.machine.slotLabel)\(i + 1)" + (loaded.indices.contains(i) && loaded[i].present ? " · \(loaded[i].type ?? "?")" : "")).tag(i)
+                        }
+                    }
+                    .accessibilityIdentifier("calibrationSlot")
                 }
                 Button { showPicker = true } label: { Label("Anderes Filament wählen", systemImage: "list.bullet") }
                     .accessibilityIdentifier("calibrationFilament")
@@ -56,7 +67,7 @@ struct CalibrationHomeView: View {
 
             Section {
                 NavigationLink {
-                    CalibrationOverviewView(filament: filament, settings: settings)
+                    CalibrationOverviewView(filament: filament, settings: settings, tool: tool)
                 } label: {
                     Label("Komplett-Kalibrierung – alle Tests und alle Werte auf einmal speichern", systemImage: "list.bullet.clipboard")
                 }
@@ -66,7 +77,7 @@ struct CalibrationHomeView: View {
             Section("Kalibrierdrucke") {
                 ForEach(CalibrationKind.allCases) { kind in
                     NavigationLink {
-                        CalibrationTestView(kind: kind, filament: filament, settings: settings)
+                        CalibrationTestView(kind: kind, filament: filament, settings: settings, tool: tool)
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: kind.symbol).frame(width: 28).foregroundStyle(Color.accentColor)
@@ -113,11 +124,12 @@ struct CalibrationHomeView: View {
         }
         .task {
             // Start with what the printer reports, if anything.
-            if let spool = loaded.first(where: { $0.present && $0.type != nil }), let type = spool.type,
-               let match = FilamentLibrary.bestMatch(type: type, vendor: spool.vendor, printer: model) {
+            if let i = loaded.firstIndex(where: { $0.present && $0.type != nil }), let type = loaded[i].type,
+               let match = FilamentLibrary.bestMatch(type: type, vendor: loaded[i].vendor, printer: model) {
                 var f = match
-                f.color = spool.color ?? f.color
+                f.color = loaded[i].color ?? f.color
                 settings.filaments[0] = f
+                tool = i
             }
             await app.syncCalibrations()
         }
@@ -134,8 +146,9 @@ struct CalibrationTestView: View {
     let kind: CalibrationKind
     let filament: Filament
     let settings: PrintSettings
+    var tool = 0
 
-    private var plan: CalibrationPlan { CalibrationFactory.plan(kind, filament: filament, base: settings) }
+    private var plan: CalibrationPlan { CalibrationFactory.plan(kind, filament: filament, base: settings, tool: tool) }
 
     var body: some View {
         let plan = plan
@@ -230,7 +243,7 @@ struct CalibrationResultSection: View {
         }
         if noneGood {
             Section("Was jetzt?") {
-                ForEach(CalibrationAdvice.whenNoStepIsGood(plan.kind, filamentType: plan.settings.filament(for: 0).type)) { item in
+                ForEach(CalibrationAdvice.whenNoStepIsGood(plan.kind, filamentType: plan.filament.type)) { item in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.title).font(.subheadline.weight(.semibold))
                         Text(item.detail).font(.caption).foregroundStyle(.secondary)
@@ -264,7 +277,7 @@ struct CalibrationResultSheet: View {
 
     var body: some View {
         NavigationStack {
-            List { CalibrationResultSection(plan: plan, filamentName: plan.settings.filament(for: 0).name) }
+            List { CalibrationResultSection(plan: plan, filamentName: plan.filament.name) }
                 .navigationTitle("Ergebnis")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
