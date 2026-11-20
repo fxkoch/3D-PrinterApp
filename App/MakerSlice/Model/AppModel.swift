@@ -66,19 +66,28 @@ final class AppModel {
             for key in ["levelingLog", "alertLastState", "alertPosted"] { UserDefaults.standard.removeObject(forKey: key) }
         }
         expertMode = UserDefaults.standard.bool(forKey: "expertMode")
-        var cleaned: [PrinterModel] = []
+        var cleaned: [(PrinterModel, [String])] = []
         for model in PrinterModel.allCases {
             if let data = UserDefaults.standard.data(forKey: "settings-\(model.rawValue)"),
                let saved = try? JSONDecoder().decode(PrintSettings.self, from: data), saved.printer == model {
                 // Older versions kept the commands of one print (a calibration's speed steps, vase mode) as defaults.
-                if saved.hasProjectOnlyValues { cleaned.append(model) }
+                if saved.hasProjectOnlyValues {
+                    var what: [String] = []
+                    if let top = saved.factorCommands.flatMap(\.lines).compactMap({ Int($0.uppercased().components(separatedBy: "S").last ?? "") }).max() {
+                        what.append("Tempo-/Fluss-Stufen bis \(top) %")
+                    }
+                    if saved.layerGCodes.count > saved.factorCommands.count { what.append("Befehle bei bestimmten Höhen") }
+                    if !saved.retractLengthSteps.isEmpty { what.append("Rückzugsstufen") }
+                    if saved.spiralVase { what.append("Vasenmodus") }
+                    cleaned.append((model, what))
+                }
                 savedSettings[model] = saved.forNewProjects
             }
         }
         printers.log = log
-        for model in cleaned {
+        for (model, what) in cleaned {
             remember(savedSettings[model]!)
-            log.add(.warning, "Vorgaben für \(model.displayName) bereinigt: Befehle einer einzelnen Kalibrierung (z. B. Tempo-Stufen bis 433 % ab 4 mm Höhe) und der Vasenmodus galten bisher für jeden Druck.", source: "App")
+            log.add(.warning, "Vorgaben für \(model.displayName) bereinigt: \(what.isEmpty ? "Endbefehle einer Kalibrierung" : what.joined(separator: ", ")). Sie stammten aus einem einzelnen Druck (meist einer Kalibrierung) und galten bisher für jeden neuen Druck.", source: "App")
         }
         browser.log = log
         setUpCalibration()
