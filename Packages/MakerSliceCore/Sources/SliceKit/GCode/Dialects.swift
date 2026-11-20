@@ -31,6 +31,8 @@ struct U1Dialect: MachineDialect {
         }
         let highTemp = s.plateType == .highTemp
         var lines: [String] = [
+            // The printer keeps the speed factor of the last job (a paused calibration never reaches its reset at the end).
+            "M220 S100 ; reset speed factor",
             "SET_PRINT_AUTO_BED_LEVELING ENABLE=\(s.enableBedLeveling ? 1 : 0)",
             "SET_TIME_LAPSE_CAMERA ENABLE=\(s.enableTimelapse ? 1 : 0)",
             "PRINT_START",
@@ -182,7 +184,7 @@ struct U1Dialect: MachineDialect {
     }
 
     func end(_ ctx: PrintContext) -> [String] {
-        var lines = ["M107", "PRINT_END"]
+        var lines = ["M220 S100 ; reset speed factor", "M107", "PRINT_END"]
         if ctx.settings.enableTimelapse { lines.append("TIMELAPSE_STOP") }
         lines.append("; U1 nozzle flow metadata, in logical filament order")
         let slots = max(ctx.settings.machine.toolCount, (ctx.usedTools.max() ?? 0) + 1)
