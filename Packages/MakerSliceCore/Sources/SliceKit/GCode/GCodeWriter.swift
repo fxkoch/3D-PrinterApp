@@ -167,9 +167,13 @@ public struct GCodeWriter {
                     }
                     if state.lastRole != extrusion.role {
                         body.line(";TYPE:\(extrusion.role.gcodeLabel)")
-                        if extrusion.role == .outerWall {
-                            body.line(dialect.acceleration(Int(s.outerWallAcceleration)))
-                        } else if state.lastRole == .outerWall {
+                        // Overhangs are part of the outer wall: same (gentle) acceleration.
+                        let outer: Set<ExtrusionRole> = [.outerWall, .overhangWall]
+                        if outer.contains(extrusion.role) {
+                            if !outer.contains(state.lastRole ?? .innerWall) {
+                                body.line(dialect.acceleration(Int(s.outerWallAcceleration)))
+                            }
+                        } else if outer.contains(state.lastRole ?? .innerWall) {
                             body.line(dialect.acceleration(Int(s.acceleration)))
                         }
                         setFan(&body, &state, filament: filament, layerIndex: layer.index, role: extrusion.role)
@@ -383,7 +387,7 @@ public struct GCodeWriter {
     /// Part cooling: off for the first layers, full for bridges/overhangs, filament default otherwise.
     private func setFan(_ g: inout GCodeBuffer, _ state: inout MachineState, filament: Filament, layerIndex: Int, role: ExtrusionRole?) {
         var speed = layerIndex < filament.fanOffLayers ? 0 : filament.fanSpeed
-        if layerIndex > 0, role == .bridge { speed = max(speed, filament.overhangFanSpeed) }
+        if layerIndex > 0, role == .bridge || role == .overhangWall { speed = max(speed, filament.overhangFanSpeed) }
         let target = Int((speed * 255).rounded())
         guard target != state.fan else { return }
         g.line(target == 0 ? "M107" : "M106 S\(target)")

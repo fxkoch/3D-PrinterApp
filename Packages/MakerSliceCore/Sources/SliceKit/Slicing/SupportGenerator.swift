@@ -41,6 +41,9 @@ struct SupportGenerator {
 
         // Leave a gap of whole layers between support and model. 0 mm means the contact layers touch the model.
         let gap = max(0, Int((s.supportTopZDistance / s.layerHeight).rounded()))
+        // Where a support stands on the model itself it would weld to that surface (same material). A support of a
+        // material that does not weld gets its dense foot instead and stands directly on the part.
+        let bottomGap = denseFoot ? 0 : min(3, max(0, Int((s.supportBottomZDistance / s.layerHeight).rounded())))
 
         // Shadow of the model as seen from below – used for "build plate only".
         var shadow = [Polygons](repeating: Polygons(), count: n)
@@ -68,6 +71,10 @@ struct SupportGenerator {
                 // Anything above the model's footprint would have to stand on the model.
                 carry = carry.difference(shadow[i])
                 area = area.difference(shadow[i].offset(s.supportXYDistance))
+            }
+            if bottomGap > 0, i > 0 {
+                let model = (1...bottomGap).filter { i - $0 >= 0 }.map { layers[i - $0] }.filter { !$0.isEmpty }
+                if !model.isEmpty { area = area.difference(Polygons(model.flatMap(\.paths)).union()) }
             }
             area = area.filterSmall(minArea: 1)
             areas[i] = area

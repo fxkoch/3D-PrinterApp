@@ -146,6 +146,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var detectBridges: Bool = true
     public var bridgeSpeed: Double = 50
     public var bridgeFlow: Double = 0.9
+    /// Outer walls over air (more than half the line width unsupported) print at `overhangSpeed` with the overhang fan.
+    public var slowDownOverhangs: Bool = true
+    public var overhangSpeed: Double = 30
     public var topSurfacePattern: SurfacePattern = .monotonic
     public var bottomSurfacePattern: SurfacePattern = .monotonic
 
@@ -165,6 +168,8 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var support: SupportMode = .off
     public var supportAngle: Double = 30
     public var supportTopZDistance: Double = 0.2
+    /// Gap where a support stands on the model itself (supports of the part's own material; others get a dense foot).
+    public var supportBottomZDistance: Double = 0.2
     public var supportXYDistance: Double = 0.35
     public var supportSpacing: Double = 2.5
     /// Slot (0-based) that prints the support; nil = the first slot used by the objects.
@@ -384,6 +389,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.acceleration, &acceleration); d(.outerWallAcceleration, &outerWallAcceleration); d(.minLayerTime, &minLayerTime)
         d(.ironing, &ironing); d(.ironingSpeed, &ironingSpeed); d(.ironingFlow, &ironingFlow); d(.ironingSpacing, &ironingSpacing)
         d(.detectBridges, &detectBridges); d(.bridgeSpeed, &bridgeSpeed); d(.bridgeFlow, &bridgeFlow)
+        d(.slowDownOverhangs, &slowDownOverhangs); d(.overhangSpeed, &overhangSpeed); d(.supportBottomZDistance, &supportBottomZDistance)
         d(.support, &support); d(.supportAngle, &supportAngle); d(.supportTopZDistance, &supportTopZDistance)
         d(.supportXYDistance, &supportXYDistance); d(.supportSpacing, &supportSpacing)
         d(.supportSlot, &supportSlot); d(.supportInterfaceSlot, &supportInterfaceSlot)
