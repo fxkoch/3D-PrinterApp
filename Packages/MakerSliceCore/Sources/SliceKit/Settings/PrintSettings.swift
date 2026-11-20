@@ -214,6 +214,35 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     /// Harmless commands written at the end of the print (calibration prints reset speed/flow factors here).
     public var footerGCode: [String] = []
 
+    /// The settings as a starting point for the next project. What belongs to one print only is dropped: commands at a
+    /// height (temperature towers, the speed steps of the max-flow test), retraction steps, the end commands of a
+    /// calibration and the vase mode. Kept as defaults, a max-flow test once raised the speed of every later print
+    /// to 400 % from 28 mm up, and the vase mode turned every model into a single wall.
+    public var forNewProjects: PrintSettings {
+        var s = self
+        s.layerGCodes = []
+        s.retractLengthSteps = []
+        s.footerGCode = []
+        s.spiralVase = false
+        return s
+    }
+
+    /// True when `forNewProjects` drops something.
+    public var hasProjectOnlyValues: Bool {
+        !layerGCodes.isEmpty || !retractLengthSteps.isEmpty || !footerGCode.isEmpty || spiralVase
+    }
+
+    /// Commands at a height that change the speed or flow factor of the printer (M220/M221). A normal print never
+    /// needs them; they are left over from a calibration or come from a downloaded project.
+    public var factorCommands: [LayerGCode] {
+        layerGCodes.filter { code in
+            code.lines.contains { line in
+                let c = line.trimmingCharacters(in: .whitespaces).uppercased()
+                return c.hasPrefix("M220") || c.hasPrefix("M221")
+            }
+        }
+    }
+
     /// Retraction length at height `z`.
     public func retractLength(atHeight z: Double, tool: Int) -> Double {
         var result = filament(for: tool).retractLength

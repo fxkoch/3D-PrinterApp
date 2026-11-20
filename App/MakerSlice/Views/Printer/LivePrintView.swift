@@ -178,6 +178,15 @@ struct SpeedPanel: View {
                     Stepper(value: Binding(get: { current }, set: { set($0) }), in: SpeedControl.percentRange, step: 10) {
                         Text("\(current) % der geplanten Geschwindigkeit")
                     }
+                    if current > SpeedControl.percentRange.upperBound {
+                        // Set by the G-code itself (a calibration's speed steps): the extruder cannot keep up.
+                        Label("\(current) % ist zu schnell: Der Extruder kommt nicht nach, zermahlt das Filament und der Druck wird lückenhaft. Das stammt meist aus Befehlen einer Kalibrierung im Druck.",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote).foregroundStyle(.orange)
+                        Button("Auf 100 % stellen") { set(100) }
+                            .buttonStyle(.borderedProminent).tint(.orange)
+                            .accessibilityIdentifier("speedReset")
+                    }
                     Text("Leise ist halbes Tempo: ruhigere Bewegungen, der Druck dauert etwa doppelt so lang. Lüfter bleiben unverändert.")
                         .font(.footnote).foregroundStyle(.secondary)
                 case .none:

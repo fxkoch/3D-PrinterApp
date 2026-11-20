@@ -31,6 +31,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case primeTowerTuning(width: Double, volume: Double)
         case spiralVase(Bool)
         case leveling(Bool)
+        /// Drops speed/flow factor commands at a height, retraction steps and calibration end commands.
+        case removeLeftoverCommands
     }
 
     public var id: String
@@ -114,6 +116,21 @@ public enum PrintAdvisor {
         let analyses = objects.map { analyze($0, supportAngle: s.supportAngle) }
         let usedTools = Set(objects.map(\.tool))
         let materials = usedTools.map { s.filament(for: $0) }
+
+        // Speed or flow steps at a height (calibration prints are not advised, so these are leftovers or come from a
+        // downloaded project). The max-flow test raises the speed to 433 %: the extruder then grinds the filament.
+        let factors = s.factorCommands
+        if !factors.isEmpty || !s.retractLengthSteps.isEmpty || !s.footerGCode.isEmpty {
+            let list = factors.prefix(4).map { code in
+                code.lines.joined(separator: " ") + " ab " + formatDecimal(code.z, digits: 1) + " mm"
+            }.joined(separator: ", ")
+            result.append(Recommendation(
+                id: "leftover-commands", title: "Tempo-/Fluss-Befehle aus einer Kalibrierung",
+                detail: (list.isEmpty ? "Dieser Druck enthält Rückzugsstufen oder Endbefehle eines Kalibrierdrucks."
+                    : "Dieser Druck ändert unterwegs Tempo oder Fluss des Druckers: \(list)\(factors.count > 4 ? " …" : "").")
+                    + " Das stammt meist aus einer Kalibrierung. Über 150 % kommt der Extruder nicht mehr nach und zermahlt das Filament.",
+                icon: "exclamationmark.octagon", severity: .warning, action: .removeLeftoverCommands))
+        }
 
         // Too big for the printer.
         for (object, a) in zip(objects, analyses)
@@ -417,6 +434,16 @@ public enum PrintAdvisor {
             if slot < s.filaments.count { s.filaments[slot].fanSpeed = speed; s.filaments[slot].fanMinSpeed = min(s.filaments[slot].fanMinSpeed, speed) }
         case .primeTowerTuning(let width, let volume): s.primeTowerWidth = width; s.purgeVolume = volume
         case .spiralVase(let on): s.spiralVase = on
+        case .removeLeftoverCommands:
+            s.layerGCodes = s.layerGCodes.compactMap { code in
+                let rest = code.lines.filter { line in
+                    let c = line.trimmingCharacters(in: .whitespaces).uppercased()
+                    return !c.hasPrefix("M220") && !c.hasPrefix("M221")
+                }
+                return rest.isEmpty ? nil : LayerGCode(z: code.z, lines: rest)
+            }
+            s.retractLengthSteps = []
+            s.footerGCode = []
         case .useLoadedFilament(let slot, let type):
             if slot < s.filaments.count, var f = FilamentLibrary.bestMatch(type: type, printer: s.printer) {
                 f.color = s.filaments[slot].color

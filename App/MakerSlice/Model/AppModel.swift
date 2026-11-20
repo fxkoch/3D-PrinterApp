@@ -66,13 +66,20 @@ final class AppModel {
             for key in ["levelingLog", "alertLastState", "alertPosted"] { UserDefaults.standard.removeObject(forKey: key) }
         }
         expertMode = UserDefaults.standard.bool(forKey: "expertMode")
+        var cleaned: [PrinterModel] = []
         for model in PrinterModel.allCases {
             if let data = UserDefaults.standard.data(forKey: "settings-\(model.rawValue)"),
                let saved = try? JSONDecoder().decode(PrintSettings.self, from: data), saved.printer == model {
-                savedSettings[model] = saved
+                // Older versions kept the commands of one print (a calibration's speed steps, vase mode) as defaults.
+                if saved.hasProjectOnlyValues { cleaned.append(model) }
+                savedSettings[model] = saved.forNewProjects
             }
         }
         printers.log = log
+        for model in cleaned {
+            remember(savedSettings[model]!)
+            log.add(.warning, "Vorgaben für \(model.displayName) bereinigt: Befehle einer einzelnen Kalibrierung (z. B. Tempo-Stufen bis 433 % ab 4 mm Höhe) und der Vasenmodus galten bisher für jeden Druck.", source: "App")
+        }
         browser.log = log
         setUpCalibration()
         // UI tests start without printers saved by an earlier test run.
@@ -159,7 +166,9 @@ final class AppModel {
         savedSettings[model] ?? PrintSettings(printer: model)
     }
 
-    func remember(_ settings: PrintSettings) {
+    /// Keeps the settings as the starting point of the next project – without what belongs to this one print only.
+    func remember(_ new: PrintSettings) {
+        let settings = new.forNewProjects
         savedSettings[settings.printer] = settings
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "settings-\(settings.printer.rawValue)")

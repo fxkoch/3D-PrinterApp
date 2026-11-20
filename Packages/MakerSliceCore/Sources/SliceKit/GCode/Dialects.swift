@@ -158,8 +158,21 @@ struct U1Dialect: MachineDialect {
     }
 
     func afterLayer(_ layer: SlicedLayer, _ ctx: PrintContext) -> [String] {
-        [";AFTER_LAYER_CHANGE", ";\(fmt(layer.z))",
-         "SET_PRINT_STATS_INFO TOTAL_LAYER=\(ctx.layers.count) CURRENT_LAYER=\(layer.index + 1)"]
+        var lines = [";AFTER_LAYER_CHANGE", ";\(fmt(layer.z))",
+                     "SET_PRINT_STATS_INFO TOTAL_LAYER=\(ctx.layers.count) CURRENT_LAYER=\(layer.index + 1)"]
+        if layer.index == 1 {
+            // Second layer: the normal temperatures (OrcaSlicer does this itself; the U1 profile has no line for it).
+            // Other heads get theirs with the next tool change, which waits for the layer's temperature.
+            let s = ctx.settings
+            let tool = layer.islands.first?.tool ?? ctx.initialTool
+            let f = s.filament(for: tool)
+            if f.nozzleTemp != f.firstLayerNozzleTemp { lines.append("M104 T\(tool) S\(f.nozzleTemp)") }
+            let bed = ctx.initialFilament
+            if bed.bedTemp(for: s.plateType, firstLayer: false) != bed.bedTemp(for: s.plateType, firstLayer: true) {
+                lines.append("M140 S\(bed.bedTemp(for: s.plateType, firstLayer: false))")
+            }
+        }
+        return lines
     }
 
     func toolChange(from: Int, to: Int, layer: SlicedLayer, _ ctx: PrintContext) -> [String] {
