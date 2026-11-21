@@ -71,6 +71,15 @@ final class CalibrationTests: XCTestCase {
         XCTAssertTrue(gcode.contains("M220 S100"))
     }
 
+    /// The U1 keeps the speed factor of the last job, so every print must reset it at the start and at the end.
+    func testU1PrintResetsSpeedFactorAtStartAndEnd() throws {
+        let (f, base) = petg(.snapmakerU1)
+        let plan = CalibrationFactory.plan(.flow, filament: f, base: base)
+        let gcode = try slice(plan).gcode
+        XCTAssertTrue(gcode.contains("M220 S100 ; reset speed factor"), "start resets the speed factor")
+        XCTAssertTrue(gcode.contains("M220 S100 ; reset speed factor\nM107"), "end resets the speed factor")
+    }
+
     func testResultsChangeTheLibraryProfileForThatPrinterOnly() {
         let book = CalibrationBook.shared
         defer { for r in book.all { book.remove(r) } }

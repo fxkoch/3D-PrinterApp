@@ -72,13 +72,27 @@ jobs:
           }
           fetch "${{ steps.orca.outputs.tag }}" "${{ steps.orca.outputs.asset }}"
           # The U1 and Kobra S1 profiles must be part of the release; otherwise use the nightly build.
-          if ! ls orca/squashfs-root/resources/profiles/Snapmaker/machine/ | grep -q "U1 (0.4 nozzle)" \
-             || ! ls orca/squashfs-root/resources/profiles/Anycubic/machine/ | grep -q "Kobra S1 0.4 nozzle"; then
+          # (Since 2.5 the AppImage packs each vendor into <vendor>.opc, so ask the release's source tree.)
+          tag='${{ steps.orca.outputs.tag }}'
+          machines() { gh api "repos/$ORCA_REPO/contents/resources/profiles/$1/machine?ref=$tag" --jq '.[].name' 2>/dev/null || true; }
+          if ! machines Snapmaker | grep -q "U1 (0.4 nozzle)" || ! machines Anycubic | grep -q "Kobra S1 0.4 nozzle"; then
             echo "Release lacks U1/Kobra S1 profiles – using nightly build"
             asset=$(gh release view nightly-builds -R "$ORCA_REPO" --json assets -q '.assets[].name' \
                     | grep -i linux | grep -i 'appimage$' | grep -viE 'aarch64|arm64' | grep -i 2404 | head -1)
             fetch nightly-builds "$asset"
           fi
+
+      - name: Profile JSONs of this OrcaSlicer version
+        run: |
+          # The slicer script flattens the profiles itself; the AppImage of OrcaSlicer 2.5+ only has packed .opc files.
+          version=$(cat orca/VERSION)
+          ref=$version; [ "$version" = "nightly-builds" ] && ref=main
+          rm -rf orca-src
+          git clone -q --depth 1 --branch "$ref" --filter=blob:none --sparse "https://github.com/$ORCA_REPO" orca-src
+          git -C orca-src sparse-checkout set resources/profiles/Snapmaker resources/profiles/Anycubic resources/profiles/OrcaFilamentLibrary
+          ls orca-src/resources/profiles/Snapmaker/machine/ | grep -q "U1 (0.4 nozzle)"
+          ls orca-src/resources/profiles/Anycubic/machine/ | grep -q "Kobra S1 0.4 nozzle"
+          echo "ORCA_RESOURCES=$PWD/orca-src/resources" >> "$GITHUB_ENV"
 
       - name: Locate OrcaSlicer
         run: |

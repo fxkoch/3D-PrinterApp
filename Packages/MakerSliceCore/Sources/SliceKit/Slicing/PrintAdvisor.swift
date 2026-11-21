@@ -21,6 +21,7 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case autoSplit(objectID: UUID)
         case useLoadedFilament(slot: Int, type: String)
         case retraction(slot: Int, length: Double)
+        case filamentNozzle(slot: Int, temp: Int)
         case elephantFoot(Double)
         case supportTopZ(Double)
         case supportDistances(z: Double, xy: Double)
@@ -30,6 +31,19 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case primeTowerTuning(width: Double, volume: Double)
         case spiralVase(Bool)
         case leveling(Bool)
+        /// Drops speed/flow factor commands at a height, retraction steps and calibration end commands.
+        case removeLeftoverCommands
+        case firstLayerSpeed(Double)
+        /// Overhang slowdown on, at this speed (mm/s).
+        case overhangSlowdown(speed: Double)
+        case supportBottomZ(Double)
+        case supportSpacing(Double)
+        case seam(SeamPosition)
+        case atLeastWalls(Int)
+        /// Bed temperatures of a slot's filament up or down (all plates, first layer included).
+        case filamentBedDelta(slot: Int, delta: Int)
+        /// Prints everything of slot `from` with slot `to` (an empty head/slot → the one holding the material).
+        case useSlot(from: Int, to: Int)
     }
 
     public var id: String
@@ -106,13 +120,29 @@ public enum PrintAdvisor {
 
     /// - Parameter loadedTypes: material reported by the printer per slot (nil = unknown/empty).
     /// - Parameter dryerHumidity: relative humidity (%) reported by the ACE Pro, if known.
+    /// - Parameter analyses: precomputed `analyze` results for `objects` (same support angle), to skip the mesh work.
     public static func recommendations(objects: [ModelObject], settings s: PrintSettings,
                                        loadedTypes: [String?] = [], dryerHumidity: Double? = nil,
-                                       hoursSinceLeveling: Double? = nil) -> [Recommendation] {
+                                       hoursSinceLeveling: Double? = nil, analyses known: [ObjectAnalysis]? = nil) -> [Recommendation] {
         var result: [Recommendation] = []
-        let analyses = objects.map { analyze($0, supportAngle: s.supportAngle) }
+        let analyses = known?.count == objects.count ? known! : objects.map { analyze($0, supportAngle: s.supportAngle) }
         let usedTools = Set(objects.map(\.tool))
         let materials = usedTools.map { s.filament(for: $0) }
+
+        // Speed or flow steps at a height (calibration prints are not advised, so these are leftovers or come from a
+        // downloaded project). The max-flow test raises the speed to 433 %: the extruder then grinds the filament.
+        let factors = s.factorCommands
+        if !factors.isEmpty || !s.retractLengthSteps.isEmpty || !s.footerGCode.isEmpty {
+            let list = factors.prefix(4).map { code in
+                code.lines.joined(separator: " ") + " ab " + formatDecimal(code.z, digits: 1) + " mm"
+            }.joined(separator: ", ")
+            result.append(Recommendation(
+                id: "leftover-commands", title: "Tempo-/Fluss-Befehle aus einer Kalibrierung",
+                detail: (list.isEmpty ? "Dieser Druck enthält Rückzugsstufen oder Endbefehle eines Kalibrierdrucks."
+                    : "Dieser Druck ändert unterwegs Tempo oder Fluss des Druckers: \(list)\(factors.count > 4 ? " …" : "").")
+                    + " Das stammt meist aus einer Kalibrierung. Über 150 % kommt der Extruder nicht mehr nach und zermahlt das Filament.",
+                icon: "exclamationmark.octagon", severity: .warning, action: .removeLeftoverCommands))
+        }
 
         // Too big for the printer.
         for (object, a) in zip(objects, analyses)
@@ -136,14 +166,15 @@ public enum PrintAdvisor {
 
         // Supports.
         let overhang = analyses.map(\.overhangArea).reduce(0, +)
-        if overhang > 30, s.support == .off {
+        // Vase mode has no supports ("Stützen im Vasenmodus" turns them off): the support tips must not turn them back on.
+        if overhang > 30, s.support == .off, !s.spiralVase {
             let mode: SupportMode = analyses.contains(where: \.overhangOverModel) ? .everywhere : .buildPlateOnly
             result.append(Recommendation(
                 id: "support", title: "Stützen einschalten",
                 detail: String(format: "Etwa %.0f mm² hängen frei in der Luft (flacher als %.0f°). Ohne Stützen hängen diese Stellen durch.",
                                overhang, s.supportAngle) + (mode == .everywhere ? " Einige Überhänge liegen über dem Modell – Stützen „Überall“." : ""),
                 icon: "building.columns", severity: .warning, action: .support(mode)))
-        } else if overhang > 30, s.support == .buildPlateOnly, analyses.contains(where: \.overhangOverModel) {
+        } else if overhang > 30, s.support == .buildPlateOnly, !s.spiralVase, analyses.contains(where: \.overhangOverModel) {
             result.append(Recommendation(
                 id: "support-everywhere", title: "Stützen „Überall“ nötig",
                 detail: "Einige Überhänge liegen über dem Modell selbst. Mit „Nur vom Druckbett“ entstehen dort keine Stützen und die Stellen hängen durch.",
@@ -185,43 +216,36 @@ public enum PrintAdvisor {
                 detail: "Mit Elefantenfuß-Ausgleich lässt der Slicer einen kleinen Spalt zwischen Brim und Teil – dann hält der Brim das Teil nicht. Im Snapmaker-Forum behob 0 mm Ausgleich das. Der Ausgleich ist nur ohne Brim sinnvoll.",
                 icon: "square.dashed.inset.filled", severity: .suggestion, action: .elephantFoot(0)))
         }
-        // Supports: Snapmaker forum users print organic supports with Z distance = layer height + 0.05 mm
-        // (0.25 mm at 0.2 mm layers); with a different material as interface 0 mm works and leaves a clean surface.
+        // Supports: one rule per situation, decided by the material the supports are printed in (and its contact layer)
+        // compared with the part. Each rule proposes one value, so the tips cannot push each other back and forth.
         if s.support != .off {
-            // Supports of a material that does not weld to the part (PLA on PETG) come off easily – that is the point of
-            // the second material – but thin support lines find no hold where they stand on the part.
             let partGroups = Set(materials.map { PrimeTower.bondGroup($0.type) })
-            if let slot = s.supportInterfaceSlot ?? s.supportSlot, !partGroups.contains(PrimeTower.bondGroup(s.filament(for: slot).type)) {
-                let other = s.filament(for: slot).type, part = materials.first?.type ?? "Teil"
+            let bodyTool = s.supportSlot ?? usedTools.min() ?? 0
+            let contact = s.filament(for: s.supportInterfaceSlot ?? bodyTool).type
+            let part = materials.first?.type ?? "Teil"
+            let zNow = s.supportTopZDistance
+            if !partGroups.contains(PrimeTower.bondGroup(contact)) {
+                // PLA on PETG: the release is the point, but the support must still stand where it lands on the part.
                 result.append(Recommendation(
-                    id: "support-foot", title: "Stützen aus \(other) auf \(part): fester Fuß",
-                    detail: "\(other) haftet kaum auf \(part). So lösen sich die Stützen leicht, aber dünne Stützlinien fallen um, wo sie auf dem Teil stehen. Dort druckt die App deshalb die ersten zwei Schichten der Stütze geschlossen, etwas breiter und langsam. Zusätzlich hilft 0 mm Abstand.",
-                    icon: "building.columns", severity: .info, action: s.supportTopZDistance > 0 ? .supportTopZ(0) : nil))
-            }
-            let footTip = result.last?.id == "support-foot"
-            if s.supportInterfaceSlot != nil, s.supportTopZDistance > 0, !footTip {
+                    id: "support-foot", title: "Stützen aus \(contact) auf \(part): fester Fuß",
+                    detail: "\(contact) haftet kaum auf \(part). So lösen sich die Stützen leicht. Damit sie nicht umfallen, druckt die App an der Auflage auf dem Teil einen geschlossenen Fuß, drei Kontaktschichten mit 100 % und langsamer. Abstand 0 mm, die Kontaktschicht liegt direkt am Teil.",
+                    icon: "building.columns", severity: .info, action: zNow != 0 ? .supportTopZ(0) : nil))
+            } else if contact.uppercased().hasPrefix("PETG"), zNow < 0.28 || s.supportXYDistance < 0.6 {
+                // PETG sticks to itself: more distance keeps it from welding to the part (0.28 mm Z, 0.6 mm XY).
                 result.append(Recommendation(
-                    id: "support-z0", title: "Stützen: Abstand 0 mm bei anderem Material",
-                    detail: "Die Kontaktschicht der Stützen besteht aus einem anderen Material (z. B. PETG unter PLA). Dann haftet sie kaum, und Nutzer im Snapmaker-Forum stellen den oberen Abstand auf 0 mm – die Unterseite wird so glatter. Erst mit einem kleinen Teil testen; verschmilzt es, wieder 0,2 mm.",
-                    icon: "building.columns", severity: .info, action: .supportTopZ(0)))
-            } else if s.supportInterfaceSlot == nil, s.supportTopZDistance < s.layerHeight + 0.04 {
+                    id: "support-petg", title: "PETG-Stützen: mehr Abstand",
+                    detail: "\(contact) verschweißt mit sich selbst. Mit 0,28 mm Abstand oben und 0,6 mm zur Seite lassen sich die Stützen sauber abbrechen und die Unterseite bleibt glatt.",
+                    icon: "building.columns", severity: .suggestion,
+                    action: .supportDistances(z: max(0.28, zNow), xy: max(0.6, s.supportXYDistance))))
+            } else if !contact.uppercased().hasPrefix("PETG"), zNow < s.layerHeight + 0.04 {
+                // Snapmaker forum: organic supports come off "like butter" with layer height + 0.05 mm.
                 let value = ((s.layerHeight + 0.05) * 100).rounded() / 100
                 result.append(Recommendation(
                     id: "support-z", title: "Stützen lassen sich leichter lösen",
-                    detail: String(format: "Bei %.2f mm Schichten nutzen Snapmaker-Anwender %.2f mm Abstand zwischen Stütze und Teil: Die Stützen gehen \"wie Butter\" ab. Für sehr hohe Stützen zusätzlich die Erweiterung der ersten Schicht auf 5–7 mm stellen.",
-                                   s.layerHeight, value),
+                    detail: String(format: "Bei %.2f mm Schichten nutzen Snapmaker-Anwender %.2f mm Abstand zwischen Stütze und Teil: Die Stützen aus %@ gehen \"wie Butter\" ab. Für sehr hohe Stützen zusätzlich die Erweiterung der ersten Schicht auf 5–7 mm stellen.",
+                                   s.layerHeight, value, contact),
                     icon: "building.columns", severity: .suggestion, action: .supportTopZ(value)))
             }
-        }
-
-        // Support from PETG sticks to itself: more distance keeps it from welding to the part (0.28–0.30 mm Z, 0.6 mm XY).
-        if s.support != .off, materials.contains(where: { $0.type.hasPrefix("PETG") }),
-           s.supportTopZDistance < 0.28 || s.supportXYDistance < 0.6 {
-            result.append(Recommendation(
-                id: "support-petg", title: "PETG-Stützen: mehr Abstand",
-                detail: "PETG verschweißt mit sich selbst. Mit 0,28 mm Abstand oben und 0,6 mm zur Seite lassen sich die Stützen sauber abbrechen und die Unterseite bleibt glatt.",
-                icon: "building.columns", severity: .suggestion,
-                action: .supportDistances(z: max(0.28, s.supportTopZDistance), xy: max(0.6, s.supportXYDistance))))
         }
         // Clean surface on fine prints: a fast outer wall shows ringing and wobble; 100 mm/s (inner walls stay fast).
         if s.layerHeight <= 0.16, s.outerWallSpeed > 120, !s.spiralVase {
@@ -249,8 +273,11 @@ public enum PrintAdvisor {
             }
         }
 
-        // Infill pattern and density.
-        if materials.contains(where: \.isFlexible), s.infillPattern != .gyroid {
+        // Infill pattern and density (a chosen print goal decides infill and layer height itself).
+        let goalChosen = s.purpose != .balanced
+        if goalChosen {
+            // nothing: the goal's walls, infill and layer height stay
+        } else if materials.contains(where: \.isFlexible), s.infillPattern != .gyroid {
             result.append(Recommendation(
                 id: "infill-flex", title: "Gyroid-Füllung für flexibles Material",
                 detail: "Bei TPU federt Gyroid gleichmäßig in alle Richtungen und verhindert Knicke.",
@@ -270,7 +297,9 @@ public enum PrintAdvisor {
 
         // Layer height.
         let smallest = analyses.map { min($0.size.x, $0.size.y, $0.size.z) }.min() ?? 0
-        if smallest > 0, smallest < 12, s.layerHeight >= 0.2 {
+        if goalChosen {
+            // the goal sets the layer height
+        } else if smallest > 0, smallest < 12, s.layerHeight >= 0.2 {
             result.append(Recommendation(
                 id: "fine", title: "Feinere Schichten für kleine Details",
                 detail: "Das Modell ist klein. 0,12 mm Schichthöhe bildet Details deutlich schärfer ab.",
@@ -374,10 +403,30 @@ public enum PrintAdvisor {
             let configured = s.filament(for: tool)
             let label = "\(s.machine.slotLabel)\(tool + 1)"
             guard let loaded = loadedTypes[tool], !loaded.isEmpty, loaded.uppercased() != "NONE" else {
-                result.append(Recommendation(
-                    id: "empty-\(tool)", title: "\(label) ist leer",
-                    detail: "Für den Druck wird \(label) benötigt, aber der Drucker meldet dort kein Filament.",
-                    icon: "exclamationmark.circle", severity: .warning))
+                // Another free slot holds the same material: print with that one.
+                func holds(_ i: Int) -> String? {
+                    guard i != tool, !usedTools.contains(i), i < loadedTypes.count, let t = loadedTypes[i], !t.isEmpty, t.uppercased() != "NONE" else { return nil }
+                    return t
+                }
+                let base = configured.type.uppercased()
+                let same = loadedTypes.indices.first { i in holds(i).map { $0.uppercased().hasPrefix(base) || base.hasPrefix($0.uppercased().split(separator: " ").first.map(String.init) ?? $0) } ?? false }
+                let other = loadedTypes.indices.first { holds($0) != nil }
+                if let to = same {
+                    result.append(Recommendation(
+                        id: "empty-\(tool)", title: "\(label) ist leer – mit \(s.machine.slotLabel)\(to + 1) drucken",
+                        detail: "Für den Druck wird \(label) gebraucht, dort ist aber kein Filament. In \(s.machine.slotLabel)\(to + 1) steckt \(holds(to)!) – das Modell wird damit gedruckt.",
+                        icon: "arrow.right.circle", severity: .warning, action: .useSlot(from: tool, to: to)))
+                } else if let to = other {
+                    result.append(Recommendation(
+                        id: "empty-\(tool)", title: "\(label) ist leer",
+                        detail: "Für den Druck wird \(label) gebraucht, dort ist aber kein Filament. Eingelegt ist \(holds(to)!) in \(s.machine.slotLabel)\(to + 1) – ein anderes Material als \(configured.type). Tippen, um damit zu drucken, oder \(configured.type) in \(label) einlegen.",
+                        icon: "exclamationmark.circle", severity: .info, action: .useSlot(from: tool, to: to)))
+                } else {
+                    result.append(Recommendation(
+                        id: "empty-\(tool)", title: "\(label) ist leer",
+                        detail: "Für den Druck wird \(label) benötigt, aber der Drucker meldet dort kein Filament.",
+                        icon: "exclamationmark.circle", severity: .warning))
+                }
                 continue
             }
             let loadedBase = loaded.uppercased().split(separator: " ").first.map(String.init) ?? loaded
@@ -411,6 +460,8 @@ public enum PrintAdvisor {
         case .leveling(let on): s.enableBedLeveling = on
         case .retraction(let slot, let length):
             if slot < s.filaments.count { s.filaments[slot].retractLength = length }
+        case .filamentNozzle(let slot, let temp):
+            if slot < s.filaments.count { s.filaments[slot].nozzleTemp = temp; s.filaments[slot].firstLayerNozzleTemp = temp }
         case .elephantFoot(let value): s.elephantFootCompensation = value
         case .supportTopZ(let value): s.supportTopZDistance = value
         case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
@@ -420,6 +471,30 @@ public enum PrintAdvisor {
             if slot < s.filaments.count { s.filaments[slot].fanSpeed = speed; s.filaments[slot].fanMinSpeed = min(s.filaments[slot].fanMinSpeed, speed) }
         case .primeTowerTuning(let width, let volume): s.primeTowerWidth = width; s.purgeVolume = volume
         case .spiralVase(let on): s.spiralVase = on
+        case .firstLayerSpeed(let v): s.firstLayerSpeed = v; s.firstLayerInfillSpeed = min(s.firstLayerInfillSpeed, v * 2)
+        case .overhangSlowdown(let speed): s.slowDownOverhangs = true; s.overhangSpeed = speed
+        case .supportBottomZ(let v): s.supportBottomZDistance = v
+        case .supportSpacing(let v): s.supportSpacing = v
+        case .seam(let position): s.seamPosition = position
+        case .atLeastWalls(let n): s.wallLoops = max(s.wallLoops, n)
+        case .filamentBedDelta(let slot, let delta):
+            if slot < s.filaments.count {
+                s.filaments[slot].bedTemp += delta
+                s.filaments[slot].firstLayerBedTemp += delta
+                s.filaments[slot].smoothPlateBedTemp += delta
+            }
+        case .useSlot(let from, let to):
+            objects = objects.map { $0.movingTool(from: from, to: to) }
+        case .removeLeftoverCommands:
+            s.layerGCodes = s.layerGCodes.compactMap { code in
+                let rest = code.lines.filter { line in
+                    let c = line.trimmingCharacters(in: .whitespaces).uppercased()
+                    return !c.hasPrefix("M220") && !c.hasPrefix("M221")
+                }
+                return rest.isEmpty ? nil : LayerGCode(z: code.z, lines: rest)
+            }
+            s.retractLengthSteps = []
+            s.footerGCode = []
         case .useLoadedFilament(let slot, let type):
             if slot < s.filaments.count, var f = FilamentLibrary.bestMatch(type: type, printer: s.printer) {
                 f.color = s.filaments[slot].color
@@ -485,12 +560,23 @@ public enum PrintAdvisor {
                 icon: "drop.triangle", severity: .info))
         }
 
-        // PETG.
+        // PETG: the tips quote the PETG set in each slot and its current values, not a generic range.
+        for tool in tools where s.filament(for: tool).type.uppercased().hasPrefix("PETG") {
+            let f = s.filament(for: tool)
+            if f.nozzleTemp > 240 {
+                result.append(Recommendation(
+                    id: "petg-temp-\(tool)", title: "\(label(tool)) \(f.name): Düse 240 °C",
+                    detail: "Eingestellt sind \(f.nozzleTemp) °C. Beim Temperaturturm war mit PETG 240 °C am saubersten, bei 270 °C hingen die meisten Fäden. Erst danach Rückzug prüfen.",
+                    icon: "thermometer.medium", severity: .suggestion, action: .filamentNozzle(slot: tool, temp: 240)))
+            }
+            if f.retractLength > 0.8 {
+                result.append(Recommendation(
+                    id: "petg-retract-\(tool)", title: "\(label(tool)) \(f.name): Rückzug 0,6 mm",
+                    detail: String(format: "Eingestellt sind %.1f mm. Beim Rückzug-Test mit diesem PETG war 0,2 mm sauberer als 1,6 mm. Fehlen dann Stellen im Druck, Rückzug in 0,2-mm-Schritten wieder erhöhen.", f.retractLength),
+                    icon: "arrow.uturn.backward", severity: .suggestion, action: .retraction(slot: tool, length: 0.6)))
+            }
+        }
         if types.contains(where: { $0.hasPrefix("PETG") }) {
-            result.append(Recommendation(
-                id: "petg-tips", title: "PETG: Fäden vermeiden",
-                detail: "Bei Fäden die Düse in 5-°C-Schritten kühler stellen (230–240 °C), Rückzug 0,8–2 mm, Lüfter 30–50 %. Stützen mit 0,25 mm Abstand – PETG klebt sonst fest.",
-                icon: "scribble", severity: .info))
             // Not with a brim: there the compensation opens a gap between brim and part (see "brim-gap"), the two tips would alternate.
             if s.elephantFootCompensation < 0.15, s.brimWidth == 0 {
                 result.append(Recommendation(
@@ -500,8 +586,9 @@ public enum PrintAdvisor {
             }
         }
 
-        // Connectors need an accurate first layer.
-        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1, s.brimWidth == 0 {
+        // Connectors need an accurate first layer. Not next to the PETG tip, which sets the same setting to 0.2 mm.
+        let petgFootShown = types.contains(where: { $0.hasPrefix("PETG") }) && s.elephantFootCompensation < 0.15 && s.brimWidth == 0
+        if objects.contains(where: { !$0.volumes.isEmpty }), s.elephantFootCompensation < 0.1, s.brimWidth == 0, !petgFootShown {
             result.append(Recommendation(
                 id: "connector-foot", title: "Passgenaue Steckverbindungen",
                 detail: "Geteilte Teile mit Zapfen/Dübeln passen nur, wenn die erste Schicht nicht ausbeult. Elefantenfuß-Ausgleich auf 0,15 mm setzen.",
@@ -555,7 +642,7 @@ public enum PrintAdvisor {
             if s.support != .off {
                 result.append(Recommendation(
                     id: "vase-support", title: "Stützen im Vasenmodus",
-                    detail: "Stützen unterbrechen die Spirale. Vasenmodelle sollten ohne Überhänge auskommen.",
+                    detail: "Der Vasenmodus ist eingeschaltet. Stützen unterbrechen die Spirale, und Vasenmodelle sollten ohne Überhänge auskommen. Oft ist der Modus eine Altlast aus einer Kalibrierung (Max-Volumenstrom druckt als Vase). Hat das Modell Überhänge, Vasenmodus ausschalten.",
                     icon: "building.columns", severity: .suggestion, action: .support(.off)))
             }
         }

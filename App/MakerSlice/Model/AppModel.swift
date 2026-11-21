@@ -55,6 +55,11 @@ final class AppModel {
         didSet { UserDefaults.standard.set(expertMode, forKey: "expertMode") }
     }
 
+    /// New models get the advisor's safe settings at once (supports, brim, layer height, material tips), with undo.
+    var autoOptimize: Bool = UserDefaults.standard.object(forKey: "autoOptimize") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoOptimize, forKey: "autoOptimize") }
+    }
+
     /// Settings the user last used per printer model; new projects start from these.
     @ObservationIgnored private var savedSettings: [PrinterModel: PrintSettings] = [:]
 
@@ -66,13 +71,29 @@ final class AppModel {
             for key in ["levelingLog", "alertLastState", "alertPosted"] { UserDefaults.standard.removeObject(forKey: key) }
         }
         expertMode = UserDefaults.standard.bool(forKey: "expertMode")
+        var cleaned: [(PrinterModel, [String])] = []
         for model in PrinterModel.allCases {
             if let data = UserDefaults.standard.data(forKey: "settings-\(model.rawValue)"),
                let saved = try? JSONDecoder().decode(PrintSettings.self, from: data), saved.printer == model {
-                savedSettings[model] = saved
+                // Older versions kept the commands of one print (a calibration's speed steps, vase mode) as defaults.
+                if saved.hasProjectOnlyValues {
+                    var what: [String] = []
+                    if let top = saved.factorCommands.flatMap(\.lines).compactMap({ Int($0.uppercased().components(separatedBy: "S").last ?? "") }).max() {
+                        what.append("Tempo-/Fluss-Stufen bis \(top) %")
+                    }
+                    if saved.layerGCodes.count > saved.factorCommands.count { what.append("Befehle bei bestimmten Höhen") }
+                    if !saved.retractLengthSteps.isEmpty { what.append("Rückzugsstufen") }
+                    if saved.spiralVase { what.append("Vasenmodus") }
+                    cleaned.append((model, what))
+                }
+                savedSettings[model] = saved.forNewProjects
             }
         }
         printers.log = log
+        for (model, what) in cleaned {
+            remember(savedSettings[model]!)
+            log.add(.warning, "Vorgaben für \(model.displayName) bereinigt: \(what.isEmpty ? "Endbefehle einer Kalibrierung" : what.joined(separator: ", ")). Sie stammten aus einem einzelnen Druck (meist einer Kalibrierung) und galten bisher für jeden neuen Druck.", source: "App")
+        }
         browser.log = log
         setUpCalibration()
         // UI tests start without printers saved by an earlier test run.
@@ -124,8 +145,7 @@ final class AppModel {
 
     /// Starts another calibration print for the same printer and filament (closes the current project first).
     func startCalibration(_ kind: CalibrationKind, like plan: CalibrationPlan) {
-        let filament = plan.settings.filament(for: 0)
-        let next = CalibrationFactory.plan(kind, filament: filament, base: settings(for: plan.settings.printer))
+        let next = CalibrationFactory.plan(kind, filament: plan.filament, base: settings(for: plan.settings.printer), tool: plan.tool)
         project = nil
         Task {
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -159,7 +179,9 @@ final class AppModel {
         savedSettings[model] ?? PrintSettings(printer: model)
     }
 
-    func remember(_ settings: PrintSettings) {
+    /// Keeps the settings as the starting point of the next project – without what belongs to this one print only.
+    func remember(_ new: PrintSettings) {
+        let settings = new.forNewProjects
         savedSettings[settings.printer] = settings
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "settings-\(settings.printer.rawValue)")
@@ -243,7 +265,7 @@ final class AppModel {
                 let p = PrintProject(name: name, imported: model, settings: settings, useModelMaterials: loaded.allSatisfy { ($0 ?? "").isEmpty || $0 == "NONE" })
                 p.loadedTypes = loaded
                 p.dryerHumidity = humidity
-                p.refreshRecommendations()
+                if autoOptimize { p.autoOptimize() } else { p.refreshRecommendations() }
                 sendState = .idle
                 project = p
             case .failure(let error):
@@ -330,7 +352,8 @@ final class AppModel {
             if startPrint, project.settings.enableBedLeveling { LevelingLog.record(printer: project.settings.printer, plate: project.settings.plateType) }
             log.add(.info, startPrint ? "Druck gestartet: \(project.gcodeFileName)" : "Hochgeladen: \(project.gcodeFileName)",
                     source: printer.name)
-            remember(project.settings)
+            // A calibration print has its own settings (e.g. vase mode for the flow test): they must not become the defaults.
+            if project.calibration == nil { remember(project.settings) }
             await printers.refresh(printer)
         } catch {
             sendState = .failed(error.localizedDescription)

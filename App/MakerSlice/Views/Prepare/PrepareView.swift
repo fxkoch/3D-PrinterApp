@@ -45,6 +45,7 @@ struct PrepareView: View {
                         if let plan = project.calibration {
                             calibrationPanel(plan)
                         } else {
+                            if project.autoTuning || project.autoTuned != nil { autoTunePanel }
                             if !project.openRecommendations.isEmpty { advicePanel }
                             printerPanel
                             materialPanel
@@ -152,7 +153,7 @@ struct PrepareView: View {
     private func calibrationPanel(_ plan: CalibrationPlan) -> some View {
         Panel(title: "Kalibrierdruck: \(plan.kind.displayName)", systemImage: plan.kind.symbol) {
             Text(plan.note).font(.subheadline)
-            Text("Filament: \(plan.settings.filament(for: 0).name) · \(plan.settings.printer.displayName)").font(.caption).foregroundStyle(.secondary)
+            Text("Filament: \(plan.filament.name) · \(plan.settings.machine.slotLabel)\(plan.tool + 1) · \(plan.settings.printer.displayName)").font(.caption).foregroundStyle(.secondary)
             Text("Die Einstellungen dieses Tests sind fest, damit das Ergebnis aussagekräftig ist. Tippe auf „Slicen“, dann auf „Drucken“. Nach dem Druck trägst du hier ein, welche Stufe am besten aussieht.")
                 .font(.caption).foregroundStyle(.secondary)
             Button { showCalibrationResult = true } label: { Label("Ergebnis eintragen", systemImage: "checkmark.circle") }
@@ -263,6 +264,35 @@ struct PrepareView: View {
 
     // MARK: - Panels
 
+    /// What the app set for this model by itself, with undo.
+    @State private var showAutoDetails = false
+    private var autoTunePanel: some View {
+        Panel(title: "Für dieses Modell eingestellt", systemImage: "wand.and.stars.inverse") {
+            if project.autoTuning {
+                HStack { ProgressView(); Text("Modell wird analysiert …").font(.subheadline).foregroundStyle(.secondary) }
+            } else if let tuned = project.autoTuned {
+                ForEach(tuned.applied.prefix(showAutoDetails ? 50 : 4), id: \.id) { rec in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(rec.title, systemImage: rec.icon).font(.subheadline)
+                        if showAutoDetails { Text(rec.detail).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }
+                HStack {
+                    if tuned.applied.count > 4 || !showAutoDetails {
+                        Button(showAutoDetails ? "Weniger" : (tuned.applied.count > 4 ? "Alle \(tuned.applied.count) mit Begründung" : "Begründung")) {
+                            showAutoDetails.toggle()
+                        }
+                    }
+                    Spacer()
+                    Button("Rückgängig", role: .destructive) { project.undoAutoOptimize() }
+                        .accessibilityIdentifier("undoAutoTune")
+                }
+                .font(.caption)
+            }
+        }
+        .accessibilityIdentifier("autoTunePanel")
+    }
+
     private var advicePanel: some View {
         Panel(title: "Empfehlungen", systemImage: "wand.and.stars") {
             ForEach(project.openRecommendations.prefix(3)) { rec in
@@ -272,9 +302,18 @@ struct PrepareView: View {
                     project.dismissed.insert(rec.id)
                 }
             }
-            if project.openRecommendations.count > 3 {
-                Button("Alle \(project.openRecommendations.count) Empfehlungen") { showAdvice = true }.font(.subheadline)
+            HStack {
+                if project.openRecommendations.count > 3 {
+                    Button("Alle \(project.openRecommendations.count) Empfehlungen") { showAdvice = true }
+                }
+                Spacer()
+                if project.openRecommendations.contains(where: { $0.severity >= .suggestion && $0.action.map(AutoTune.isAutomatic) == true }) {
+                    Button("Alle übernehmen") { project.autoOptimize() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("applyAllRecommendations")
+                }
             }
+            .font(.subheadline)
         }
     }
 
@@ -491,7 +530,8 @@ struct PrepareView: View {
             }
 
             Divider()
-            if app.expertMode { expertInfill } else { simpleStrength }
+            purposePicker
+            if app.expertMode { expertInfill }
 
             Divider()
             if app.expertMode {
@@ -524,6 +564,13 @@ struct PrepareView: View {
                 Text("Haftrand, Glätten und Reinigungsturm stellt die App bei Bedarf selbst vor (siehe Empfehlungen). Alle Einstellungen gibt es im Expertenmodus.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Divider()
+            NavigationLink {
+                TroubleshootView(printer: app.printers.selected, model: project.settings.printer)
+            } label: {
+                Label("Problem beim letzten Druck? Problem-Helfer", systemImage: "stethoscope").font(.subheadline)
+            }
+            .accessibilityIdentifier("troubleshootFromPrepare")
         }
     }
 
@@ -536,24 +583,33 @@ struct PrepareView: View {
         }
     }
 
-    /// Simple mode: three levels instead of pattern and percentage.
-    private var simpleStrength: some View {
-        let levels: [(String, Double)] = [("Leicht", 0.10), ("Normal", 0.15), ("Stabil", 0.30)]
-        let current = levels.min { abs($0.1 - project.settings.infillDensity) < abs($1.1 - project.settings.infillDensity) }
+    /// The print goal: one choice sets layer height, walls, shells and infill, adapted to the filament.
+    private var purposePicker: some View {
+        let goal = project.settings.purpose
+        let main = project.settings.filament(for: project.usedTools.first ?? 0)
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Stabilität")
-                HelpButton(key: .infillDensity)
+                Text("Ziel")
+                Spacer()
+                Menu {
+                    ForEach(PrintPurpose.allCases) { p in
+                        Button { project.choose(p, autoTune: app.autoOptimize) } label: {
+                            Label(p.title, systemImage: p == goal ? "checkmark" : p.symbol)
+                            Text(p.summary)
+                        }
+                    }
+                } label: {
+                    Label(goal.title, systemImage: goal.symbol).font(.subheadline.weight(.semibold))
+                }
+                .accessibilityIdentifier("purposePicker")
             }
-            Picker("Stabilität", selection: Binding(get: { current?.0 ?? "Normal" }, set: { name in
-                if let level = levels.first(where: { $0.0 == name }) { project.settings.infillDensity = level.1 }
-            })) {
-                ForEach(levels, id: \.0) { Text($0.0).tag($0.0) }
+            Text(goal.summary).font(.caption).foregroundStyle(.secondary)
+            if let note = goal.note(for: main) {
+                Text(note).font(.caption).foregroundStyle(.secondary)
             }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("strengthPicker")
-            Text("Leicht spart Material und Zeit, Stabil für Teile, die Kraft aushalten müssen.")
-                .font(.caption).foregroundStyle(.secondary)
+            Text(String(format: "%.2f mm Schichten · %d Wände · %d %% %@", project.settings.layerHeight, project.settings.wallLoops,
+                        Int((project.settings.infillDensity * 100).rounded()), project.settings.infillPattern.displayName))
+                .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
         }
     }
 

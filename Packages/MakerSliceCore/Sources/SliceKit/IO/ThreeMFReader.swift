@@ -83,6 +83,26 @@ public struct ModelObject: Identifiable, Sendable, Equatable {
     }
 
     /// The object with its colours mapped to printer slots (`map`: file colour → slot).
+    /// Everything this object prints with slot `from` (body, parts, colour changes, paint) goes to slot `to`.
+    public func movingTool(from: Int, to: Int) -> ModelObject {
+        var copy = self
+        if copy.tool == from { copy.tool = to }
+        copy.parts = parts.map { var p = $0; if p.tool == from { p.tool = to }; return p }
+        copy.colorChanges = colorChanges.map { var c = $0; if c.tool == from { c.tool = to }; return c }
+        copy.paint = paint.map { var f = $0; if f.tool == from { f.tool = to }; return f }
+        return copy
+    }
+
+    /// This object with the slots of `other` (same object): body, parts, colour changes and paint.
+    public func takingTools(of other: ModelObject) -> ModelObject {
+        var copy = self
+        copy.tool = other.tool
+        if parts.count == other.parts.count { for i in parts.indices { copy.parts[i].tool = other.parts[i].tool } }
+        if colorChanges.count == other.colorChanges.count { copy.colorChanges = other.colorChanges }
+        if paint.count == other.paint.count { for i in paint.indices { copy.paint[i].tool = other.paint[i].tool } }
+        return copy
+    }
+
     public func applyingColorMap(_ map: [Int: Int]) -> ModelObject {
         var copy = self
         copy.tool = map[sourceTool ?? tool] ?? tool

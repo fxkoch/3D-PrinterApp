@@ -154,7 +154,7 @@ final class ModeTests: XCTestCase {
         u1.filaments[0] = FilamentLibrary.bestMatch(type: "PETG", printer: .snapmakerU1)!
         u1.elephantFootCompensation = 0.1
         let u1IDs = Set(PrintAdvisor.recommendations(objects: [object], settings: u1).map(\.id))
-        XCTAssertTrue(u1IDs.isSuperset(of: ["petg-tips", "petg-foot", "dry"]))
+        XCTAssertTrue(u1IDs.isSuperset(of: ["petg-temp-0", "petg-foot", "dry"]))
         XCTAssertFalse(u1IDs.contains("kobra-wiper"))
 
         u1.spiralVase = true

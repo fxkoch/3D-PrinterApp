@@ -135,6 +135,7 @@ public final class Slicer: @unchecked Sendable {
         var supportGenerator = SupportGenerator(settings: s)
         supportGenerator.denseFoot = !partGroups.contains(PrimeTower.bondGroup(s.filament(for: contactTool).type))
         let support = s.support == .off ? nil : supportGenerator.generate(layers: all, tops: tops)
+        let denseContact = supportGenerator.denseFoot
         if isCancelled() { throw SliceError.cancelled }
 
         // 3. Walls and infill per layer, in parallel.
@@ -158,7 +159,8 @@ public final class Slicer: @unchecked Sendable {
                 }
                 if let support, !support.areas[i].isEmpty {
                     let gen = LayerToolpathGenerator(settings: s, layerIndex: i, z: tops[i], height: height)
-                    let supportPaths = gen.supportPaths(area: support.areas[i], interface: support.interfaces[i], foot: support.feet[i])
+                    let supportPaths = gen.supportPaths(area: support.areas[i], interface: support.interfaces[i], foot: support.feet[i],
+                                                        dense: denseContact)
                     // Support (and its contact layers) may use their own slots, e.g. a soluble or cheaper material.
                     let supportTool = s.supportSlot ?? tools.first ?? 0
                     let interfaceTool = s.supportInterfaceSlot ?? supportTool
@@ -184,14 +186,20 @@ public final class Slicer: @unchecked Sendable {
         if isCancelled() { throw SliceError.cancelled }
         var result = layers.compactMap { $0 }
 
-        // 4. Skirt/brim on the first layer.
-        if let firstTool = result.first?.islands.first?.tool ?? tools.first {
+        // 4. Skirt/brim on the first layer, in the material of the part with the largest footprint. Supports from
+        // another slot come first in the layer, but a PLA brim would not hold a PETG part. The brim's island leads the
+        // layer so the print starts with it.
+        let footprint: (Int) -> Double = { tool in regions[tool].map { $0[0].areaMM2 } ?? 0 }
+        let partTool = tools.filter { footprint($0) > 0 }.max { (footprint($0), -$0) < (footprint($1), -$1) }
+        if let brimTool = partTool ?? result.first?.islands.first?.tool ?? tools.first, !result.isEmpty {
             let adhesion = adhesionPaths(firstLayer: all[0], supportFirstLayer: support?.areas.first)
-            if !adhesion.isEmpty, !result.isEmpty {
-                if let idx = result[0].islands.firstIndex(where: { $0.tool == firstTool }) {
-                    result[0].islands[idx].extrusions.insert(contentsOf: adhesion, at: 0)
+            if !adhesion.isEmpty {
+                if let idx = result[0].islands.firstIndex(where: { $0.tool == brimTool }) {
+                    var island = result[0].islands.remove(at: idx)
+                    island.extrusions.insert(contentsOf: adhesion, at: 0)
+                    result[0].islands.insert(island, at: 0)
                 } else {
-                    result[0].islands.insert(ToolIsland(tool: firstTool, extrusions: adhesion), at: 0)
+                    result[0].islands.insert(ToolIsland(tool: brimTool, extrusions: adhesion), at: 0)
                 }
             }
         }

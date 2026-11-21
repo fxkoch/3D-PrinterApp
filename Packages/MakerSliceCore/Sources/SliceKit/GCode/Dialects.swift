@@ -31,6 +31,8 @@ struct U1Dialect: MachineDialect {
         }
         let highTemp = s.plateType == .highTemp
         var lines: [String] = [
+            // The printer keeps the speed factor of the last job (a paused calibration never reaches its reset at the end).
+            "M220 S100 ; reset speed factor",
             "SET_PRINT_AUTO_BED_LEVELING ENABLE=\(s.enableBedLeveling ? 1 : 0)",
             "SET_TIME_LAPSE_CAMERA ENABLE=\(s.enableTimelapse ? 1 : 0)",
             "PRINT_START",
@@ -156,8 +158,21 @@ struct U1Dialect: MachineDialect {
     }
 
     func afterLayer(_ layer: SlicedLayer, _ ctx: PrintContext) -> [String] {
-        [";AFTER_LAYER_CHANGE", ";\(fmt(layer.z))",
-         "SET_PRINT_STATS_INFO TOTAL_LAYER=\(ctx.layers.count) CURRENT_LAYER=\(layer.index + 1)"]
+        var lines = [";AFTER_LAYER_CHANGE", ";\(fmt(layer.z))",
+                     "SET_PRINT_STATS_INFO TOTAL_LAYER=\(ctx.layers.count) CURRENT_LAYER=\(layer.index + 1)"]
+        if layer.index == 1 {
+            // Second layer: the normal temperatures (OrcaSlicer does this itself; the U1 profile has no line for it).
+            // Other heads get theirs with the next tool change, which waits for the layer's temperature.
+            let s = ctx.settings
+            let tool = layer.islands.first?.tool ?? ctx.initialTool
+            let f = s.filament(for: tool)
+            if f.nozzleTemp != f.firstLayerNozzleTemp { lines.append("M104 T\(tool) S\(f.nozzleTemp)") }
+            let bed = ctx.initialFilament
+            if bed.bedTemp(for: s.plateType, firstLayer: false) != bed.bedTemp(for: s.plateType, firstLayer: true) {
+                lines.append("M140 S\(bed.bedTemp(for: s.plateType, firstLayer: false))")
+            }
+        }
+        return lines
     }
 
     func toolChange(from: Int, to: Int, layer: SlicedLayer, _ ctx: PrintContext) -> [String] {
@@ -182,7 +197,7 @@ struct U1Dialect: MachineDialect {
     }
 
     func end(_ ctx: PrintContext) -> [String] {
-        var lines = ["M107", "PRINT_END"]
+        var lines = ["M220 S100 ; reset speed factor", "M107", "PRINT_END"]
         if ctx.settings.enableTimelapse { lines.append("TIMELAPSE_STOP") }
         lines.append("; U1 nozzle flow metadata, in logical filament order")
         let slots = max(ctx.settings.machine.toolCount, (ctx.usedTools.max() ?? 0) + 1)

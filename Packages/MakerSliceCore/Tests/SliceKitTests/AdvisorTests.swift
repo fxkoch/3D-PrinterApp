@@ -67,9 +67,11 @@ final class AdvisorTests: XCTestCase {
         s.supportTopZDistance = 0.2
         var recs = PrintAdvisor.recommendations(objects: t, settings: s)
         XCTAssertEqual(recs.first { $0.id == "support-z" }?.action, .supportTopZ(0.25), "0.25 mm at 0.2 mm layers")
+        s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
         s.supportInterfaceSlot = 1
         recs = PrintAdvisor.recommendations(objects: t, settings: s)
-        XCTAssertEqual(recs.first { $0.id == "support-z0" }?.action, .supportTopZ(0), "other material as interface: 0 mm")
+        XCTAssertEqual(recs.first { $0.id == "support-foot" }?.action, .supportTopZ(0), "PLA contact on a PETG part: 0 mm")
+        XCTAssertNil(recs.first { $0.id == "support-z" }, "one rule per situation")
         s.brimWidth = 5
         s.elephantFootCompensation = 0.15
         recs = PrintAdvisor.recommendations(objects: t, settings: s)
@@ -77,6 +79,103 @@ final class AdvisorTests: XCTestCase {
         let gap = try XCTUnwrap(recs.first { $0.id == "brim-gap" })
         try PrintAdvisor.apply(gap.action!, settings: &s, objects: &objects)
         XCTAssertEqual(s.elephantFootCompensation, 0)
+    }
+
+    /// The setting a tip changes, as (name, value). Tips that change the same setting must not both be shown with different values.
+    private func settingChanges(_ action: Recommendation.Action) -> [(String, String)] {
+        switch action {
+        case .supportTopZ(let z): return [("support top z", "\(z)")]
+        case .supportDistances(let z, let xy): return [("support top z", "\(z)"), ("support xy", "\(xy)")]
+        case .elephantFoot(let v): return [("elephant foot", "\(v)")]
+        case .brim(let w): return [("brim", "\(w)")]
+        case .zHop(let v): return [("z hop", "\(v)")]
+        case .retraction(let slot, let length): return [("retraction \(slot)", "\(length)")]
+        case .filamentNozzle(let slot, let temp): return [("nozzle \(slot)", "\(temp)")]
+        case .filamentFan(let slot, let speed): return [("fan \(slot)", "\(speed)")]
+        case .support(let mode): return [("support", "\(mode)")]
+        default: return []
+        }
+    }
+
+    /// For every material combination: tips never set one setting to two values, and applying a tip never brings
+    /// the same tip back with a new value (that was the back and forth on the printer).
+    func testRecommendationsDoNotPushEachOtherBackAndForth() throws {
+        let t = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "T", mesh: Fixtures.tShape())], bedSize: 270))
+        for partType in ["PETG", "PLA"] {
+            for contactType in [nil, "PETG", "PLA"] {
+                for topZ in [0.0, 0.2] {
+                    for brim in [0.0, 5.0] {
+                        var s = PrintSettings(printer: .snapmakerU1)
+                        s.support = .buildPlateOnly
+                        s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: partType, printer: s.printer))
+                        if let contactType {
+                            s.filaments[1] = try XCTUnwrap(FilamentLibrary.bestMatch(type: contactType, printer: s.printer))
+                            s.supportInterfaceSlot = 1
+                        }
+                        s.supportTopZDistance = topZ
+                        s.brimWidth = brim
+                        s.zHop = 0.4
+                        s.filaments[0].nozzleTemp = 250
+                        s.filaments[0].retractLength = 1.0
+                        let case_ = "part \(partType), contact \(contactType ?? "part"), z \(topZ), brim \(brim)"
+                        let recs = PrintAdvisor.recommendations(objects: t, settings: s)
+                        var seen: [String: String] = [:]
+                        for rec in recs {
+                            for (name, value) in rec.action.map(settingChanges) ?? [] {
+                                if let other = seen[name] {
+                                    XCTAssertEqual(other, value, "\(case_): \"\(name)\" set to two values")
+                                }
+                                seen[name] = value
+                            }
+                        }
+                        for rec in recs {
+                            guard let action = rec.action else { continue }
+                            var after = s
+                            var objects = t
+                            try PrintAdvisor.apply(action, settings: &after, objects: &objects)
+                            let again = PrintAdvisor.recommendations(objects: objects, settings: after)
+                            if let back = again.first(where: { $0.id == rec.id }) {
+                                XCTAssertNil(back.action, "\(case_): \(rec.id) comes back with a new value")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// PETG tips quote the PETG in the slot with its own values, and vanish once those values are the advised ones.
+    func testPETGTipsUseTheFilamentInTheSlot() throws {
+        // The part prints from slot 2, so the PETG in slot 2 is the one in use.
+        let t = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "T", mesh: Fixtures.tShape(), tool: 1)], bedSize: 270))
+        var s = PrintSettings(printer: .snapmakerU1)
+        s.filaments[1] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
+        s.filaments[1].nozzleTemp = 250
+        s.filaments[1].retractLength = 1.0
+        var objects = t
+        let temp = try XCTUnwrap(PrintAdvisor.recommendations(objects: t, settings: s).first { $0.id == "petg-temp-1" })
+        XCTAssertTrue(temp.title.contains(s.filaments[1].name), "the tip names the filament in the slot")
+        XCTAssertEqual(temp.action, .filamentNozzle(slot: 1, temp: 240))
+        XCTAssertEqual(PrintAdvisor.recommendations(objects: t, settings: s).first { $0.id == "petg-retract-1" }?.action, .retraction(slot: 1, length: 0.6))
+        try PrintAdvisor.apply(temp.action!, settings: &s, objects: &objects)
+        XCTAssertEqual(s.filaments[1].nozzleTemp, 240)
+        XCTAssertNil(PrintAdvisor.recommendations(objects: t, settings: s).first { $0.id == "petg-temp-1" })
+    }
+
+    /// Vase mode: the advice to switch supports off must not be undone by the advice to switch them on.
+    func testVaseModeDoesNotTurnSupportsBackOn() throws {
+        var objs = [ModelObject(name: "Overhang", mesh: Fixtures.tShape())]
+        var s = PrintSettings()
+        s.support = .buildPlateOnly
+        s.spiralVase = true
+        let recs = PrintAdvisor.recommendations(objects: objs, settings: s)
+        let off = try XCTUnwrap(recs.first { $0.id == "vase-support" })
+        XCTAssertEqual(off.action, .support(.off))
+        try PrintAdvisor.apply(off.action!, settings: &s, objects: &objs)
+        let after = PrintAdvisor.recommendations(objects: objs, settings: s).map(\.id)
+        XCTAssertFalse(after.contains("support"))
+        XCTAssertFalse(after.contains("support-everywhere"))
+        XCTAssertFalse(after.contains("vase-support"))
     }
 
     func testSurfaceAndPETGSupportTips() throws {

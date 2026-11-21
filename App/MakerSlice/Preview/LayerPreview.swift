@@ -75,6 +75,7 @@ struct LayerPreview: View {
         case .solidInfill: return .indigo
         case .sparseInfill: return Color.green.opacity(0.8)
         case .bridge: return .brown
+        case .overhangWall: return .yellow
         case .ironing: return .pink
         case .primeTower: return .mint
         case .support: return .gray

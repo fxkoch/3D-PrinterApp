@@ -20,12 +20,16 @@ public struct PrintRecovery: Equatable, Sendable {
     /// What the pause message says went wrong.
     enum Cause {
         case filamentOut, clog, heater, adhesion, power, userPause, unknown
+        /// The extruder pushes against resistance and grinds the filament (multiACE "Widerstand … zermahlen").
+        case grinding
     }
 
     static func cause(of message: String?) -> Cause {
         let m = (message ?? "").lowercased()
         func has(_ words: [String]) -> Bool { words.contains { m.contains($0) } }
         if has(["runaway", "heater", "mintemp", "maxtemp", "thermistor", "temperature", "temperatur", "heizer"]) { return .heater }
+        // Before "filament": these messages name the filament too, but it is still there – it cannot be pushed.
+        if has(["zermahl", "widerstand", "resistance", "grinding", "unterextrusion", "under-extrusion", "underextrusion", "coil-delta"]) { return .grinding }
         if has(["runout", "run out", "out of filament", "no filament", "filament sensor", "filament", "material", "feed", "ausgegangen", "leer", "retract", "rückgang", "rueckgang", "abnormal", "slip"]) { return .filamentOut }
         if has(["clog", "jam", "extru", "blocked", "verstopf", "grind", "skip"]) { return .clog }
         if has(["detach", "adhesion", "spaghetti", "first layer", "lift", "warp", "haftung", "gelöst"]) { return .adhesion }
@@ -47,9 +51,13 @@ public struct PrintRecovery: Equatable, Sendable {
         var reasons: [String] = []
         if let layerText { reasons.append("Der Druck steht bei \(layerText) (\(percent) %).") } else { reasons.append("Der Druck steht bei \(percent) %.") }
         if let message = s.stateMessage { reasons.append("Meldung des Druckers: „\(message)“") }
+        // A speed factor far above 100 % (left by a calibration's speed steps) makes the extruder grind the filament.
+        let tooFast = (s.speedPercent ?? 100) > 150
+        let speedStep = "Tempo steht auf \(Int(s.speedPercent ?? 100)) %: zuerst auf 100 % stellen (Live-Ansicht → Tempo)."
+        if tooFast { reasons.append("Der Drucker läuft mit \(Int(s.speedPercent ?? 100)) % Tempo. So schnell kann kein Extruder fördern.") }
 
         func result(_ verdict: Verdict, _ title: String, steps: [String]) -> PrintRecovery {
-            PrintRecovery(verdict: verdict, title: title, reasons: reasons, steps: steps)
+            PrintRecovery(verdict: verdict, title: title, reasons: reasons, steps: tooFast && !steps.contains(speedStep) ? [speedStep] + steps : steps)
         }
 
         // Safety first: heater faults are never resumed blindly.
@@ -76,6 +84,13 @@ public struct PrintRecovery: Equatable, Sendable {
             return result(.discard, "Abbrechen und neu starten", steps: ["Ursache beheben (Filament, Düse, Haftung).", "Druck neu starten."])
         }
         switch cause {
+        case .grinding:
+            reasons.append("Das Filament ist noch da, kommt aber nicht durch: Die Stelle ist zu dünn gedruckt. Weiterdrucken geht, wenn die Ursache behoben ist.")
+            return result(.checkFirst, "Ursache beheben, Teil prüfen",
+                          steps: ["Spule prüfen: läuft sie frei, kein Knoten, nichts verklemmt im ACE.",
+                                  "Schlauch zum Druckkopf auf Knicke prüfen.",
+                                  "Düse prüfen: kommt beim Extrudieren ein gleichmäßiger Faden? Sonst Kaltzug (Cold Pull).",
+                                  "Fehlen mehrere Schichten am Teil, lieber abbrechen. Sonst „Fortsetzen“; die dünne Stelle bleibt sichtbar."])
         case .filamentOut:
             let retract = ["retract", "rückgang", "rueckgang", "abnormal", "slip"].contains { (s.stateMessage ?? "").lowercased().contains($0) }
             reasons.append(retract
