@@ -271,8 +271,11 @@ public enum PrintAdvisor {
             }
         }
 
-        // Infill pattern and density.
-        if materials.contains(where: \.isFlexible), s.infillPattern != .gyroid {
+        // Infill pattern and density (a chosen print goal decides infill and layer height itself).
+        let goalChosen = s.purpose != .balanced
+        if goalChosen {
+            // nothing: the goal's walls, infill and layer height stay
+        } else if materials.contains(where: \.isFlexible), s.infillPattern != .gyroid {
             result.append(Recommendation(
                 id: "infill-flex", title: "Gyroid-Füllung für flexibles Material",
                 detail: "Bei TPU federt Gyroid gleichmäßig in alle Richtungen und verhindert Knicke.",
@@ -292,7 +295,9 @@ public enum PrintAdvisor {
 
         // Layer height.
         let smallest = analyses.map { min($0.size.x, $0.size.y, $0.size.z) }.min() ?? 0
-        if smallest > 0, smallest < 12, s.layerHeight >= 0.2 {
+        if goalChosen {
+            // the goal sets the layer height
+        } else if smallest > 0, smallest < 12, s.layerHeight >= 0.2 {
             result.append(Recommendation(
                 id: "fine", title: "Feinere Schichten für kleine Details",
                 detail: "Das Modell ist klein. 0,12 mm Schichthöhe bildet Details deutlich schärfer ab.",

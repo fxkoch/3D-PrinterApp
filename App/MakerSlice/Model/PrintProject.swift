@@ -402,6 +402,16 @@ final class PrintProject: Identifiable {
         }
     }
 
+    /// Sets a print goal (robust, light, fast …) for the filaments this plate uses. Earlier automatic changes are kept,
+    /// but "undo" now starts from here.
+    func choose(_ purpose: PrintPurpose, autoTune: Bool) {
+        var s = settings
+        s.apply(purpose, usedTools: usedTools)
+        settings = s
+        autoTuned = nil
+        if autoTune { autoOptimize() } else { refreshRecommendations() }
+    }
+
     /// Back to the settings before the automatic tuning.
     func undoAutoOptimize() {
         guard let tuned = autoTuned else { return }

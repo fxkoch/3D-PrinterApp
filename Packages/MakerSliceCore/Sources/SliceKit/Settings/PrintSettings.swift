@@ -113,6 +113,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var outerWallLineWidth: Double = 0.42
     public var firstLayerLineWidth: Double = 0.5
 
+    /// The goal chosen for the print (robust, light, fast …); the advisor then leaves layer height and infill alone.
+    public var purpose: PrintPurpose = .balanced
+
     // Strength
     public var wallLoops: Int = 2
     public var topLayers: Int = 5
@@ -379,6 +382,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
             if let v = try? c.decodeIfPresent(T.self, forKey: key) { value = v }
         }
         d(.printer, &printer)
+        d(.purpose, &purpose)
         d(.layerHeight, &layerHeight); d(.firstLayerHeight, &firstLayerHeight); d(.nozzleDiameter, &nozzleDiameter)
         d(.lineWidth, &lineWidth); d(.outerWallLineWidth, &outerWallLineWidth); d(.firstLayerLineWidth, &firstLayerLineWidth)
         d(.wallLoops, &wallLoops); d(.topLayers, &topLayers); d(.bottomLayers, &bottomLayers)

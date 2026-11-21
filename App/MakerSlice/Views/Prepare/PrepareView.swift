@@ -530,7 +530,8 @@ struct PrepareView: View {
             }
 
             Divider()
-            if app.expertMode { expertInfill } else { simpleStrength }
+            purposePicker
+            if app.expertMode { expertInfill }
 
             Divider()
             if app.expertMode {
@@ -582,24 +583,33 @@ struct PrepareView: View {
         }
     }
 
-    /// Simple mode: three levels instead of pattern and percentage.
-    private var simpleStrength: some View {
-        let levels: [(String, Double)] = [("Leicht", 0.10), ("Normal", 0.15), ("Stabil", 0.30)]
-        let current = levels.min { abs($0.1 - project.settings.infillDensity) < abs($1.1 - project.settings.infillDensity) }
+    /// The print goal: one choice sets layer height, walls, shells and infill, adapted to the filament.
+    private var purposePicker: some View {
+        let goal = project.settings.purpose
+        let main = project.settings.filament(for: project.usedTools.first ?? 0)
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Stabilität")
-                HelpButton(key: .infillDensity)
+                Text("Ziel")
+                Spacer()
+                Menu {
+                    ForEach(PrintPurpose.allCases) { p in
+                        Button { project.choose(p, autoTune: app.autoOptimize) } label: {
+                            Label(p.title, systemImage: p == goal ? "checkmark" : p.symbol)
+                            Text(p.summary)
+                        }
+                    }
+                } label: {
+                    Label(goal.title, systemImage: goal.symbol).font(.subheadline.weight(.semibold))
+                }
+                .accessibilityIdentifier("purposePicker")
             }
-            Picker("Stabilität", selection: Binding(get: { current?.0 ?? "Normal" }, set: { name in
-                if let level = levels.first(where: { $0.0 == name }) { project.settings.infillDensity = level.1 }
-            })) {
-                ForEach(levels, id: \.0) { Text($0.0).tag($0.0) }
+            Text(goal.summary).font(.caption).foregroundStyle(.secondary)
+            if let note = goal.note(for: main) {
+                Text(note).font(.caption).foregroundStyle(.secondary)
             }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("strengthPicker")
-            Text("Leicht spart Material und Zeit, Stabil für Teile, die Kraft aushalten müssen.")
-                .font(.caption).foregroundStyle(.secondary)
+            Text(String(format: "%.2f mm Schichten · %d Wände · %d %% %@", project.settings.layerHeight, project.settings.wallLoops,
+                        Int((project.settings.infillDensity * 100).rounded()), project.settings.infillPattern.displayName))
+                .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
         }
     }
 
