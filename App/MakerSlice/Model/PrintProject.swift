@@ -62,6 +62,8 @@ final class PrintProject: Identifiable {
     /// Settings the app picked for this model by itself (with the settings before, for undo).
     private(set) var autoTuned: AutoTuneResult?
     private(set) var autoTuning = false
+    /// Slots of the objects before the automatic tuning moved them (for undo).
+    @ObservationIgnored private var toolsBeforeAutoTune: [ModelObject.ID: ModelObject] = [:]
 
     @ObservationIgnored private var sliceTasks: [Int: Task<Void, Never>] = [:]
     /// Plates still waiting while "alle Platten slicen" runs.
@@ -380,6 +382,7 @@ final class PrintProject: Identifiable {
     func autoOptimize() {
         guard calibration == nil else { refreshRecommendations(); return }
         let objects = self.objects, settings = self.settings, loaded = loadedTypes, humidity = dryerHumidity
+        let plate = currentPlate - 1
         autoTuning = true
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -391,6 +394,15 @@ final class PrintProject: Identifiable {
             guard self.settings == settings else { self.refreshRecommendations(); return }
             if result.changed {
                 self.settings = result.settings
+                // Slots moved by the tuning (empty head → the one with the material), if the plate is still the same.
+                if self.plates.indices.contains(plate), self.plates[plate].map(\.id) == result.objects.map(\.id),
+                   self.plates[plate].map(\.allTools) != result.objects.map(\.allTools) {
+                    for (i, tuned) in result.objects.enumerated() {
+                        if self.toolsBeforeAutoTune[tuned.id] == nil { self.toolsBeforeAutoTune[tuned.id] = self.plates[plate][i] }
+                        self.plates[plate][i] = self.plates[plate][i].takingTools(of: tuned)
+                    }
+                    self.changed(plate: plate + 1)
+                }
                 // Keep the first "before": a second run must not make its own result the undo target.
                 if let earlier = self.autoTuned {
                     self.autoTuned = AutoTuneResult(original: earlier.original, settings: result.settings, applied: earlier.applied + result.applied)
@@ -417,6 +429,13 @@ final class PrintProject: Identifiable {
         guard let tuned = autoTuned else { return }
         settings = tuned.original
         autoTuned = nil
+        for p in plates.indices {
+            for i in plates[p].indices {
+                if let before = toolsBeforeAutoTune[plates[p][i].id] { plates[p][i] = plates[p][i].takingTools(of: before) }
+            }
+        }
+        toolsBeforeAutoTune = [:]
+        invalidate()
         // The tips stay visible, now as suggestions to tap.
         refreshRecommendations()
     }

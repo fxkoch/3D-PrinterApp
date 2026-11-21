@@ -52,3 +52,40 @@ final class AutoTuneTests: XCTestCase {
         }
     }
 }
+
+final class EmptySlotTests: XCTestCase {
+    func testEmptyHeadMovesToTheHeadWithTheSameMaterial() throws {
+        var s = PrintSettings()
+        s.filaments = [.petg, .pla, .petg, .pla]
+        let objects = [ModelObject(name: "Zwiebelspender", mesh: Fixtures.box(20, 20, 20), tool: 0)]
+        let loaded: [String?] = ["", "PLA", "PETG", nil]
+        let tip = try XCTUnwrap(PrintAdvisor.recommendations(objects: objects, settings: s, loadedTypes: loaded).first { $0.id == "empty-0" })
+        XCTAssertEqual(tip.action, .useSlot(from: 0, to: 2))
+        XCTAssertEqual(tip.severity, .warning)
+        let tuned = AutoTune.run(objects: objects, settings: s, loadedTypes: loaded)
+        XCTAssertEqual(tuned.objects.first?.tool, 2)
+        XCTAssertTrue(tuned.applied.contains { $0.id == "empty-0" })
+    }
+
+    func testOtherMaterialIsOnlyOffered() throws {
+        var s = PrintSettings()
+        s.filaments = [.petg, .pla, .pla, .pla]
+        let objects = [ModelObject(name: "Teil", mesh: Fixtures.box(20, 20, 20), tool: 0)]
+        let loaded: [String?] = ["", "PLA", nil, nil]
+        let tip = try XCTUnwrap(PrintAdvisor.recommendations(objects: objects, settings: s, loadedTypes: loaded).first { $0.id == "empty-0" })
+        XCTAssertEqual(tip.severity, .info)
+        XCTAssertEqual(tip.action, .useSlot(from: 0, to: 1))
+        XCTAssertEqual(AutoTune.run(objects: objects, settings: s, loadedTypes: loaded).objects.first?.tool, 0, "not automatic")
+    }
+
+    func testMovingKeepsPartsAndColourChangesInStep() {
+        var o = ModelObject(name: "Anhänger", mesh: Fixtures.box(10, 10, 10), tool: 0)
+        o.parts = [ObjectPart(name: "Schrift", mesh: Fixtures.box(5, 5, 5), tool: 1)]
+        o.colorChanges = [ColorChange(z: 5, tool: 0)]
+        let moved = o.movingTool(from: 0, to: 3)
+        XCTAssertEqual(moved.tool, 3)
+        XCTAssertEqual(moved.parts.first?.tool, 1)
+        XCTAssertEqual(moved.colorChanges.first?.tool, 3)
+        XCTAssertEqual(moved.takingTools(of: o).tool, 0)
+    }
+}

@@ -42,6 +42,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case atLeastWalls(Int)
         /// Bed temperatures of a slot's filament up or down (all plates, first layer included).
         case filamentBedDelta(slot: Int, delta: Int)
+        /// Prints everything of slot `from` with slot `to` (an empty head/slot → the one holding the material).
+        case useSlot(from: Int, to: Int)
     }
 
     public var id: String
@@ -401,10 +403,30 @@ public enum PrintAdvisor {
             let configured = s.filament(for: tool)
             let label = "\(s.machine.slotLabel)\(tool + 1)"
             guard let loaded = loadedTypes[tool], !loaded.isEmpty, loaded.uppercased() != "NONE" else {
-                result.append(Recommendation(
-                    id: "empty-\(tool)", title: "\(label) ist leer",
-                    detail: "Für den Druck wird \(label) benötigt, aber der Drucker meldet dort kein Filament.",
-                    icon: "exclamationmark.circle", severity: .warning))
+                // Another free slot holds the same material: print with that one.
+                func holds(_ i: Int) -> String? {
+                    guard i != tool, !usedTools.contains(i), i < loadedTypes.count, let t = loadedTypes[i], !t.isEmpty, t.uppercased() != "NONE" else { return nil }
+                    return t
+                }
+                let base = configured.type.uppercased()
+                let same = loadedTypes.indices.first { i in holds(i).map { $0.uppercased().hasPrefix(base) || base.hasPrefix($0.uppercased().split(separator: " ").first.map(String.init) ?? $0) } ?? false }
+                let other = loadedTypes.indices.first { holds($0) != nil }
+                if let to = same {
+                    result.append(Recommendation(
+                        id: "empty-\(tool)", title: "\(label) ist leer – mit \(s.machine.slotLabel)\(to + 1) drucken",
+                        detail: "Für den Druck wird \(label) gebraucht, dort ist aber kein Filament. In \(s.machine.slotLabel)\(to + 1) steckt \(holds(to)!) – das Modell wird damit gedruckt.",
+                        icon: "arrow.right.circle", severity: .warning, action: .useSlot(from: tool, to: to)))
+                } else if let to = other {
+                    result.append(Recommendation(
+                        id: "empty-\(tool)", title: "\(label) ist leer",
+                        detail: "Für den Druck wird \(label) gebraucht, dort ist aber kein Filament. Eingelegt ist \(holds(to)!) in \(s.machine.slotLabel)\(to + 1) – ein anderes Material als \(configured.type). Tippen, um damit zu drucken, oder \(configured.type) in \(label) einlegen.",
+                        icon: "exclamationmark.circle", severity: .info, action: .useSlot(from: tool, to: to)))
+                } else {
+                    result.append(Recommendation(
+                        id: "empty-\(tool)", title: "\(label) ist leer",
+                        detail: "Für den Druck wird \(label) benötigt, aber der Drucker meldet dort kein Filament.",
+                        icon: "exclamationmark.circle", severity: .warning))
+                }
                 continue
             }
             let loadedBase = loaded.uppercased().split(separator: " ").first.map(String.init) ?? loaded
@@ -461,6 +483,8 @@ public enum PrintAdvisor {
                 s.filaments[slot].firstLayerBedTemp += delta
                 s.filaments[slot].smoothPlateBedTemp += delta
             }
+        case .useSlot(let from, let to):
+            objects = objects.map { $0.movingTool(from: from, to: to) }
         case .removeLeftoverCommands:
             s.layerGCodes = s.layerGCodes.compactMap { code in
                 let rest = code.lines.filter { line in
