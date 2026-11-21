@@ -12,6 +12,7 @@ struct CalibrationHomeView: View {
     @State private var refresh = 0
     /// Slot the tests print with (the head or ACE slot that holds the filament).
     @State private var tool = 0
+    @State private var bookVersion = 0
 
     init(printer: PrinterConnection, model: PrinterModel) {
         self.printer = printer
@@ -65,6 +66,8 @@ struct CalibrationHomeView: View {
                 Text("Kalibriert wird immer ein bestimmtes Filament an diesem Drucker. Die Werte gelten danach für jeden Druck mit diesem Filamentprofil.")
             }
 
+            setupSection
+
             Section {
                 NavigationLink {
                     CalibrationOverviewView(filament: filament, settings: settings, tool: tool)
@@ -117,6 +120,7 @@ struct CalibrationHomeView: View {
             }
         }
         .id(refresh)
+        .onAppear { bookVersion += 1 }   // results entered in a test change the plan (redraw, same identity)
         .navigationTitle("Kalibrieren")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showPicker) {
@@ -132,6 +136,45 @@ struct CalibrationHomeView: View {
                 tool = i
             }
             await app.syncCalibrations()
+        }
+    }
+
+    /// The shortest way to set up this filament: only the tests it still needs, optional ones only on demand.
+    @ViewBuilder private var setupSection: some View {
+        let plan = FilamentSetup.plan(for: filament, printer: model)
+        let _ = bookVersion
+        Section {
+            if !plan.seeds.isEmpty {
+                let from = Set(plan.seeds.map(\.filament)).sorted().joined(separator: ", ")
+                Label("Startwerte von \(from): " + plan.seeds.map { "\($0.kind.displayName) \($0.kind.format($0.value))" }.joined(separator: ", ")
+                      + ". Die Tests prüfen sie nur noch nach.", systemImage: "arrow.triangle.branch")
+                    .font(.caption)
+            }
+            ForEach(Array(plan.steps.enumerated()), id: \.element.id) { i, step in
+                NavigationLink {
+                    CalibrationTestView(kind: step.kind, filament: plan.filament, settings: settings, tool: tool)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: step.kind.symbol).frame(width: 28).foregroundStyle(step.onlyIf == nil ? Color.accentColor : .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(i + 1). \(step.kind.displayName)" + (step.onlyIf == nil ? "" : " (bei Bedarf)")).font(.subheadline.weight(.semibold))
+                            Text(step.onlyIf ?? step.why).font(.caption).foregroundStyle(.secondary)
+                            Text(step.kind.effort).font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("setup-\(step.kind.rawValue)")
+            }
+            ForEach(plan.skipped) { skip in
+                Label("\(skip.kind.displayName): \(skip.reason)", systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Neues Filament einrichten")
+        } footer: {
+            Text(plan.steps.isEmpty ? "Dieses Filament ist an diesem Drucker fertig eingerichtet."
+                 : "Nötig: etwa \(plan.requiredMinutes) Minuten Druckzeit" + (plan.optionalMinutes > 0 ? ", bei Bedarf bis zu \(plan.optionalMinutes) Minuten mehr." : ".")
+                   + " Nach jedem Test die beste Stufe eintragen – die Werte gelten danach für jeden Druck mit diesem Filament.")
         }
     }
 
