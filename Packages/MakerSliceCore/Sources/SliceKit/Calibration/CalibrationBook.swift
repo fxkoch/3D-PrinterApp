@@ -10,13 +10,19 @@ public struct CalibrationResult: Codable, Equatable, Sendable, Identifiable {
     public var kind: CalibrationKind
     public var value: Double
     public var date: Date
+    /// Where the value comes from: "test" (a calibration print), "manual" (problem helper, entered by hand).
+    /// Only test results count as calibrated. Older files have none and count as tests.
+    public var source: String?
 
-    public init(printer: String, filament: String, kind: CalibrationKind, value: Double, date: Date = Date()) {
+    public var isTest: Bool { source == nil || source == "test" }
+
+    public init(printer: String, filament: String, kind: CalibrationKind, value: Double, date: Date = Date(), source: String? = nil) {
         self.printer = printer
         self.filament = filament
         self.kind = kind
         self.value = value
         self.date = date
+        self.source = source
     }
 }
 

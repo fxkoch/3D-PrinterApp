@@ -21,6 +21,7 @@ struct PrinterDetailView: View {
     @State private var showFilamentControl = false
     @State private var editing = false
     @State private var showLive = false
+    @State private var showCalibrationResult = false
 
     private var status: PrinterStatus? { app.printers.status(of: printer) }
     private var model: PrinterModel { app.printers.model(of: printer) }
@@ -29,6 +30,20 @@ struct PrinterDetailView: View {
         ScrollView {
             VStack(spacing: Theme.spacing) {
                 header
+                if let plan = app.pendingCalibrationResult, plan.settings.printer == model {
+                    // The test print was sent from the prepare screen, which is closed now: enter the result here.
+                    Panel {
+                        Label("Testdruck „\(plan.name)“ fertig? Trag ein, welche Stufe am besten aussieht.", systemImage: plan.kind.symbol)
+                            .font(.subheadline)
+                        HStack {
+                            Button("Ergebnis eintragen") { showCalibrationResult = true }
+                                .buttonStyle(.borderedProminent)
+                                .accessibilityIdentifier("pendingCalibrationResult")
+                            Spacer()
+                            Button("Später") { app.pendingCalibrationResult = nil }.font(.caption)
+                        }
+                    }
+                }
                 if let status {
                     jobPanel(status)
                     Button { showLive = true } label: {
@@ -59,6 +74,15 @@ struct PrinterDetailView: View {
         .sheet(isPresented: $editing) { PrinterEditView(existing: printer) }
         .sheet(isPresented: $showFilamentCheck) { FilamentCheckView(printer: printer) }
         .sheet(isPresented: $showFilamentControl) { FilamentControlView(printer: printer) }
+        .sheet(isPresented: $showCalibrationResult, onDismiss: {
+            // Done once a value for this test is saved.
+            if let plan = app.pendingCalibrationResult,
+               CalibrationBook.shared.result(plan.kind, printer: plan.settings.printer, filament: plan.filament.name).map({ $0.date > Date().addingTimeInterval(-600) }) == true {
+                app.pendingCalibrationResult = nil
+            }
+        }) {
+            if let plan = app.pendingCalibrationResult { CalibrationResultSheet(plan: plan) }
+        }
         .fullScreenCover(isPresented: $showLive) { LivePrintView(printer: printer) }
         .confirmationDialog(pending == .dry ? "Trocknen starten?" : "Druck wirklich abbrechen?",
                             isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }), titleVisibility: .visible) {
@@ -350,6 +374,13 @@ struct PrinterDetailView: View {
                                  : "Modus: Normal – der ACE wird nicht für den Druck genutzt.")
                 .font(.caption).foregroundStyle(.secondary)
                 .accessibilityIdentifier("aceMode")
+            // Which ACE slot feeds which head (read only).
+            ForEach(Array(ace.headSlots.enumerated()), id: \.offset) { head, source in
+                if let source {
+                    Text("Kopf \(head + 1) ← Fach \(source.index + 1)" + (source.material.map { " (\($0))" } ?? ""))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
             ForEach(ace.units, id: \.index) { unit in
                 Text(unit.connected ? "\(unit.model) – Slots" : "\(unit.model) – nicht verbunden").font(.caption.weight(.semibold))
                 HStack(spacing: 10) {

@@ -48,7 +48,8 @@ struct LibraryView: View {
                                     Button { workshopItem = item } label: { Label("Festigkeit prüfen und optimieren", systemImage: "checkmark.shield") }
                                     Button { app.open(item) } label: { Label("Zum Drucken öffnen", systemImage: "printer") }
                                 }
-                                .swipeActions {
+                                // No full swipe: deleting removes the file from the phone.
+                                .swipeActions(allowsFullSwipe: false) {
                                     Button(role: .destructive) { app.library.delete(item) } label: {
                                         Label("Löschen", systemImage: "trash")
                                     }

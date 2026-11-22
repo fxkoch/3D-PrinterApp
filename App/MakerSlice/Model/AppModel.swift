@@ -145,7 +145,12 @@ final class AppModel {
 
     /// Starts another calibration print for the same printer and filament (closes the current project first).
     func startCalibration(_ kind: CalibrationKind, like plan: CalibrationPlan) {
-        let next = CalibrationFactory.plan(kind, filament: plan.filament, base: settings(for: plan.settings.printer), tool: plan.tool)
+        // The filament as it is now (with the result just saved), not as the last test changed it (e.g. the tower's hottest step).
+        let printer = plan.settings.printer
+        var filament = FilamentLibrary.entries(for: printer).first { $0.filament.name == plan.filament.name }?.filament
+            ?? CalibrationBook.shared.apply(to: plan.filament, printer: printer)
+        filament.color = plan.filament.color
+        let next = CalibrationFactory.plan(kind, filament: filament, base: settings(for: printer), tool: plan.tool)
         project = nil
         Task {
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -220,6 +225,16 @@ final class AppModel {
 
     /// Handles files opened from other apps (Files, AirDrop, "Öffnen in …").
     func handleIncoming(_ url: URL) {
+        // ZIPs from Thingiverse/Printables are unpacked like downloads.
+        if url.pathExtension.lowercased() == "zip" {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url) {
+                tab = .library
+                addDownloaded(data: data, fileName: url.lastPathComponent, title: nil, source: .file)
+                return
+            }
+        }
         do {
             let item = try library.importFile(at: url)
             tab = .library
@@ -343,6 +358,11 @@ final class AppModel {
             sendState = .failed("Geslicet für \(project.settings.printer.displayName), ausgewählt ist aber „\(printer.name)“ (\(model.displayName)).")
             return
         }
+        // A printer that is busy would refuse the start after the upload (or queue the file unnoticed).
+        if startPrint, let status = printers.status(of: printer), status.state == .printing || status.state == .paused, !status.isIdle {
+            sendState = .failed("„\(printer.name)“ druckt gerade. Warte, bis der Druck fertig ist, oder wähle „Nur hochladen“.")
+            return
+        }
         sendState = .uploading
         // Every slot that extrudes in the G-code (supports may print with their own slot), not only the models' slots.
         let printed = Set(project.usedTools).union(output.estimate.filamentMM.filter { $0.value > 0 }.keys).sorted()
@@ -362,6 +382,8 @@ final class AppModel {
             try await printers.driver(for: printer).upload(gcode: data, fileName: project.gcodeFileName,
                                                            startPrint: startPrint, mapping: mapping)
             sendState = .done
+            // After a test print the user wants to enter what they see – also from the printer page.
+            if let plan = project.calibration, startPrint { pendingCalibrationResult = plan }
             if startPrint, project.settings.enableBedLeveling { LevelingLog.record(printer: project.settings.printer, plate: project.settings.plateType) }
             log.add(.info, startPrint ? "Druck gestartet: \(project.gcodeFileName)" : "Hochgeladen: \(project.gcodeFileName)",
                     source: printer.name)

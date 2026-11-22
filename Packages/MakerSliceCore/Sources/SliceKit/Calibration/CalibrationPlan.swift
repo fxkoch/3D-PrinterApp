@@ -78,7 +78,8 @@ public enum CalibrationFactory {
         let maxAllowed = 300
         let low = f.nozzleTempMin > 150 ? f.nozzleTempMin - 5 : f.nozzleTemp - 25
         var top = f.nozzleTemp + 15
-        top = min(max(top, low + 30), maxAllowed)
+        // Never above what the filament allows (PETG profiles end at 260 °C, not 270).
+        top = min(max(top, low + 30), maxAllowed, max(f.nozzleTempMax, f.nozzleTemp))
         let temps = (0..<7).map { top - 5 * $0 }
         let segment = 8.0
         let steps = temps.enumerated().map { i, t in
@@ -108,9 +109,10 @@ public enum CalibrationFactory {
         s.bottomLayers = 4
         s.infillDensity = 0.15
         s.wallLoops = 2
-        // M221 scales the flow the G-code already contains; the first tier starts at 92 %.
+        // M221 scales the flow the G-code already contains; the first tier starts at 92 %. Each factor starts on the
+        // first layer ABOVE the tier below: that tier's top surface – the one being judged – still has its own factor.
         s.layerGCodes = steps.enumerated().map { i, st in
-            LayerGCode(z: i == 0 ? 0 : st.zFrom - s.layerHeight, lines: ["M221 S\(Int((100 * (1 + deltas[i])).rounded()))"])
+            LayerGCode(z: i == 0 ? 0 : st.zFrom + 0.01, lines: ["M221 S\(Int((100 * (1 + deltas[i])).rounded()))"])
         }
         s.footerGCode = ["M221 S100"]
         let object = staircase(tiers: steps.count, height: tier)
@@ -134,8 +136,10 @@ public enum CalibrationFactory {
         s.infillDensity = 0
         s.outerWallSpeed = max(s.outerWallSpeed, 120)
         s.innerWallSpeed = max(s.innerWallSpeed, 120)
+        // Small layers must not be slowed down for cooling: PA shows only at speed. (0 would mean "filament default".)
+        s.minLayerTime = 0.001
         s.layerGCodes = steps.enumerated().map { i, st in
-            LayerGCode(z: i == 0 ? 0 : st.zFrom - s.layerHeight, lines: ["SET_PRESSURE_ADVANCE ADVANCE=\(String(format: "%.3f", st.value))"])
+            LayerGCode(z: i == 0 ? 0 : st.zFrom + 0.01, lines: ["SET_PRESSURE_ADVANCE ADVANCE=\(String(format: "%.3f", st.value))"])
         }
         s.footerGCode = ["SET_PRESSURE_ADVANCE ADVANCE=\(String(format: "%.3f", f.pressureAdvance ?? 0.02))"]
         let object = hollowTower(size: 36, wall: 0.9, height: segment * Double(steps.count))
@@ -171,7 +175,9 @@ public enum CalibrationFactory {
         s.bottomLayers = 4
         s.outerWallSpeed = baseSpeed
         s.innerWallSpeed = baseSpeed
-        s.minLayerTime = 0
+        // No slowdown for cooling, or the small vase layers never reach the flow written on the step.
+        // (0 would mean "use the filament's minimum layer time".)
+        s.minLayerTime = 0.001
         // M220 scales the speed; the safety margin is applied to the stored result.
         let steps = targets.enumerated().map { i, t in
             CalibrationStep(index: i, value: (t * 0.85 * 10).rounded() / 10, label: String(format: "%.0f mm³/s", t),

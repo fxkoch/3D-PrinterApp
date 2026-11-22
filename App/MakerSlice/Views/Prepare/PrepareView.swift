@@ -137,7 +137,10 @@ struct PrepareView: View {
                     }
                 }))
             }
+            // "An den Drucker gesendet" belongs to the plate that was sent, not to the next one or a new slice.
+            .onChange(of: project.currentPlate) { _, _ in if app.sendState != .uploading { app.sendState = .idle } }
             .onChange(of: project.output != nil) { _, sliced in
+                if sliced, app.sendState != .uploading { app.sendState = .idle }
                 showLayers = sliced
                 if let count = project.output?.layers.count { layer = Double(count - 1) }
                 if sliced, printAfterSlice {
@@ -561,7 +564,7 @@ struct PrepareView: View {
                     Toggle("Oberseite glätten (Ironing)", isOn: $project.settings.ironing)
                 }
             } else {
-                Text("Haftrand, Glätten und Reinigungsturm stellt die App bei Bedarf selbst vor (siehe Empfehlungen). Alle Einstellungen gibt es im Expertenmodus.")
+                Text("Haftrand, Glätten und Reinigungsturm schlägt die App bei Bedarf selbst vor (siehe Empfehlungen). Alle Einstellungen gibt es im Expertenmodus.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Divider()

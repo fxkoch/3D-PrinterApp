@@ -155,7 +155,7 @@ private struct ProblemFixesView: View {
         case .filament(let kind, let value):
             // Kept like a calibration result: every later print of this filament on this printer uses it.
             let f = settings.filament(for: slot)
-            app.saveCalibration(CalibrationResult(printer: model.rawValue, filament: f.name, kind: kind, value: value))
+            app.saveCalibration(CalibrationResult(printer: model.rawValue, filament: f.name, kind: kind, value: value, source: "manual"))
             if let p = openProject, p.settings.filaments.indices.contains(slot) {
                 p.settings.filaments[slot] = CalibrationBook.shared.apply(to: p.settings.filaments[slot], printer: model)
             }

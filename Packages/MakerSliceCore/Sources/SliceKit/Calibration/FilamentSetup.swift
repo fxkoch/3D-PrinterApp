@@ -43,22 +43,29 @@ public enum FilamentSetup {
         }
     }
 
-    /// Printers that measure the flow dynamics (pressure advance) of every head before each print by themselves.
-    static func measuresFlowDynamics(_ printer: PrinterModel) -> Bool { printer == .snapmakerU1 }
+    /// Printers that measure the flow dynamics (pressure advance) before every print the app starts. None does: the U1's
+    /// "dynamic flow calibration" only runs when it is switched on for a job at the printer, and the Kobra S1's only
+    /// with its start option.
+    static func measuresFlowDynamics(_ printer: PrinterModel) -> Bool { false }
 
     public static func plan(for filament: Filament, printer: PrinterModel, book: CalibrationBook = .shared) -> FilamentSetupPlan {
-        let own = book.results(printer: printer, filament: filament.name)
+        // Values from the problem helper or typed in by hand are no calibration: those tests still run.
+        let own = book.results(printer: printer, filament: filament.name).filter(\.isTest)
         let done = Set(own.map(\.kind))
         var f = book.apply(to: filament, printer: printer)
 
         // Starting values from another filament of the same type on this printer (most recent first).
         let group = PrimeTower.bondGroup(filament.type)
         let type = filament.type.uppercased()
+        // Only the exact same type (PLA-CF, PLA Silk or PETG-CF behave differently); same vendor first.
+        _ = group
         let others = book.all.filter { r in
-            r.printer == printer.rawValue && r.filament != filament.name && !done.contains(r.kind)
-                && (FilamentLibrary.all.first { $0.filament.name == r.filament }?.filament).map {
-                    $0.type.uppercased() == type || ($0.type.uppercased().hasPrefix(type) && PrimeTower.bondGroup($0.type) == group)
-                } ?? false
+            r.isTest && r.printer == printer.rawValue && r.filament != filament.name && !done.contains(r.kind)
+                && (FilamentLibrary.all.first { $0.filament.name == r.filament }?.filament).map { $0.type.uppercased() == type } ?? false
+        }.sorted { a, b in
+            let va = FilamentLibrary.all.first { $0.filament.name == a.filament }?.filament.vendor == filament.vendor
+            let vb = FilamentLibrary.all.first { $0.filament.name == b.filament }?.filament.vendor == filament.vendor
+            return va != vb ? va : a.date > b.date
         }
         var seeds: [CalibrationResult] = []
         for kind in CalibrationKind.allCases where !done.contains(kind) {
@@ -84,18 +91,20 @@ public enum FilamentSetup {
                 steps.append(.init(kind: kind, why: why, onlyIf: onlyIf))
             }
         }
+        // Order of the OrcaSlicer calibration guide: temperature, (max flow), pressure advance, flow, (retraction).
         plan(.temperature, why: "Die wichtigste Größe. Der Turm zeigt zugleich Fäden, Brücken und Oberfläche – daran entscheidet sich, ob der Rückzug-Test überhaupt nötig ist.")
-        plan(.flow, why: "Gleicht Durchmesser und Schmelzverhalten dieser Spule aus: geschlossene Oberflächen, maßhaltige Teile.")
-        plan(.retraction, why: "Findet die kleinste Rückzugslänge ohne Fäden.",
-             onlyIf: "Nur wenn am Temperaturturm bei der gewählten Temperatur noch Fäden zwischen den Säulen hängen.")
-        if measuresFlowDynamics(printer) {
-            skipped.append(.init(kind: .pressureAdvance, reason: "Der \(printer.displayName) misst vor jedem Druck die Fluss-Dynamik jedes Kopfes selbst."))
-        } else {
-            plan(.pressureAdvance, why: "Schärfere Ecken und gleichmäßige Linien bei wechselndem Tempo.",
-                 onlyIf: "Nur wenn Ecken nach dem Fluss-Test rund oder ausgebeult wirken.")
-        }
         plan(.maxFlow, why: "Wie schnell die Düse dieses Filament schmelzen kann. Ohne Test gilt der vorsichtige Wert des Profils (\(formatDecimal(f.maxVolumetricSpeed, digits: 1)) mm³/s).",
              onlyIf: "Nur wenn du schneller drucken willst oder Wände bei hohem Tempo rau und dünn werden.")
+        if measuresFlowDynamics(printer) {
+            skipped.append(.init(kind: .pressureAdvance, reason: "Der \(printer.displayName) misst die Fluss-Dynamik vor jedem Druck selbst."))
+        } else {
+            plan(.pressureAdvance, why: printer == .snapmakerU1
+                 ? "Schärfere Ecken und gleichmäßige Linien. Der U1 misst diesen Wert nur, wenn am Drucker die dynamische Flusskalibrierung für einen Druck eingeschaltet ist – für Drucke aus der App gilt der hier gemessene Wert."
+                 : "Schärfere Ecken und gleichmäßige Linien bei wechselndem Tempo. Am besten vor dem Fluss-Test, er wird dann leichter abzulesen.")
+        }
+        plan(.flow, why: "Gleicht Durchmesser und Schmelzverhalten dieser Spule aus: geschlossene Oberflächen, maßhaltige Teile.")
+        plan(.retraction, why: "Findet die kleinste Rückzugslänge ohne Fäden.",
+             onlyIf: "Nur wenn am Temperaturturm bei der gewählten Temperatur noch Fäden zwischen den Säulen hängen. Vorher Filament trocknen.")
         return FilamentSetupPlan(filament: f, seeds: seeds, steps: steps, skipped: skipped)
     }
 }

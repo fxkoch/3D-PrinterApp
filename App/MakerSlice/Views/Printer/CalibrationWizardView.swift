@@ -13,6 +13,8 @@ struct CalibrationHomeView: View {
     /// Slot the tests print with (the head or ACE slot that holds the filament).
     @State private var tool = 0
     @State private var bookVersion = 0
+    /// The loaded spool is taken once; coming back from a test must not undo the user's choice.
+    @State private var pickedLoaded = false
 
     init(printer: PrinterConnection, model: PrinterModel) {
         self.printer = printer
@@ -127,14 +129,15 @@ struct CalibrationHomeView: View {
             FilamentPickerView(settings: $settings, slot: 0, loaded: nil)
         }
         .task {
-            // Start with what the printer reports, if anything.
-            if let i = loaded.firstIndex(where: { $0.present && $0.type != nil }), let type = loaded[i].type,
+            // Start with what the printer reports, if anything (once per visit).
+            if !pickedLoaded, let i = loaded.firstIndex(where: { $0.present && $0.type != nil }), let type = loaded[i].type,
                let match = FilamentLibrary.bestMatch(type: type, vendor: loaded[i].vendor, printer: model) {
                 var f = match
                 f.color = loaded[i].color ?? f.color
                 settings.filaments[0] = f
                 tool = i
             }
+            pickedLoaded = true
             await app.syncCalibrations()
         }
     }

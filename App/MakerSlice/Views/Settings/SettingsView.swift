@@ -124,7 +124,7 @@ private struct NotificationSettingsSection: View {
         } header: {
             Text("Benachrichtigungen")
         } footer: {
-            Text("Bei geöffneter App kommt die Mitteilung sofort. Im Hintergrund fragt iOS die Drucker nur etwa alle 15–30 Minuten ab – eine fertige oder gestörte Druckerei kann also verzögert gemeldet werden. Sofortige Push-Mitteilungen bei geschlossener App brauchen einen Server und ein bezahltes Entwicklerkonto.")
+            Text("Bei geöffneter App kommt die Mitteilung sofort. Im Hintergrund fragt iOS die Drucker nur etwa alle 15–30 Minuten ab – ein fertiger oder gestörter Druck kann also verzögert gemeldet werden. Sofortige Push-Mitteilungen bei geschlossener App brauchen einen Server und ein bezahltes Entwicklerkonto.")
         }
     }
 }

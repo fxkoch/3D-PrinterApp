@@ -6,18 +6,23 @@ final class FilamentSetupTests: XCTestCase {
         try XCTUnwrap(FilamentLibrary.all.map(\.filament).first { $0.type == "PETG" && $0.name != "Generic PETG" })
     }
 
-    func testNewFilamentNeedsOnlyTemperatureAndFlowOnTheU1() throws {
+    /// OrcaSlicer's order; the U1 measures PA only when its dynamic flow calibration is switched on for a job, which
+    /// prints started by the app do not do.
+    func testNewFilamentNeedsTemperaturePressureAdvanceAndFlow() throws {
         let book = CalibrationBook()
-        let plan = FilamentSetup.plan(for: try otherPETG(), printer: .snapmakerU1, book: book)
-        XCTAssertEqual(plan.steps.filter { $0.onlyIf == nil }.map(\.kind), [.temperature, .flow])
-        XCTAssertEqual(Set(plan.steps.filter { $0.onlyIf != nil }.map(\.kind)), [.retraction, .maxFlow])
-        XCTAssertTrue(plan.skipped.contains { $0.kind == .pressureAdvance })
-        XCTAssertEqual(plan.requiredMinutes, 65)
+        for printer in PrinterModel.allCases {
+            let plan = FilamentSetup.plan(for: try otherPETG(), printer: printer, book: book)
+            XCTAssertEqual(plan.steps.filter { $0.onlyIf == nil }.map(\.kind), [.temperature, .pressureAdvance, .flow], printer.rawValue)
+            XCTAssertEqual(plan.steps.filter { $0.onlyIf != nil }.map(\.kind), [.maxFlow, .retraction])
+        }
     }
 
-    func testOtherPrintersAlsoOfferPressureAdvanceOnDemand() throws {
-        let plan = FilamentSetup.plan(for: try otherPETG(), printer: .bambuP1S, book: CalibrationBook())
-        XCTAssertTrue(plan.steps.contains { $0.kind == .pressureAdvance && $0.onlyIf != nil })
+    func testHandEnteredValuesDoNotCountAsCalibrated() throws {
+        let book = CalibrationBook()
+        let f = try otherPETG()
+        book.set(CalibrationResult(printer: PrinterModel.snapmakerU1.rawValue, filament: f.name, kind: .temperature, value: 235, source: "manual"))
+        XCTAssertTrue(FilamentSetup.plan(for: f, printer: .snapmakerU1, book: book).steps.contains { $0.kind == .temperature })
+        XCTAssertTrue(CalibrationAdvice.open(printer: .snapmakerU1, filament: f.name, book: book).contains(.temperature))
     }
 
     func testStartsFromACalibratedFilamentOfTheSameType() throws {

@@ -13,7 +13,7 @@ struct PrintersView: View {
                     ContentUnavailableView {
                         Label("Kein Drucker", systemImage: "printer")
                     } description: {
-                        Text("Füge deinen Snapmaker U1 oder Anycubic Kobra S1 hinzu. Der Drucker muss im selben WLAN sein.")
+                        Text("Füge deinen Snapmaker U1, Anycubic Kobra S1 oder Bambu Lab P1S hinzu. Der Drucker muss im selben WLAN sein.")
                     } actions: {
                         Button("Drucker hinzufügen") { showAdd = true }.buttonStyle(.borderedProminent)
                     }

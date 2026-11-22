@@ -107,7 +107,14 @@ public struct GCodeWriter {
             body.line(dialect.pressureAdvance(pa))
         }
 
-        var pendingLayerGCodes = s.layerGCodes.map { ($0.z, $0.lines.filter(LayerGCode.isAllowed)) }.filter { !$0.1.isEmpty }
+        // Pressure advance in the printer's own words (Bambu: M900 K), whatever the calibration or project wrote.
+        func native(_ line: String) -> String {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard t.uppercased().hasPrefix("SET_PRESSURE_ADVANCE"), let r = t.range(of: "ADVANCE=", options: .caseInsensitive),
+                  let v = Double(t[r.upperBound...].split(separator: " ").first ?? "") else { return line }
+            return dialect.pressureAdvance(v)
+        }
+        var pendingLayerGCodes = s.layerGCodes.map { ($0.z, $0.lines.filter(LayerGCode.isAllowed).map(native)) }.filter { !$0.1.isEmpty }
         for layer in layers {
             let height = layer.height
             if !s.retractLengthSteps.isEmpty { state.retractLength = s.retractLength(atHeight: layer.z, tool: state.tool) }
@@ -272,7 +279,7 @@ public struct GCodeWriter {
         if !state.retracted {
             out.line("G1 E-\(fmt5(state.retractLength ?? s.filament(for: state.tool).retractLength)) F\(Int(s.retractSpeed * 60))")
         }
-        let footer = s.footerGCode.filter(LayerGCode.isAllowed)
+        let footer = s.footerGCode.filter(LayerGCode.isAllowed).map(native)
         if !footer.isEmpty {
             out.line("; Kalibrierung: Werte zurücksetzen")
             footer.forEach { out.line($0) }
