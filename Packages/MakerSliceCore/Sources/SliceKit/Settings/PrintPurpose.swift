@@ -38,7 +38,7 @@ public enum PrintPurpose: String, Codable, CaseIterable, Identifiable, Sendable 
         switch self {
         case .balanced: return "Guter Standard für fast alles."
         case .robust: return "Zäh und bruchfest: viele Wände, für Halter, Clips, Werkzeug."
-        case .strong: return "Steif und tragfähig: dichte Füllung, für Teile unter Last."
+        case .strong: return "Steif und tragfähig: fünf Wände, für Teile unter Last."
         case .light: return "Möglichst leicht: wenig Füllung, für Deko, Lampen, Modellbau."
         case .saving: return "Wenig Filament und Abfall bei brauchbarer Festigkeit."
         case .fast: return "Kürzeste Druckzeit: dicke Schichten, wenig Füllung."
@@ -80,7 +80,9 @@ public enum PrintPurpose: String, Codable, CaseIterable, Identifiable, Sendable 
         switch self {
         case .balanced: return Values(layerHeight: 0.2, walls: 2, topMM: 1.0, bottomMM: 0.6, infill: 0.15, pattern: .grid)
         case .robust: return Values(layerHeight: 0.2, walls: 4, topMM: 1.2, bottomMM: 1.0, infill: 0.25, pattern: .gyroid)
-        case .strong: return Values(layerHeight: 0.2, walls: 3, topMM: 1.2, bottomMM: 1.0, infill: 0.4, pattern: .cubic)
+        // Walls carry load better than infill (CNC Kitchen: 2 → 4 walls about +65 %; above 40 % infill adds little);
+        // Bambu's and the U1's "Strength" profiles use 6 walls and 25 %.
+        case .strong: return Values(layerHeight: 0.2, walls: 5, topMM: 1.2, bottomMM: 1.0, infill: 0.3, pattern: .gyroid)
         case .light: return Values(layerHeight: 0.2, walls: 2, topMM: 0.8, bottomMM: 0.6, infill: 0.06, pattern: .gyroid)
         case .saving: return Values(layerHeight: 0.24, walls: 2, topMM: 0.8, bottomMM: 0.6, infill: 0.1, pattern: .gyroid)
         case .fast: return Values(layerHeight: 0.28, walls: 2, topMM: 0.84, bottomMM: 0.56, infill: 0.1, pattern: .grid)

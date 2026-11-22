@@ -75,6 +75,52 @@ public enum PrintAdvisor {
         public var footprintArea: Double      // mm², faces touching the bed
         public var size: Vec3
         public var volume: Double             // mm³
+        /// First layer: max(by / Ixx, bx / Iyy) in 1/mm³ (bending stiffness of the footprint against tipping) and the
+        /// diagonal of its bounding box (mm). Used by the Bambu/Orca auto-brim formula.
+        public var footprintTipping: Double = 0
+        public var footprintDiagonal: Double = 0
+    }
+
+    /// Second moments of area of the first-layer outline (mm⁴) about its centroid, and its bounding box (mm).
+    static func footprintStiffness(_ layer: Polygons) -> (tipping: Double, diagonal: Double)? {
+        var a = 0.0, cx = 0.0, cy = 0.0, ixx = 0.0, iyy = 0.0
+        for path in layer.paths where path.count >= 3 {
+            for i in 0..<path.count {
+                let p = path[i], q = path[(i + 1) % path.count]
+                let x0 = p.mmX, y0 = p.mmY, x1 = q.mmX, y1 = q.mmY
+                let c = x0 * y1 - x1 * y0
+                a += c
+                cx += (x0 + x1) * c
+                cy += (y0 + y1) * c
+                ixx += (y0 * y0 + y0 * y1 + y1 * y1) * c
+                iyy += (x0 * x0 + x0 * x1 + x1 * x1) * c
+            }
+        }
+        a /= 2
+        guard abs(a) > 1e-6, let box = layer.boundingBox else { return nil }
+        cx /= 6 * a; cy /= 6 * a
+        // Parallel axis theorem: moments about the centroid (holes are negative loops and subtract themselves).
+        let ixxC = abs(ixx / 12 - a * cy * cy), iyyC = abs(iyy / 12 - a * cx * cx)
+        let bx = box.max.mmX - box.min.mmX, by = box.max.mmY - box.min.mmY
+        guard ixxC > 1e-9, iyyC > 1e-9 else { return nil }
+        return (max(by / ixxC, bx / iyyC), (bx * bx + by * by).squareRoot())
+    }
+
+    /// Brim width of Bambu Studio / OrcaSlicer's "auto brim" (Brim.cpp): tall parts on a narrow footprint tip over or
+    /// peel at speed; warp-prone materials need it on large bases. 0 = no brim.
+    public static func autoBrimWidth(_ a: ObjectAnalysis, settings s: PrintSettings, filament f: Filament) -> Double {
+        guard a.footprintTipping > 0, a.footprintDiagonal > 0 else { return 0 }
+        let h = a.size.z
+        let vmax = [s.outerWallSpeed, s.innerWallSpeed, s.infillSpeed, s.solidInfillSpeed, s.topSurfaceSpeed, s.supportSpeed].max() ?? 250
+        let type = f.type.uppercased()
+        let adhesion = type.hasPrefix("PETG") || type.hasPrefix("PCTG") || type == "PET" ? 2.0 : (f.isFlexible ? 0.5 : 1.0)
+        let reference: Double = type.hasPrefix("PLA") ? 200 : (type.hasPrefix("PC-") ? 80 : (type.hasPrefix("PC") ? 40 : (f.isFlexible ? 1000 : 100)))
+        let d = a.footprintDiagonal
+        let tipping = a.footprintTipping * h * h / 1920 * vmax
+        let thermal = 8 * d / reference * min(h, 30) / 30
+        var w = adhesion * min(min(max(tipping, thermal), 18), 1.5 * d)
+        if w < 5, w < 1.5 * d { w = 0 }
+        return min(18, w.rounded(.down))
     }
 
     public static func analyze(_ object: ModelObject, supportAngle: Double = 30) -> ObjectAnalysis {
@@ -114,8 +160,13 @@ public enum PrintAdvisor {
                 }
             }
         }
-        return ObjectAnalysis(overhangArea: overhang, overhangOverModel: overModel, flatTopArea: flatTop,
-                              footprintArea: footprint, size: box.size, volume: mesh.volume)
+        var result = ObjectAnalysis(overhangArea: overhang, overhangOverModel: overModel, flatTopArea: flatTop,
+                                    footprintArea: footprint, size: box.size, volume: mesh.volume)
+        if let first = MeshSlicer.slice(mesh, at: [box.min.z + 0.1]).first, let stiff = footprintStiffness(first) {
+            result.footprintTipping = stiff.tipping
+            result.footprintDiagonal = stiff.diagonal
+        }
+        return result
     }
 
     /// - Parameter loadedTypes: material reported by the printer per slot (nil = unknown/empty).
@@ -194,21 +245,20 @@ public enum PrintAdvisor {
 
         // Bed adhesion.
         let warpProne = materials.contains { $0.needsEnclosure }
-        for (object, a) in zip(objects, analyses) where s.brimWidth == 0 {
-            let slender = a.footprintArea > 0 && a.size.z / max(a.footprintArea.squareRoot(), 1) > 3.5
-            if a.footprintArea < 150 || slender || (warpProne && a.footprintArea > 2500) {
-                let reason = warpProne ? "\(materials.first { $0.needsEnclosure }!.type) neigt zum Verziehen."
-                    : slender ? "„\(object.name)“ ist hoch und steht auf kleiner Fläche."
-                    : "„\(object.name)“ hat wenig Kontaktfläche zum Bett."
-                // Snapmaker forum (U1 "model does not stick"): 2 mm is too narrow, 10 mm or more for tall / small parts.
-                let width: Double = slender || a.footprintArea < 150 ? 10 : 5
-                result.append(Recommendation(
-                    id: "brim", title: "Brim für bessere Haftung",
-                    detail: reason + String(format: " Ein %.0f-mm-Rand verhindert Ablösen und lässt sich danach leicht abziehen. Hilft es nicht: Filament trocknen, Platte mit warmem Wasser und Spülmittel reinigen (kein Aceton), Betttemperatur 5 °C höher, Z-Hop an.", width),
-                    icon: "square.dashed", severity: .suggestion, action: .brim(width)))
-                break
-            }
+        // Brim width by the auto-brim formula of Bambu Studio / OrcaSlicer, per object; the widest one counts.
+        let brims = zip(objects, analyses).map { o, a in (o, a, autoBrimWidth(a, settings: s, filament: s.filament(for: o.tool))) }
+        if let widest = brims.max(by: { $0.2 < $1.2 }), widest.2 > 0, s.brimWidth + 0.5 < widest.2 {
+            let (object, a, width) = widest
+            let f = s.filament(for: object.tool)
+            let thermal = f.needsEnclosure && a.footprintDiagonal > 60
+            let reason = thermal ? "\(f.type) schrumpft beim Abkühlen, auf \(Int(a.footprintDiagonal)) mm Grundfläche heben sich sonst die Ecken."
+                : String(format: "„%@“ ist %.0f mm hoch auf schmaler Grundfläche: bei vollem Tempo kann es kippen oder sich lösen.", object.name, a.size.z)
+            result.append(Recommendation(
+                id: "brim", title: String(format: "Brim %.0f mm für bessere Haftung", width),
+                detail: reason + String(format: " Die Breite (%.0f mm) folgt der Auto-Brim-Formel von Bambu Studio und OrcaSlicer (Höhe, Steifigkeit der Grundfläche, Tempo, Material). Der Rand lässt sich danach abziehen. Hilft es nicht: Filament trocknen, Platte mit warmem Wasser und Spülmittel reinigen (kein Aceton), Bett 5 °C wärmer.", width),
+                icon: "square.dashed", severity: .suggestion, action: .brim(width)))
         }
+        _ = warpProne
         // Orca leaves a gap between brim and part when the elephant-foot compensation is set (Snapmaker forum: set it to 0).
         if s.brimWidth > 0, s.elephantFootCompensation > 0 {
             result.append(Recommendation(

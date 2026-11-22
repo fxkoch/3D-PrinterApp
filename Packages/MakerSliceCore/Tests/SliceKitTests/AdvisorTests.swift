@@ -23,7 +23,9 @@ final class AdvisorTests: XCTestCase {
         let tiny = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "c", mesh: Fixtures.box(8, 8, 8))], bedSize: 270))
         let recs = PrintAdvisor.recommendations(objects: tiny, settings: PrintSettings())
         XCTAssertTrue(ids(recs).contains("fine"))
-        XCTAssertTrue(ids(recs).contains("brim"), "8×8 mm footprint needs a brim")
+        XCTAssertFalse(ids(recs).contains("brim"), "a small cube does not tip over (Bambu/Orca auto brim)")
+        let pillar = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "p", mesh: Fixtures.box(8, 8, 60))], bedSize: 270))
+        XCTAssertTrue(ids(PrintAdvisor.recommendations(objects: pillar, settings: PrintSettings())).contains("brim"), "8 × 8 × 60 mm tips over")
     }
 
     func testTooLargeSplitsAutomatically() throws {

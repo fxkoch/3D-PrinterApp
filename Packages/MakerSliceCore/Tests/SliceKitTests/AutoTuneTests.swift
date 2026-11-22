@@ -132,3 +132,26 @@ final class ReviewRoundTwoTests: XCTestCase {
         XCTAssertEqual(result.settings.support, .off)
     }
 }
+
+final class AutoBrimTests: XCTestCase {
+    private func width(_ mesh: TriangleMesh, _ f: Filament = .pla) -> Double {
+        var s = PrintSettings()
+        s.filaments[0] = f
+        let a = PrintAdvisor.analyze(ModelObject(name: "t", mesh: mesh))
+        return PrintAdvisor.autoBrimWidth(a, settings: s, filament: f)
+    }
+
+    /// Worked values of the Bambu/Orca formula (vmax 300 mm/s): a 20 mm PLA square tips at about 147 mm height.
+    func testMatchesTheBambuFormula() {
+        XCTAssertEqual(width(Fixtures.box(20, 20, 140)), 0, "just below the threshold")
+        XCTAssertEqual(width(Fixtures.box(20, 20, 150)), 5, accuracy: 0.6)
+        XCTAssertEqual(width(Fixtures.box(10, 10, 52)), 5, accuracy: 0.6, "10 mm square: 5 mm at 52 mm")
+        XCTAssertEqual(width(Fixtures.box(40, 40, 200)), 0, "bases of 40 mm and more do not tip")
+        XCTAssertGreaterThan(width(Fixtures.box(20, 20, 110), .petg), 0, "PETG counts double")
+    }
+
+    func testWarpProneMaterialsGetABrimOnLargeBases() {
+        XCTAssertGreaterThanOrEqual(width(Fixtures.box(80, 80, 40), .abs), 5)
+        XCTAssertEqual(width(Fixtures.box(80, 80, 40), .pla), 0)
+    }
+}
