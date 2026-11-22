@@ -20,6 +20,8 @@ struct PrepareView: View {
     @State private var showFileImporter = false
     @State private var showCalibrationResult = false
     @State private var showAssistant = false
+    @State private var showAddPrinter = false
+    @State private var confirmClose = false
 
     struct SlotSelection: Identifiable {
         let id: Int
@@ -64,7 +66,20 @@ struct PrepareView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Schließen") { app.project = nil }.accessibilityIdentifier("closeProject")
+                    Button("Schließen") {
+                        // A sliced plate or a model set up by hand would be lost without asking.
+                        if project.calibration == nil, (0..<project.plateCount).contains(where: { project.output(ofPlate: $0 + 1) != nil }) {
+                            confirmClose = true
+                        } else {
+                            app.project = nil
+                        }
+                    }
+                    .accessibilityIdentifier("closeProject")
+                    .confirmationDialog("Projekt schließen?", isPresented: $confirmClose, titleVisibility: .visible) {
+                        Button("Schließen", role: .destructive) { app.project = nil }
+                    } message: {
+                        Text("Das Slice-Ergebnis und die Anordnung gehen verloren. Das Modell bleibt in der Bibliothek.")
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -87,6 +102,7 @@ struct PrepareView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
+            .sheet(isPresented: $showAddPrinter) { PrinterEditView(existing: nil) }
             .sheet(isPresented: $showAssistant) {
                 AssistantView(isSheet: true)
                     .presentationDetents([.medium, .large])
@@ -353,6 +369,9 @@ struct PrepareView: View {
             } else {
                 Text("Kein \(project.settings.printer.displayName) eingerichtet – du kannst trotzdem slicen und den G-Code teilen.")
                     .font(.caption).foregroundStyle(.secondary)
+                Button { showAddPrinter = true } label: { Label("Drucker hinzufügen", systemImage: "plus.circle") }
+                    .font(.subheadline)
+                    .accessibilityIdentifier("addPrinterFromPrepare")
             }
         }
     }

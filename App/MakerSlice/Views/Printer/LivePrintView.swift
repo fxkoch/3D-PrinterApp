@@ -8,6 +8,7 @@ struct LivePrintView: View {
     @Environment(\.dismiss) private var dismiss
     let printer: PrinterConnection
     @State private var camera = LiveCamera()
+    @State private var confirmCancel = false
 
     private var status: PrinterStatus? { app.printers.status(of: printer) }
 
@@ -18,6 +19,7 @@ struct LivePrintView: View {
                     cameraPanel
                     if let status {
                         phasePanel(status)
+                        controls(status)
                         SpeedPanel(printer: printer, status: status)
                         statsPanel(status)
                     } else {
@@ -92,6 +94,33 @@ struct LivePrintView: View {
                 if let detail = phase.detail { Text(detail).font(.subheadline).foregroundStyle(.secondary).monospacedDigit() }
                 if s.state == .printing || s.state == .paused {
                     ProgressView(value: s.progress).tint(s.state.color)
+                }
+            }
+        }
+    }
+
+    /// Pause, resume and cancel right next to the camera: seen spaghetti should not need a detour.
+    @ViewBuilder private func controls(_ s: PrinterStatus) -> some View {
+        if (s.state == .printing || s.state == .paused) && !s.isIdle {
+            HStack {
+                if s.state == .printing {
+                    Button {
+                        Task { await app.printers.perform(on: printer, "Druck pausiert") { try await $0.pause() } }
+                    } label: { Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity) }
+                } else {
+                    Button {
+                        Task { await app.printers.perform(on: printer, "Druck fortgesetzt") { try await $0.resume() } }
+                    } label: { Label("Fortsetzen", systemImage: "play.fill").frame(maxWidth: .infinity) }
+                }
+                Button(role: .destructive) { confirmCancel = true } label: {
+                    Label("Abbrechen", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("liveControls")
+            .confirmationDialog("Druck wirklich abbrechen?", isPresented: $confirmCancel, titleVisibility: .visible) {
+                Button("Druck abbrechen", role: .destructive) {
+                    Task { await app.printers.perform(on: printer, "Druck abgebrochen") { try await $0.cancel() } }
                 }
             }
         }

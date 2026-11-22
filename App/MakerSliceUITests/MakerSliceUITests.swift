@@ -4,6 +4,13 @@ import XCTest
 /// test cube, slice it for both printers, open the cut tool and expert settings.
 /// Screenshots are attached to the test result.
 final class MakerSliceUITests: XCTestCase {
+    /// Closes the prepare screen; a sliced project asks first.
+    private func closeProject() {
+        app.buttons["closeProject"].tap()
+        let confirm = app.sheets.buttons["Schließen"].firstMatch
+        if confirm.waitForExistence(timeout: 2) { confirm.tap() }
+    }
+
     var app: XCUIApplication!
 
     override func setUp() {
@@ -251,7 +258,7 @@ final class MakerSliceUITests: XCTestCase {
             snapshot("7\(i)-Einfach-Vorbereiten")
             scroll.swipeUp(velocity: .slow)
         }
-        app.buttons["closeProject"].tap()
+        closeProject()
         app.tabBars.buttons["Drucker"].tap()
         sleep(3)
         snapshot("75-Einfach-Drucker")
@@ -372,7 +379,7 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("30-Claude-im-Projekt")
         app.buttons["Fertig"].tap()
 
-        app.buttons["closeProject"].tap()
+        closeProject()
         let tab = app.tabBars.buttons["Claude"]
         XCTAssertTrue(tab.waitForExistence(timeout: 5))
         tab.tap()
@@ -430,7 +437,7 @@ final class MakerSliceUITests: XCTestCase {
             sleep(1)
             snapshot("16-Drucken-ohne-Drucker")
         }
-        app.buttons["closeProject"].tap()
+        closeProject()
     }
 
     /// Search Printables, open a model, download a file and slice it – the full "find & print" flow.

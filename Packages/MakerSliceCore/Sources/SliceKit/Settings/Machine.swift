@@ -47,7 +47,7 @@ public struct MachineProfile: Equatable, Sendable {
 
     public static let snapmakerU1 = MachineProfile(
         model: .snapmakerU1, bedSize: 270, maxHeight: 270, toolCount: 4, multiMaterial: .toolChanger,
-        filamentScope: "u1", supportsPlateTypes: PlateType.allCases, slotLabel: "T"
+        filamentScope: "u1", supportsPlateTypes: PlateType.allCases, slotLabel: "Kopf "
     )
 
     public static let kobraS1 = MachineProfile(
