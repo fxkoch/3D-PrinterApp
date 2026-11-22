@@ -89,3 +89,46 @@ final class EmptySlotTests: XCTestCase {
         XCTAssertEqual(moved.takingTools(of: o).tool, 0)
     }
 }
+
+final class ReviewRoundTwoTests: XCTestCase {
+    /// A spool without RFID is there, its material is just unknown: no "empty" tip and nothing is moved.
+    func testUnknownSpoolIsNotEmpty() {
+        var s = PrintSettings()
+        s.filaments = [.petg, .pla, .petg, .pla]
+        let objects = [ModelObject(name: "Teil", mesh: Fixtures.box(20, 20, 20), tool: 0)]
+        let loaded: [String?] = ["?", "PLA", "PETG", nil]
+        XCTAssertFalse(PrintAdvisor.recommendations(objects: objects, settings: s, loadedTypes: loaded).contains { $0.id.hasPrefix("empty-") || $0.id.hasPrefix("mismatch-") })
+        XCTAssertEqual(AutoTune.run(objects: objects, settings: s, loadedTypes: loaded).objects.first?.tool, 0)
+    }
+
+    /// A calibrated temperature or retraction is never replaced by the general PETG tips.
+    func testCalibratedPETGKeepsItsValues() {
+        var s = PrintSettings()
+        var f = Filament.petg
+        f.nozzleTemp = 250
+        f.retractLength = 1.2
+        f.calibratedKinds = [CalibrationKind.temperature.rawValue, CalibrationKind.retraction.rawValue]
+        s.filaments[0] = f
+        let objects = [ModelObject(name: "Teil", mesh: Fixtures.box(20, 20, 20))]
+        let ids = PrintAdvisor.recommendations(objects: objects, settings: s).map(\.id)
+        XCTAssertFalse(ids.contains("petg-temp-0"))
+        XCTAssertFalse(ids.contains("petg-retract-0"))
+        XCTAssertEqual(AutoTune.run(objects: objects, settings: s).settings.filaments[0].nozzleTemp, 250)
+    }
+
+    /// A flat sign is not a small model: no 0.12 mm layers.
+    func testFlatPartsKeepTheirLayerHeight() {
+        let s = PrintSettings()
+        let sign = [ModelObject(name: "Schild", mesh: Fixtures.box(150, 100, 3))]
+        XCTAssertFalse(PrintAdvisor.recommendations(objects: sign, settings: s).contains { $0.id == "fine" })
+        let figure = [ModelObject(name: "Figur", mesh: Fixtures.box(15, 15, 25))]
+        XCTAssertTrue(PrintAdvisor.recommendations(objects: figure, settings: s).contains { $0.id == "fine" })
+    }
+
+    func testDismissedTipsAreNotTakenOver() throws {
+        let s = PrintSettings()
+        let objects = try XCTUnwrap(PlateArranger.arrange([ModelObject(name: "T", mesh: Fixtures.tShape())], bedSize: s.bedSize))
+        let result = AutoTune.run(objects: objects, settings: s, excluding: ["support"])
+        XCTAssertEqual(result.settings.support, .off)
+    }
+}

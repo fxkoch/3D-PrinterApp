@@ -194,7 +194,8 @@ final class PrinterManager {
     /// Material types loaded per slot (for the advisor), nil when unknown.
     func loadedTypes(_ printer: PrinterConnection?) -> [String?] {
         guard let s = status(of: printer), !s.filaments.isEmpty else { return [] }
-        return s.filaments.map { $0.present ? ($0.type ?? "") : "NONE" }
+        // "?" = a spool is there, its material is unknown (no RFID tag) – not the same as empty.
+        return s.filaments.map { f in f.present ? (f.type.flatMap { $0.isEmpty ? nil : $0 } ?? "?") : "NONE" }
     }
 
     /// Filament profiles matching what is loaded in the printer (RFID / ACE), per slot.

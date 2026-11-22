@@ -32,23 +32,25 @@ public enum AutoTune {
         }
     }
 
+    /// - Parameter excluding: tips the user dismissed; they are never taken over.
     public static func run(objects: [ModelObject], settings: PrintSettings, loadedTypes: [String?] = [],
-                           dryerHumidity: Double? = nil) -> AutoTuneResult {
+                           dryerHumidity: Double? = nil, excluding: Set<String> = []) -> AutoTuneResult {
         var s = settings
         var scratch = objects
         var applied: [Recommendation] = []
         // Each tip is taken over once. A tip that came back with another value would only push a setting to and fro.
-        var taken = Set<String>()
+        var taken = excluding
         let analyses = objects.map { PrintAdvisor.analyze($0, supportAngle: settings.supportAngle) }
-        for _ in 0..<6 {
+        // One tip at a time, then ask again: a tip can make the next one unnecessary (brim → no elephant-foot tip).
+        for _ in 0..<25 {
             let todo = PrintAdvisor.recommendations(objects: scratch, settings: s, loadedTypes: loadedTypes,
                                                     dryerHumidity: dryerHumidity, analyses: analyses)
                 .filter { r in
                     guard let action = r.action, r.severity >= .suggestion, isAutomatic(action) else { return false }
                     return !taken.contains(r.id)
                 }
-            guard !todo.isEmpty else { break }
-            for r in todo {
+            guard let next = todo.first else { break }
+            for r in [next] {
                 taken.insert(r.id)
                 let before = s, toolsBefore = scratch.map(\.allTools)
                 try? PrintAdvisor.apply(r.action!, settings: &s, objects: &scratch)

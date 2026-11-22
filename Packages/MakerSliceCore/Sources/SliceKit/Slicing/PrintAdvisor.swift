@@ -296,10 +296,11 @@ public enum PrintAdvisor {
         }
 
         // Layer height.
-        let smallest = analyses.map { min($0.size.x, $0.size.y, $0.size.z) }.min() ?? 0
+        // Small means small in every direction: a flat sign of 150 × 100 × 3 mm has no fine details to resolve.
+        let allSmall = !analyses.isEmpty && analyses.allSatisfy { max($0.size.x, $0.size.y) < 30 && $0.size.z < 40 }
         if goalChosen {
             // the goal sets the layer height
-        } else if smallest > 0, smallest < 12, s.layerHeight >= 0.2 {
+        } else if allSmall, s.layerHeight >= 0.2 {
             result.append(Recommendation(
                 id: "fine", title: "Feinere Schichten für kleine Details",
                 detail: "Das Modell ist klein. 0,12 mm Schichthöhe bildet Details deutlich schärfer ab.",
@@ -402,10 +403,12 @@ public enum PrintAdvisor {
         for tool in usedTools.sorted() where tool < loadedTypes.count {
             let configured = s.filament(for: tool)
             let label = "\(s.machine.slotLabel)\(tool + 1)"
+            // "?" = a spool is there but the printer does not know its material (no RFID): nothing to compare.
+            if loadedTypes[tool] == "?" { continue }
             guard let loaded = loadedTypes[tool], !loaded.isEmpty, loaded.uppercased() != "NONE" else {
                 // Another free slot holds the same material: print with that one.
                 func holds(_ i: Int) -> String? {
-                    guard i != tool, !usedTools.contains(i), i < loadedTypes.count, let t = loadedTypes[i], !t.isEmpty, t.uppercased() != "NONE" else { return nil }
+                    guard i != tool, !usedTools.contains(i), i < loadedTypes.count, let t = loadedTypes[i], !t.isEmpty, t != "?", t.uppercased() != "NONE" else { return nil }
                     return t
                 }
                 let base = configured.type.uppercased()
@@ -537,7 +540,7 @@ public enum PrintAdvisor {
                     detail: "Langsam drucken (max. ca. 3,5 mm³/s) und kurz zurückziehen. Ein langer Rückzug beim Werkzeugwechsel (Standard 10 mm) verursacht bei TPU oft Staus – MakerSlice zieht nur um den Filament-Rückzug zurück.",
                     icon: "info.circle", severity: .info))
             }
-            for tool in flexTools where s.filament(for: tool).retractLength > 1.0 {
+            for tool in flexTools where s.filament(for: tool).retractLength > 1.0 && !(s.filament(for: tool).calibratedKinds ?? []).contains(CalibrationKind.retraction.rawValue) {
                 result.append(Recommendation(
                     id: "tpu-retract-\(tool)", title: "\(label(tool)): Rückzug für TPU kürzen",
                     detail: String(format: "%.1f mm Rückzug ist für TPU zu viel – das weiche Filament staucht sich und verstopft. 0,8 mm empfohlen.",
@@ -563,13 +566,15 @@ public enum PrintAdvisor {
         // PETG: the tips quote the PETG set in each slot and its current values, not a generic range.
         for tool in tools where s.filament(for: tool).type.uppercased().hasPrefix("PETG") {
             let f = s.filament(for: tool)
-            if f.nozzleTemp > 240 {
+            // A calibrated value is better than the general tip: it was measured with this filament on this printer.
+            let calibrated = Set(f.calibratedKinds ?? [])
+            if f.nozzleTemp > 240, !calibrated.contains(CalibrationKind.temperature.rawValue) {
                 result.append(Recommendation(
                     id: "petg-temp-\(tool)", title: "\(label(tool)) \(f.name): Düse 240 °C",
                     detail: "Eingestellt sind \(f.nozzleTemp) °C. Beim Temperaturturm war mit PETG 240 °C am saubersten, bei 270 °C hingen die meisten Fäden. Erst danach Rückzug prüfen.",
                     icon: "thermometer.medium", severity: .suggestion, action: .filamentNozzle(slot: tool, temp: 240)))
             }
-            if f.retractLength > 0.8 {
+            if f.retractLength > 0.8, !calibrated.contains(CalibrationKind.retraction.rawValue) {
                 result.append(Recommendation(
                     id: "petg-retract-\(tool)", title: "\(label(tool)) \(f.name): Rückzug 0,6 mm",
                     detail: String(format: "Eingestellt sind %.1f mm. Beim Rückzug-Test mit diesem PETG war 0,2 mm sauberer als 1,6 mm. Fehlen dann Stellen im Druck, Rückzug in 0,2-mm-Schritten wieder erhöhen.", f.retractLength),

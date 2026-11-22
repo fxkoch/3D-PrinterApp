@@ -748,7 +748,7 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         let t0 = Date()
-        while !((simState()["scripts"] as? [String]) ?? []).contains(where: { $0.hasPrefix("ACE_START_DRYING TEMP=") }), Date().timeIntervalSince(t0) < 20 { sleep(1) }
-        XCTAssertTrue(((simState()["scripts"] as? [String]) ?? []).contains(where: { $0.hasPrefix("ACE_START_DRYING TEMP=") }), "dryer command reached the printer")
+        while !((simState()["scripts"] as? [String]) ?? []).contains(where: { $0.hasPrefix("ACE_DRY ACE=") }), Date().timeIntervalSince(t0) < 20 { sleep(1) }
+        XCTAssertTrue(((simState()["scripts"] as? [String]) ?? []).contains(where: { $0.hasPrefix("ACE_DRY ACE=") }), "dryer command reached the printer")
     }
 }

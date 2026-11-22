@@ -72,7 +72,24 @@ final class MultiACETests: XCTestCase {
     func testCommands() {
         XCTAssertEqual(MultiACECommand.load(head: 2), "ACE_LOAD_HEAD HEAD=2")
         XCTAssertEqual(MultiACECommand.unload(head: 0), "ACE_UNLOAD_HEAD HEAD=0")
-        XCTAssertEqual(MultiACECommand.startDrying(unit: 0, temperature: 55, minutes: 300), "ACE_START_DRYING TEMP=55 DURATION=300")
+        XCTAssertEqual(MultiACECommand.startDrying(unit: 0, temperature: 55, minutes: 300), "ACE_DRY ACE=0 TEMP=55 DURATION=300")
+        XCTAssertEqual(MultiACECommand.startDrying(unit: 1, temperature: 50, minutes: 240), "ACE_DRY ACE=1 TEMP=50 DURATION=240")
+        XCTAssertEqual(MultiACECommand.maxDryingTemperature(kind: "v1"), 55)
+        XCTAssertEqual(MultiACECommand.maxDryingTemperature(kind: "v2"), 65)
+        XCTAssertEqual(MultiACECommand.maxDryingTemperature(kind: nil), 55)
         XCTAssertEqual(MultiACECommand.stopDrying(unit: 1), "ACE_STOP_DRYING ACE=1")
+    }
+}
+
+final class BambuAMSStatusTests: XCTestCase {
+    func testClassicAMSHumidityLevelAndNoFixedActiveSlot() {
+        var s = PrinterStatus()
+        s.applyBambu(["nozzle_temper": 210, "nozzle_target_temper": 220,
+                      "ams": ["tray_now": "255", "ams": [["id": "0", "humidity": "2", "tray": [["id": "0", "tray_type": "PLA", "tray_color": "FF0000FF"]]]]]])
+        XCTAssertEqual(s.filamentBox?.humidity, 70, "level 2 = 60–80 %")
+        XCTAssertNil(s.activeTool, "one nozzle: no tool number")
+        XCTAssertNil(s.filamentBox?.activeSlot, "255 = nothing loaded")
+        s.applyBambu(["ams": ["ams": [["id": "0", "humidity_raw": "34", "tray": [] as [[String: Any]]]]]])
+        XCTAssertEqual(s.filamentBox?.humidity, 34, "AMS 2 Pro reports %")
     }
 }

@@ -64,6 +64,8 @@ final class PrintProject: Identifiable {
     private(set) var autoTuning = false
     /// Slots of the objects before the automatic tuning moved them (for undo).
     @ObservationIgnored private var toolsBeforeAutoTune: [ModelObject.ID: ModelObject] = [:]
+    /// Tuning waits for the colour mapping and the profile question.
+    @ObservationIgnored private var pendingAutoTune = false
 
     @ObservationIgnored private var sliceTasks: [Int: Task<Void, Never>] = [:]
     /// Plates still waiting while "alle Platten slicen" runs.
@@ -101,9 +103,13 @@ final class PrintProject: Identifiable {
     func applyProfile(_ changes: [ProfileChange]) {
         settings = ProfileAdvisor.apply(changes, to: settings)
         profileReport = nil
+        if pendingAutoTune { autoOptimize() }
     }
 
-    func dismissProfile() { profileReport = nil }
+    func dismissProfile() {
+        profileReport = nil
+        if pendingAutoTune { autoOptimize() }
+    }
 
     /// Offers the differences of a profile file (OrcaSlicer/Bambu process or filament JSON) to take over – nothing changes
     /// before the user has chosen. Returns a message when there is nothing to offer.
@@ -178,7 +184,10 @@ final class PrintProject: Identifiable {
         }
     }
 
-    func finishColorSetup() { needsColorSetup = false }
+    func finishColorSetup() {
+        needsColorSetup = false
+        if pendingAutoTune { autoOptimize() }
+    }
     func reopenColorSetup() { needsColorSetup = true }
 
     /// Height-based colour changes of an object (sorted, one per height).
@@ -278,7 +287,15 @@ final class PrintProject: Identifiable {
         var list = objects
         try PrintAdvisor.apply(action, settings: &s, objects: &list)
         settings = s
-        rearrangePlate(currentPlate - 1, list)
+        // Only a change of the models (split, other slot) touches the plate; a setting must not repack it.
+        if list.map(\.id) != objects.map(\.id) {
+            rearrangePlate(currentPlate - 1, list)
+        } else if list.map(\.allTools) != objects.map(\.allTools) {
+            plates[currentPlate - 1] = list
+            changed(plate: currentPlate)
+        } else {
+            refreshRecommendations()
+        }
     }
 
     // MARK: Plates
@@ -381,12 +398,15 @@ final class PrintProject: Identifiable {
     /// Calibration prints keep their fixed settings.
     func autoOptimize() {
         guard calibration == nil else { refreshRecommendations(); return }
-        let objects = self.objects, settings = self.settings, loaded = loadedTypes, humidity = dryerHumidity
+        // Colours and the model's own profile are chosen first; tuning then works on the final materials.
+        guard !needsColorSetup, profileReport == nil else { pendingAutoTune = true; refreshRecommendations(); return }
+        pendingAutoTune = false
+        let objects = self.objects, settings = self.settings, loaded = loadedTypes, humidity = dryerHumidity, skip = dismissed
         let plate = currentPlate - 1
         autoTuning = true
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
-                AutoTune.run(objects: objects, settings: settings, loadedTypes: loaded, dryerHumidity: humidity)
+                AutoTune.run(objects: objects, settings: settings, loadedTypes: loaded, dryerHumidity: humidity, excluding: skip)
             }.value
             guard let self else { return }
             self.autoTuning = false

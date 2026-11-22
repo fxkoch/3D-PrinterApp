@@ -79,7 +79,8 @@ def run_script(script: str) -> None:
             m = re.match(r"ACE_UNLOAD_HEAD HEAD=(\d)", line)
             if m:
                 STATE["head_source"][m.group(1)] = None
-            m = re.match(r"ACE_START_DRYING TEMP=(\d+) DURATION=(\d+)", line)
+            m = re.match(r"ACE_START_DRYING TEMP=(\d+) DURATION=(\d+)", line) \
+                or re.match(r"ACE_DRY ACE=\d+ TEMP=(\d+) DURATION=(\d+)", line)
             if m:
                 STATE["dryer"] = {"status": "drying", "target_temp": int(m.group(1)),
                                   "duration": int(m.group(2)) * 60, "remain_time": int(m.group(2)) * 60}

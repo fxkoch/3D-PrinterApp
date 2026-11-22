@@ -77,7 +77,8 @@ struct RecommendationsView: View {
                 .padding()
                 .background(.bar)
             }
-            .onAppear { chosen = Set(actionable.filter { $0.severity >= .suggestion }.map(\.id)) }
+            // Pre-select only what may change without asking; plate, levelling and splitting stay a deliberate tap.
+            .onAppear { chosen = Set(actionable.filter { $0.severity >= .suggestion && $0.action.map(AutoTune.isAutomatic) == true }.map(\.id)) }
         }
     }
 

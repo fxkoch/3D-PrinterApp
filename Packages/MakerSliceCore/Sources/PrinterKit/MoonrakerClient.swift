@@ -101,7 +101,8 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         } else {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 10
-            config.timeoutIntervalForResource = 600
+            // multiACE load/unload commands answer only when done: up to about 25 minutes.
+            config.timeoutIntervalForResource = 1800
             self.session = URLSession(configuration: config)
         }
     }
@@ -171,10 +172,14 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public func cancel() async throws { _ = try await postJSON("/printer/print/cancel") }
 
     /// Runs arbitrary G-code (e.g. "M140 S60").
-    public func runGCode(_ script: String) async throws {
+    /// - Parameter timeout: seconds to wait for the printer's answer (Moonraker answers when the command is done).
+    public func runGCode(_ script: String, timeout: TimeInterval = 10) async throws {
         let encoded = script.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? script
-        _ = try await postJSON("/printer/gcode/script?script=\(encoded)")
+        _ = try await postJSON("/printer/gcode/script?script=\(encoded)", timeout: timeout)
     }
+
+    /// multiACE moves filament through metres of tube and retries on its own: its commands take minutes.
+    static let aceCommandTimeout: TimeInterval = 1800
 
     public var filamentControl: FilamentControlSupport {
         if hasMultiACE {
@@ -188,31 +193,39 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public func loadSlot(_ slot: Int) async throws {
         guard hasMultiACE else { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
         try await requireIdleForACE(head: slot)
-        try await runGCode(MultiACECommand.load(head: slot))
+        try await runGCode(MultiACECommand.load(head: slot), timeout: Self.aceCommandTimeout)
     }
 
     /// multiACE: pulls the filament of tool head `slot` back into the ACE.
     public func retractSlot(_ slot: Int) async throws {
         guard hasMultiACE else { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
         try await requireIdleForACE(head: slot)
-        try await runGCode(MultiACECommand.unload(head: slot))
+        try await runGCode(MultiACECommand.unload(head: slot), timeout: Self.aceCommandTimeout)
     }
 
     /// multiACE: starts or stops the dryer of ACE `unit`.
     public func setACEDrying(_ on: Bool, unit: Int = 0, temperature: Int = 45, minutes: Int = 240) async throws {
         guard hasMultiACE else { throw PrinterError.unsupported("Der ACE ist an diesem Drucker nicht eingerichtet.") }
-        try await requireIdleForACE(head: nil)
-        try await runGCode(on ? MultiACECommand.startDrying(unit: unit, temperature: temperature, minutes: minutes)
-                              : MultiACECommand.stopDrying(unit: unit))
+        let s = try await requireIdleForACE(head: nil)
+        let kind = s.ace?.units.first { $0.index == unit }?.kind
+        let temp = min(temperature, MultiACECommand.maxDryingTemperature(kind: kind))
+        try await runGCode(on ? MultiACECommand.startDrying(unit: unit, temperature: temp, minutes: minutes)
+                              : MultiACECommand.stopDrying(unit: unit), timeout: Self.aceCommandTimeout)
     }
 
-    /// The ACE commands move filament and heat the nozzle: never during a print.
-    private func requireIdleForACE(head: Int?) async throws {
+    /// The ACE commands move filament and heat the nozzle: never during a print (Moonraker would run them between the
+    /// print's own lines) and never while multiACE is swapping filament itself.
+    @discardableResult
+    private func requireIdleForACE(head: Int?) async throws -> PrinterStatus {
         if let head, !(0..<4).contains(head) { throw PrinterError.unsupported("Werkzeugkopf \(head + 1) gibt es nicht.") }
         let s = try await status()
         if s.state == .printing || s.state == .paused {
             throw PrinterError.unsupported("Während eines Drucks bewegt die App kein Filament.")
         }
+        if s.ace?.swapInProgress == true {
+            throw PrinterError.unsupported("multiACE wechselt gerade Filament. Bitte warten, bis der Wechsel fertig ist.")
+        }
+        return s
     }
 
     public func extrude(millimetres: Double) async throws {
@@ -393,8 +406,9 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         return try parse(data)
     }
 
-    private func postJSON(_ path: String) async throws -> [String: Any] {
-        let request = try makeRequest(path, method: "POST")
+    private func postJSON(_ path: String, timeout: TimeInterval? = nil) async throws -> [String: Any] {
+        var request = try makeRequest(path, method: "POST")
+        if let timeout { request.timeoutInterval = timeout }
         let (data, response) = try await perform { try await self.session.data(for: request) }
         try check(response, data)
         return try parse(data)

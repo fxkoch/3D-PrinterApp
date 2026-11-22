@@ -179,6 +179,17 @@ final class AppModel {
         savedSettings[model] ?? PrintSettings(printer: model)
     }
 
+    /// The user's own choices (goal, printer options, filaments) on top of the settings before auto-tuning.
+    private func keepChoices(of current: PrintSettings, over original: PrintSettings) -> PrintSettings {
+        var s = original
+        if current.purpose != original.purpose { s.apply(current.purpose) }
+        s.filaments = current.filaments
+        s.plateType = current.plateType
+        s.enableBedLeveling = current.enableBedLeveling
+        s.enableTimelapse = current.enableTimelapse
+        return s
+    }
+
     /// Keeps the settings as the starting point of the next project – without what belongs to this one print only.
     func remember(_ new: PrintSettings) {
         let settings = new.forNewProjects
@@ -262,7 +273,7 @@ final class AppModel {
             switch result {
             case .success(let model):
                 // What is loaded in the printer decides the material; a PLA file is then printed in the PETG that is in the machine.
-                let p = PrintProject(name: name, imported: model, settings: settings, useModelMaterials: loaded.allSatisfy { ($0 ?? "").isEmpty || $0 == "NONE" })
+                let p = PrintProject(name: name, imported: model, settings: settings, useModelMaterials: loaded.allSatisfy { ($0 ?? "").isEmpty || $0 == "NONE" || $0 == "?" })
                 p.loadedTypes = loaded
                 p.dryerHumidity = humidity
                 if autoOptimize { p.autoOptimize() } else { p.refreshRecommendations() }
@@ -333,7 +344,9 @@ final class AppModel {
             return
         }
         sendState = .uploading
-        let mapping = project.usedTools.map { tool -> SlotMapping in
+        // Every slot that extrudes in the G-code (supports may print with their own slot), not only the models' slots.
+        let printed = Set(project.usedTools).union(output.estimate.filamentMM.filter { $0.value > 0 }.keys).sorted()
+        let mapping = printed.map { tool -> SlotMapping in
             let f = project.settings.filament(for: tool)
             return SlotMapping(tool: tool, slot: tool, materialType: f.type, color: Color(hex: f.color).rgbBytes)
         }
@@ -353,7 +366,8 @@ final class AppModel {
             log.add(.info, startPrint ? "Druck gestartet: \(project.gcodeFileName)" : "Hochgeladen: \(project.gcodeFileName)",
                     source: printer.name)
             // A calibration print has its own settings (e.g. vase mode for the flow test): they must not become the defaults.
-            if project.calibration == nil { remember(project.settings) }
+            // What the app tuned for this model stays with the model: the defaults keep the settings from before.
+            if project.calibration == nil { remember(project.autoTuned.map { keepChoices(of: project.settings, over: $0.original) } ?? project.settings) }
             await printers.refresh(printer)
         } catch {
             sendState = .failed(error.localizedDescription)
