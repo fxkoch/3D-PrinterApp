@@ -137,7 +137,10 @@ final class MultiACEInboxTests: XCTestCase {
         XCTAssertEqual(FakeMultiACEInbox.requests.map(\.method), ["GET", "POST"])
         let post = try XCTUnwrap(FakeMultiACEInbox.requests.last)
         XCTAssertEqual(post.url.absoluteString, "http://192.168.1.50/multiace/api/preflight/inbox")
+        #if !canImport(FoundationNetworking)
+        // Linux' URLProtocol does not hand an upload body to the stub; on Apple systems the file must arrive.
         XCTAssertGreaterThan(post.bytes, 6)
+        #endif
     }
 
     func testOldMultiACEIsReportedNotUploaded() async {
