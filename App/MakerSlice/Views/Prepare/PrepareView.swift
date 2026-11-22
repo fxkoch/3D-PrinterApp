@@ -21,6 +21,7 @@ struct PrepareView: View {
     @State private var showCalibrationResult = false
     @State private var showAssistant = false
     @State private var showAddPrinter = false
+    @State private var placementObject: ModelObject?
     @State private var confirmClose = false
 
     struct SlotSelection: Identifiable {
@@ -103,6 +104,11 @@ struct PrepareView: View {
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .sheet(isPresented: $showAddPrinter) { PrinterEditView(existing: nil) }
+            .sheet(item: $placementObject) { object in
+                ObjectPlacementView(project: project, selectedID: object.id)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+            }
             .sheet(isPresented: $showAssistant) {
                 AssistantView(isSheet: true)
                     .presentationDetents([.medium, .large])
@@ -440,13 +446,15 @@ struct PrepareView: View {
                           bedSize: project.settings.bedSize, maxHeight: project.settings.maxHeight,
                           onTool: { tool in project.setTool(tool, for: object.id) },
                           onPartTool: { part, tool in project.setPartTool(tool, part: part, for: object.id) }) {
+                    Button { placementObject = object } label: { Label("Position & Drehen …", systemImage: "move.3d") }
+                        .accessibilityIdentifier("placementMenu")
                     Button { cutObject = object } label: { Label("Teilen …", systemImage: "scissors") }
                         .disabled(object.isMultiColor)
                     Button { colorObject = object } label: { Label("Farbwechsel bei Höhe …", systemImage: "paintpalette") }
                         .accessibilityIdentifier("colorChangeMenu")
                     Button { strengthObject = object } label: { Label("Festigkeit prüfen …", systemImage: "checkmark.shield") }
                         .accessibilityIdentifier("strengthMenu")
-                    Button { project.layFlat(object.id) } label: { Label("Flach hinlegen", systemImage: "arrow.down.to.line") }
+                    Button { project.layFlat(object.id) } label: { Label("Auf beste Fläche legen", systemImage: "arrow.down.to.line") }
                     Button { project.rotate(object.id, degrees: 90) } label: { Label("90° drehen", systemImage: "rotate.right") }
                     Button { project.duplicate(object.id) } label: { Label("Duplizieren", systemImage: "plus.square.on.square") }
                     if project.plateCount > 1 {

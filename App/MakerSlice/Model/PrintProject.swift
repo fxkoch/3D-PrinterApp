@@ -219,11 +219,65 @@ final class PrintProject: Identifiable {
     }
 
     func rotate(_ objectID: ModelObject.ID, degrees: Double) {
-        transform(objectID, .rotationZ(degrees * .pi / 180))
+        transformInPlace(objectID, .rotationZ(degrees * .pi / 180))
     }
 
     func scale(_ objectID: ModelObject.ID, factor: Double) {
-        transform(objectID, .scale(Vec3(factor, factor, factor)))
+        transformInPlace(objectID, .scale(Vec3(factor, factor, factor)))
+    }
+
+    /// Tips the object over by `degrees` around the bed's X axis (forwards/backwards) or Y axis (sideways).
+    func tilt(_ objectID: ModelObject.ID, aroundX: Bool, degrees: Double) {
+        let a = degrees * .pi / 180
+        transformInPlace(objectID, aroundX ? .rotationX(a) : .rotationY(a))
+    }
+
+    /// Lays the object on one of its faces (see `TriangleMesh.lyingFaces`), at the same place on the bed.
+    func lay(_ objectID: ModelObject.ID, on face: LyingFace) {
+        transformInPlace(objectID, face.rotation)
+    }
+
+    /// Moves one object by (dx, dy) mm; the others stay where they are.
+    func move(_ objectID: ModelObject.ID, dx: Double, dy: Double) {
+        guard let loc = locate(objectID) else { return }
+        plates[loc.plate][loc.index] = plates[loc.plate][loc.index].moved(dx: dx, dy: dy, bedSize: settings.bedSize)
+        placementChanged(plate: loc.plate)
+    }
+
+    /// Puts the centre of one object at (x, y) on the bed.
+    func place(_ objectID: ModelObject.ID, centerX x: Double, centerY y: Double) {
+        guard let loc = locate(objectID) else { return }
+        let c = plates[loc.plate][loc.index].boundingBox.center
+        move(objectID, dx: x - c.x, dy: y - c.y)
+    }
+
+    /// Rotation, scale or tilt about the object's own centre; it stays where it is and only moves back onto the bed
+    /// when it would stick out. The rest of the plate is not rearranged.
+    func transformInPlace(_ objectID: ModelObject.ID, _ t: Transform3D) {
+        guard let loc = locate(objectID) else { return }
+        plates[loc.plate][loc.index] = plates[loc.plate][loc.index].transformedInPlace(t, bedSize: settings.bedSize)
+        placementChanged(plate: loc.plate)
+    }
+
+    /// Objects that overlap another one on the plate (shown, not moved: the user may want them close).
+    private(set) var overlapping: Set<ModelObject.ID> = []
+
+    private func placementChanged(plate: Int) {
+        let list = plates[plate]
+        var hits = Set<ModelObject.ID>()
+        for i in list.indices {
+            for j in list.indices where j > i && PlateArranger.hasOverlap([list[i], list[j]], tolerance: 0.5) {
+                hits.insert(list[i].id); hits.insert(list[j].id)
+            }
+        }
+        overlapping = hits
+        let tooBig = list.contains { o in
+            let s = o.boundingBox.size
+            return s.x > settings.bedSize || s.y > settings.bedSize || s.z > settings.maxHeight
+        }
+        warning = tooBig ? tooLargeWarning
+            : (hits.isEmpty ? nil : "Objekte überlappen sich. Verschiebe sie oder tippe auf „Automatisch anordnen“.")
+        changed(plate: plate + 1)
     }
 
     /// Replaces the shape of a simple (one-colour) object, e.g. with a reinforced variant.
@@ -235,13 +289,10 @@ final class PrintProject: Identifiable {
         rearrangePlate(loc.plate, list)
     }
 
+    /// Lays the object on its best face: the most contact with the bed and the least overhang.
     func layFlat(_ objectID: ModelObject.ID) {
-        guard let loc = locate(objectID) else { return }
-        var list = plates[loc.plate]
-        // Volumes follow the main mesh only for simple objects; lay-flat resets them.
-        list[loc.index].mesh = list[loc.index].mesh.laidFlat()
-        list[loc.index].volumes = []
-        rearrangePlate(loc.plate, list)
+        guard let loc = locate(objectID), let best = plates[loc.plate][loc.index].mesh.lyingFaces(limit: 1, supportAngle: settings.supportAngle).first else { return }
+        lay(objectID, on: best)
     }
 
     /// Arranges the current plate again; what no longer fits moves to the next plates.
@@ -338,7 +389,9 @@ final class PrintProject: Identifiable {
 
     /// Puts objects onto plates (first fit, biggest first) and arranges the plates concerned.
     private func put(_ new: [ModelObject], preferred: Int) {
-        let layout = PlateArranger.place(new, into: plates, bedSize: settings.bedSize, preferred: preferred)
+        // Room between the parts for their brim and skirt.
+        let spacing = max(6, settings.brimWidth * 2 + 2)
+        let layout = PlateArranger.place(new, into: plates, bedSize: settings.bedSize, preferred: preferred, spacing: spacing)
         plates = layout.plates
         if !layout.unplaceable.isEmpty {
             let target = min(max(preferred, 0), plates.count - 1)
