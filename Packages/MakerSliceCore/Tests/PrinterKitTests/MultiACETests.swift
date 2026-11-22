@@ -93,3 +93,67 @@ final class BambuAMSStatusTests: XCTestCase {
         XCTAssertEqual(s.filamentBox?.humidity, 34, "AMS 2 Pro reports %")
     }
 }
+
+
+/// Stand-in for the multiACE web backend's preflight inbox.
+final class FakeMultiACEInbox: URLProtocol {
+    nonisolated(unsafe) static var requests: [(method: String, url: URL, bytes: Int)] = []
+    nonisolated(unsafe) static var probeStatus = 200
+    nonisolated(unsafe) static var postStatus = 200
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        var bytes = request.httpBody?.count ?? 0
+        if bytes == 0, let stream = request.httpBodyStream {
+            stream.open(); var buffer = [UInt8](repeating: 0, count: 65536)
+            while stream.hasBytesAvailable { let n = stream.read(&buffer, maxLength: buffer.count); if n <= 0 { break }; bytes += n }
+            stream.close()
+        }
+        Self.requests.append((request.httpMethod ?? "GET", request.url!, bytes))
+        let code = request.httpMethod == "POST" ? Self.postStatus : Self.probeStatus
+        let response = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"ok":true,"pending":false}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+final class MultiACEInboxTests: XCTestCase {
+    private func client() -> MoonrakerClient {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FakeMultiACEInbox.self]
+        return MoonrakerClient(connection: PrinterConnection(name: "U1", host: "192.168.1.50"), session: URLSession(configuration: config))
+    }
+
+    func testSendsTheFileToTheInboxOnTheWebPort() async throws {
+        FakeMultiACEInbox.requests = []; FakeMultiACEInbox.probeStatus = 200; FakeMultiACEInbox.postStatus = 200
+        try await client().sendToMultiACE(gcode: Data("G1 X1\n".utf8), fileName: "Zwiebel.gcode")
+        XCTAssertEqual(FakeMultiACEInbox.requests.map(\.method), ["GET", "POST"])
+        let post = try XCTUnwrap(FakeMultiACEInbox.requests.last)
+        XCTAssertEqual(post.url.absoluteString, "http://192.168.1.50/multiace/api/preflight/inbox")
+        XCTAssertGreaterThan(post.bytes, 6)
+    }
+
+    func testOldMultiACEIsReportedNotUploaded() async {
+        FakeMultiACEInbox.requests = []; FakeMultiACEInbox.probeStatus = 404
+        do {
+            try await client().sendToMultiACE(gcode: Data("G1".utf8), fileName: "a.gcode")
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("0.99.8b"))
+        }
+        XCTAssertEqual(FakeMultiACEInbox.requests.map(\.method), ["GET"], "nothing is uploaded")
+    }
+
+    func testAlreadyProcessedFileIsExplained() async {
+        FakeMultiACEInbox.requests = []; FakeMultiACEInbox.probeStatus = 200; FakeMultiACEInbox.postStatus = 409
+        do {
+            try await client().sendToMultiACE(gcode: Data("G1".utf8), fileName: "a.gcode")
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("neu slicen"))
+        }
+    }
+}

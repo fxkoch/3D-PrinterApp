@@ -162,6 +162,38 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         try check(response, data)
     }
 
+    /// multiACE (0.99.8b and later): hands the sliced file to the multiACE preflight on the printer's web page, where
+    /// the spools are matched to the heads. Nothing is printed: the user starts it there. One file waits at a time.
+    public func sendToMultiACE(gcode: Data, fileName: String) async throws {
+        guard let base = connection.baseURL, var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw PrinterError.invalidAddress
+        }
+        comps.port = nil   // the multiACE web backend runs behind the printer's web server (port 80)
+        comps.path = "/multiace/api/preflight/inbox"
+        guard let url = comps.url else { throw PrinterError.invalidAddress }
+        var probe = URLRequest(url: url)
+        probe.timeoutInterval = 10
+        let (_, probeResponse) = try await perform { try await self.session.data(for: probe) }
+        if (probeResponse as? HTTPURLResponse)?.statusCode == 404 {
+            throw PrinterError.unsupported("Die multiACE-Version auf dem Drucker kennt die Übergabe an die Vorschau noch nicht (ab 0.99.8b). Bitte multiACE aktualisieren oder „Nur hochladen“ nutzen.")
+        }
+        let boundary = "MakerSlice-\(UUID().uuidString)"
+        var body = Data()
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(Self.sanitize(fileName))\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8))
+        body.append(gcode)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 600
+        let (data, response) = try await perform { try await self.session.upload(for: request, from: body) }
+        switch (response as? HTTPURLResponse)?.statusCode ?? 0 {
+        case 409: throw PrinterError.unsupported("multiACE hat diese Datei schon verarbeitet. Bitte neu slicen und die frische Datei senden.")
+        case 413: throw PrinterError.unsupported("Die Datei ist für die multiACE-Vorschau zu groß.")
+        default: try check(response, data)
+        }
+    }
+
     public func startPrint(fileName: String) async throws {
         let encoded = fileName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? fileName
         _ = try await postJSON("/printer/print/start?filename=\(encoded)")

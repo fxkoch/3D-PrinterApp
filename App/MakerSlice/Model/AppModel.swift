@@ -347,6 +347,22 @@ final class AppModel {
 
     // MARK: - Printing
 
+    /// U1 with multiACE: hands the sliced file to the multiACE preflight on the printer's web page (spool matching,
+    /// swap plan). Nothing prints until the user starts it there.
+    func sendToMultiACE(_ project: PrintProject) async {
+        guard let output = project.output, let printer = printers.selected,
+              let client = printers.driver(for: printer) as? MoonrakerClient else { return }
+        sendState = .uploading
+        do {
+            try await client.sendToMultiACE(gcode: Data(output.gcode.utf8), fileName: project.gcodeFileName)
+            sendState = .done
+            log.add(.info, "An die multiACE-Vorschau gesendet: \(project.gcodeFileName) – starten auf der multiACE-Seite des Druckers", source: printer.name)
+        } catch {
+            sendState = .failed(error.localizedDescription)
+            log.add(.error, "multiACE-Vorschau: \(error.localizedDescription)", source: printer.name)
+        }
+    }
+
     func send(_ project: PrintProject, startPrint: Bool = true) async {
         guard let output = project.output else { return }
         guard let printer = printers.selected else {

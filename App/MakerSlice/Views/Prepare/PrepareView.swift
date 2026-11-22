@@ -740,6 +740,13 @@ struct PrepareView: View {
                 Button { Task { await app.send(project, startPrint: false) } } label: {
                     Label("Nur hochladen", systemImage: "arrow.up.doc")
                 }
+                if let printer = app.printers.selected, app.printers.model(of: printer) == project.settings.printer,
+                   (app.printers.driver(for: printer) as? MoonrakerClient)?.hasMultiACE == true {
+                    Button { Task { await app.sendToMultiACE(project) } } label: {
+                        Label("An multiACE-Vorschau senden", systemImage: "rectangle.stack.badge.play")
+                    }
+                    .accessibilityIdentifier("sendToMultiACE")
+                }
                 if let output = project.output {
                     ShareLink(item: GCodeFile(text: output.gcode, name: project.gcodeFileName),
                               preview: SharePreview(project.gcodeFileName)) {
