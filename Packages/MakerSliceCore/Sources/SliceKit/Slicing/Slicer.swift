@@ -259,6 +259,29 @@ public final class Slicer: @unchecked Sendable {
                 }
             }
         }
-        return result
+        return Self.keepOnBed(result, bedSize: s.bedSize, lineWidth: w)
+    }
+
+    /// Skirt and brim around a part that almost fills the bed would leave it (the U1 then stops with "move out of
+    /// range" right on the first layer). Loops that stay on the bed are kept; the others are cut at the bed edge.
+    static func keepOnBed(_ extrusions: [Extrusion], bedSize: Double, lineWidth: Double) -> [Extrusion] {
+        let margin = max(0.5, lineWidth)
+        let limit = IntPoint(mmX: margin, mmY: margin), top = IntPoint(mmX: bedSize - margin, mmY: bedSize - margin)
+        let bed = Polygons.rectangle(minX: margin, minY: margin, maxX: bedSize - margin, maxY: bedSize - margin)
+        var kept: [Extrusion] = []
+        for e in extrusions {
+            if e.points.allSatisfy({ $0.x >= limit.x && $0.y >= limit.y && $0.x <= top.x && $0.y <= top.y }) {
+                kept.append(e)
+                continue
+            }
+            let line = e.closed ? e.points + [e.points[0]] : e.points
+            for piece in bed.clip(lines: [line]) where piece.count >= 2 {
+                var part = e
+                part.points = piece
+                part.closed = false
+                if part.lengthMM >= 1 { kept.append(part) }
+            }
+        }
+        return kept
     }
 }

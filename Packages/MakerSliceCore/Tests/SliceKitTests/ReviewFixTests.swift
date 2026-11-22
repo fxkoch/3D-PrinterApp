@@ -203,3 +203,29 @@ final class ReviewFixTests: XCTestCase {
                       "the support still stands in its own slot")
     }
 }
+
+final class BedEdgeTests: XCTestCase {
+    /// A part almost as long as the bed: its skirt (and brim) must not leave the bed – the U1 stopped with "move out of
+    /// range" at Y −0.5 on the first layer of a headphone stand base.
+    func testSkirtAndBrimStayOnTheBed() throws {
+        for brim in [0.0, 8.0] {
+            var s = PrintSettings()
+            s.skirtLoops = 2
+            s.brimWidth = brim
+            let part = ModelObject(name: "Lang", mesh: Fixtures.box(40, 266, 5, at: Vec3(100, 2, 0)))
+            let output = try SliceJob(name: "lang", objects: [part], settings: s).run()
+            var minY = Double.infinity, maxY = -Double.infinity, minX = Double.infinity, maxX = -Double.infinity
+            for line in output.gcode.split(separator: "\n") where line.hasPrefix("G1 ") || line.hasPrefix("G0 ") {
+                for token in line.split(separator: " ") {
+                    if token.hasPrefix("Y"), let v = Double(token.dropFirst()) { minY = min(minY, v); maxY = max(maxY, v) }
+                    if token.hasPrefix("X"), let v = Double(token.dropFirst()) { minX = min(minX, v); maxX = max(maxX, v) }
+                }
+            }
+            XCTAssertGreaterThanOrEqual(minY, 0, "brim \(brim)")
+            XCTAssertLessThanOrEqual(maxY, s.bedSize, "brim \(brim)")
+            XCTAssertGreaterThanOrEqual(minX, 0)
+            let roles = Set(output.layers[0].islands.flatMap { $0.extrusions.map(\.role) })
+            XCTAssertTrue(roles.contains(.skirt), "the skirt is cut, not dropped")
+        }
+    }
+}
