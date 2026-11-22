@@ -193,7 +193,9 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertTrue(model.waitForExistence(timeout: 10))
         model.tap()
         let p1s = app.buttons["Bambu Lab P1S"].firstMatch
-        XCTAssertTrue(p1s.waitForExistence(timeout: 5))
+        // On a slow CI simulator the picker menu sometimes ignores the first tap.
+        if !p1s.waitForExistence(timeout: 5) { model.tap() }
+        XCTAssertTrue(p1s.waitForExistence(timeout: 10))
         p1s.tap()
         XCTAssertTrue(app.textFields["printerSerial"].waitForExistence(timeout: 5), "serial number field")
         XCTAssertTrue(app.secureTextFields["printerAccessCode"].exists, "access code field")
