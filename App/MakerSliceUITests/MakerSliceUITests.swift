@@ -277,6 +277,9 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertTrue(link.waitForExistence(timeout: 20), "the printer page offers calibration")
         link.tap()
         let temperature = app.buttons["calibration-temperature"]
+        // "Neues Filament einrichten" comes first: the list of single tests is further down.
+        _ = app.buttons["calibrationOverview"].waitForExistence(timeout: 10)
+        for _ in 0..<6 where !temperature.exists { app.swipeUp() }
         XCTAssertTrue(temperature.waitForExistence(timeout: 10))
         snapshot("A0-Kalibrieren")
         temperature.tap()
@@ -322,6 +325,8 @@ final class MakerSliceUITests: XCTestCase {
         XCTAssertTrue(link.waitForExistence(timeout: 20))
         link.tap()
         let overview = app.buttons["calibrationOverview"]
+        _ = app.buttons["calibrationFilament"].waitForExistence(timeout: 10)
+        for _ in 0..<6 where !overview.exists { app.swipeUp() }
         XCTAssertTrue(overview.waitForExistence(timeout: 10))
         overview.tap()
         let step = app.buttons["overviewStep-temperature"]
