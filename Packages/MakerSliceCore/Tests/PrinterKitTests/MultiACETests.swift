@@ -81,6 +81,7 @@ final class MultiACETests: XCTestCase {
         XCTAssertEqual(MultiACECommand.maxDryingTemperature(kind: "v1"), 55)
         XCTAssertEqual(MultiACECommand.maxDryingTemperature(kind: "v2"), 65)
         XCTAssertEqual(MultiACECommand.maxDryingTemperature(kind: nil), 55)
+        XCTAssertEqual(MultiACECommand.calibratePressureAdvance(head: 2), "ACE_PA_CALIBRATE HEAD=2 FORCE=1")
         XCTAssertEqual(MultiACECommand.stopDrying(unit: 1), "ACE_STOP_DRYING ACE=1")
     }
 }

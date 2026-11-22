@@ -15,6 +15,14 @@ struct CalibrationHomeView: View {
     @State private var bookVersion = 0
     /// The loaded spool is taken once; coming back from a test must not undo the user's choice.
     @State private var pickedLoaded = false
+    /// U1 with multiACE: pressure advance measured by the printer instead of a test print.
+    @State private var confirmAutoPA = false
+    @State private var measuringPA = false
+    @State private var autoPAMessage: String?
+    private var aceClient: MoonrakerClient? {
+        guard model == .snapmakerU1, let c = app.printers.driver(for: printer) as? MoonrakerClient, c.hasMultiACE else { return nil }
+        return c
+    }
 
     init(printer: PrinterConnection, model: PrinterModel) {
         self.printer = printer
@@ -123,6 +131,11 @@ struct CalibrationHomeView: View {
         }
         .id(refresh)
         .onAppear { bookVersion += 1 }   // results entered in a test change the plan (redraw, same identity)
+        .confirmationDialog("Pressure Advance messen?", isPresented: $confirmAutoPA, titleVisibility: .visible) {
+            Button("Kopf \(tool + 1) messen") { measureAutoPA() }
+        } message: {
+            Text("Kopf \(tool + 1) heizt auf, fährt zur Abstreifposition und spült etwas Filament (etwa 4 Minuten). Es darf kein Druck laufen. Der Wert gilt danach für \(filament.name) an diesem Drucker.")
+        }
         .navigationTitle("Kalibrieren")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showPicker) {
@@ -139,6 +152,27 @@ struct CalibrationHomeView: View {
             }
             pickedLoaded = true
             await app.syncCalibrations()
+        }
+    }
+
+    private func measureAutoPA() {
+        guard let client = aceClient else { return }
+        let head = tool, name = filament.name, printerModel = model
+        measuringPA = true
+        autoPAMessage = nil
+        Task {
+            defer { measuringPA = false }
+            do {
+                if let k = try await client.measurePressureAdvance(head: head) {
+                    app.saveCalibration(CalibrationResult(printer: printerModel.rawValue, filament: name, kind: .pressureAdvance, value: k, source: "auto"))
+                    autoPAMessage = "Gemessen: \(String(format: "%.3f", k)) – gespeichert für \(name)."
+                    bookVersion += 1
+                } else {
+                    autoPAMessage = "Die Messung lief, der Drucker hat aber keinen Wert gemeldet."
+                }
+            } catch {
+                autoPAMessage = "Messung nicht möglich: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -167,7 +201,21 @@ struct CalibrationHomeView: View {
                     }
                 }
                 .accessibilityIdentifier("setup-\(step.kind.rawValue)")
+                if step.kind == .pressureAdvance, aceClient != nil {
+                    // Saves a test print: the U1 measures PA with its coil sensor (multiACE).
+                    Button { confirmAutoPA = true } label: {
+                        if measuringPA {
+                            HStack { ProgressView(); Text("Kopf \(tool + 1) misst … (etwa 4 Minuten)") }
+                        } else {
+                            Label("Ohne Testdruck messen (Kopf \(tool + 1), ca. 4 Min.)", systemImage: "waveform.path.ecg")
+                        }
+                    }
+                    .disabled(measuringPA)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("measurePAWithoutPrint")
+                }
             }
+            if let autoPAMessage { Text(autoPAMessage).font(.caption).foregroundStyle(.secondary) }
             ForEach(plan.skipped) { skip in
                 Label("\(skip.kind.displayName): \(skip.reason)", systemImage: "checkmark.circle")
                     .font(.caption).foregroundStyle(.secondary)

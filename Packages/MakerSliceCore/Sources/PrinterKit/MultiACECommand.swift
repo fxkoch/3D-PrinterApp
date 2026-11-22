@@ -23,4 +23,9 @@ public enum MultiACECommand {
     }
 
     public static func stopDrying(unit: Int) -> String { "ACE_STOP_DRYING ACE=\(unit)" }
+
+    /// Measures pressure advance of head `head` with the U1's coil sensor, without a test print: the head heats, moves to
+    /// the discard position and purges a little. multiACE stores the value on the spool (FORCE=1: measure even if the
+    /// spool already has one). Idle printer only.
+    public static func calibratePressureAdvance(head: Int) -> String { "ACE_PA_CALIBRATE HEAD=\(head) FORCE=1" }
 }

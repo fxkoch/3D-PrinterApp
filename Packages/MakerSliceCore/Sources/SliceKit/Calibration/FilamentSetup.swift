@@ -83,6 +83,10 @@ public enum FilamentSetup {
         }
 
         var steps: [FilamentSetupPlan.Step] = []
+        // A pressure advance the printer measured itself is a good start; for PETG/TPU U1 users found it clearly lower
+        // than a printed test (0.033 vs 0.051), so it is checked once more on demand.
+        let autoPA = own.first { $0.kind == .pressureAdvance && $0.source == "auto" }
+        let checkAutoPA = autoPA != nil && (type.hasPrefix("PETG") || type.hasPrefix("PCTG") || filament.isFlexible)
         var skipped: [FilamentSetupPlan.Skip] = []
         func plan(_ kind: CalibrationKind, why: String, onlyIf: String? = nil) {
             if done.contains(kind) {
@@ -97,6 +101,9 @@ public enum FilamentSetup {
              onlyIf: "Nur wenn du schneller drucken willst oder Wände bei hohem Tempo rau und dünn werden.")
         if measuresFlowDynamics(printer) {
             skipped.append(.init(kind: .pressureAdvance, reason: "Der \(printer.displayName) misst die Fluss-Dynamik vor jedem Druck selbst."))
+        } else if checkAutoPA {
+            steps.append(.init(kind: .pressureAdvance, why: "Der U1 hat \(formatDecimal(autoPA!.value, digits: 3)) gemessen. Bei PETG und TPU liegt der automatische Wert oft zu niedrig.",
+                               onlyIf: "Nur wenn Ecken rund wirken oder nach Ecken Material fehlt."))
         } else {
             plan(.pressureAdvance, why: printer == .snapmakerU1
                  ? "Schärfere Ecken und gleichmäßige Linien. Der U1 misst diesen Wert nur, wenn am Drucker die dynamische Flusskalibrierung für einen Druck eingeschaltet ist – für Drucke aus der App gilt der hier gemessene Wert."

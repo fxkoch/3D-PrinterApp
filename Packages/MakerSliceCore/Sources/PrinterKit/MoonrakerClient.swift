@@ -260,6 +260,16 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         return s
     }
 
+    /// multiACE on the U1: measures the pressure advance of `head` (about 3½ minutes, heats and moves the head) and
+    /// returns the value the printer then uses for that head.
+    public func measurePressureAdvance(head: Int) async throws -> Double? {
+        guard hasMultiACE else { throw PrinterError.unsupported("Die Messung ohne Testdruck braucht multiACE auf dem U1.") }
+        try await requireIdleForACE(head: head)
+        try await runGCode(MultiACECommand.calibratePressureAdvance(head: head), timeout: Self.aceCommandTimeout)
+        let name = head == 0 ? "extruder" : "extruder\(head)"
+        return try await calibration().pressureAdvance[name]
+    }
+
     public func extrude(millimetres: Double) async throws {
         try await requireHotNozzle()
         try await runGCode(FilamentMove.script(millimetres: millimetres))

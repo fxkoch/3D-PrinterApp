@@ -48,3 +48,21 @@ final class FilamentSetupTests: XCTestCase {
         XCTAssertEqual(plan.filament.nozzleTemp, 235)
     }
 }
+
+final class AutoPressureAdvanceTests: XCTestCase {
+    func testPrinterMeasuredPACountsButPETGIsCheckedOnDemand() throws {
+        let book = CalibrationBook()
+        let pla = try XCTUnwrap(FilamentLibrary.all.map(\.filament).first { $0.type == "PLA" })
+        let petg = try XCTUnwrap(FilamentLibrary.all.map(\.filament).first { $0.type == "PETG" })
+        for f in [pla, petg] {
+            book.set(CalibrationResult(printer: PrinterModel.snapmakerU1.rawValue, filament: f.name, kind: .pressureAdvance, value: 0.033, source: "auto"))
+        }
+        let plaPlan = FilamentSetup.plan(for: pla, printer: .snapmakerU1, book: book)
+        XCTAssertFalse(plaPlan.steps.contains { $0.kind == .pressureAdvance })
+        XCTAssertTrue(plaPlan.skipped.contains { $0.kind == .pressureAdvance })
+        let petgPlan = FilamentSetup.plan(for: petg, printer: .snapmakerU1, book: book)
+        let check = try XCTUnwrap(petgPlan.steps.first { $0.kind == .pressureAdvance })
+        XCTAssertNotNil(check.onlyIf, "only on demand")
+        XCTAssertTrue(check.why.contains("0.033"))
+    }
+}
