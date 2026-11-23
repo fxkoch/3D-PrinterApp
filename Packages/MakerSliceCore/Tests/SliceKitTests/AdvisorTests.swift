@@ -260,10 +260,17 @@ final class AdvisorTests: XCTestCase {
         s.filaments[0] = try XCTUnwrap(FilamentLibrary.bestMatch(type: "PETG", printer: s.printer))
         s.support = .everywhere
         s.supportSlot = 1   // PLA
+        // A PLA support body on a PETG part falls over: body from the part's material, PLA only as the contact layer.
+        let body = try XCTUnwrap(PrintAdvisor.recommendations(objects: objs, settings: s).first { $0.id == "support-body" })
+        XCTAssertEqual(body.severity, .warning)
+        XCTAssertEqual(body.action, .supportMaterials(body: nil, interface: 1))
+        try PrintAdvisor.apply(body.action!, settings: &s, objects: &objs)
+        XCTAssertNil(s.supportSlot); XCTAssertEqual(s.supportInterfaceSlot, 1)
         let rec = try XCTUnwrap(PrintAdvisor.recommendations(objects: objs, settings: s).first { $0.id == "support-foot" })
-        XCTAssertEqual(rec.severity, .info)
+        XCTAssertEqual(rec.severity, .suggestion)
         try PrintAdvisor.apply(rec.action!, settings: &s, objects: &objs)
-        XCTAssertEqual(s.supportSlot, 1, "the supports keep their own material"); XCTAssertEqual(s.supportTopZDistance, 0)
+        XCTAssertEqual(s.supportTopZDistance, 0)
+        XCTAssertFalse(PrintAdvisor.recommendations(objects: objs, settings: s).contains { $0.id == "support-body" })
 
         func footLength(_ s: PrintSettings) throws -> Double {
             let arranged = try XCTUnwrap(PlateArranger.arrange(objs, bedSize: s.bedSize))
@@ -278,7 +285,7 @@ final class AdvisorTests: XCTestCase {
             return length
         }
         let dense = try footLength(s)
-        s.supportSlot = nil   // same material as the part: the usual thin lines
+        s.supportInterfaceSlot = nil   // all from the part's material: the usual thin lines
         let thin = try footLength(s)
         XCTAssertGreaterThan(thin, 0)
         XCTAssertGreaterThan(dense, thin * 2.5, "closed foot instead of thin lines")

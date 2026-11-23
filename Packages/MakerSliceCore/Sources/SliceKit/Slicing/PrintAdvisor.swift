@@ -44,6 +44,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case filamentBedDelta(slot: Int, delta: Int)
         /// Prints everything of slot `from` with slot `to` (an empty head/slot → the one holding the material).
         case useSlot(from: Int, to: Int)
+        /// Support body and contact layers from these slots (nil = the part's own material).
+        case supportMaterials(body: Int?, interface: Int?)
     }
 
     public var id: String
@@ -274,12 +276,22 @@ public enum PrintAdvisor {
             let contact = s.filament(for: s.supportInterfaceSlot ?? bodyTool).type
             let part = materials.first?.type ?? "Teil"
             let zNow = s.supportTopZDistance
-            if !partGroups.contains(PrimeTower.bondGroup(contact)) {
-                // PLA on PETG: the release is the point, but the support must still stand where it lands on the part.
+            let bodyType = s.filament(for: bodyTool).type
+            if let bodySlot = s.supportSlot, !partGroups.contains(PrimeTower.bondGroup(bodyType)) {
+                // A support body that does not weld to the part falls over where it stands on it – even with a dense
+                // foot (PLA on PETG at the onion dispenser, PETG on PLA at the headphone stand). Proven instead: the body
+                // from the part's material, only the contact layers under the overhang from the other one.
                 result.append(Recommendation(
-                    id: "support-foot", title: "Stützen aus \(contact) auf \(part): fester Fuß",
-                    detail: "\(contact) haftet kaum auf \(part). So lösen sich die Stützen leicht. Damit sie nicht umfallen, druckt die App an der Auflage auf dem Teil einen geschlossenen Fuß, drei Kontaktschichten mit 100 % und langsamer. Abstand 0 mm, die Kontaktschicht liegt direkt am Teil.",
-                    icon: "building.columns", severity: .info, action: zNow != 0 ? .supportTopZ(0) : nil))
+                    id: "support-body", title: "Stützen aus \(part), nur die Kontaktschicht aus \(bodyType)",
+                    detail: "\(bodyType) haftet nicht auf \(part): Wo die Stütze auf dem Teil steht, löst sie sich und kippt. Der Stützenkörper aus \(part) steht fest; nur die Schichten direkt unter dem Überhang aus \(bodyType) trennen sich sauber vom Teil.",
+                    icon: "building.columns", severity: .warning,
+                    action: .supportMaterials(body: nil, interface: s.supportInterfaceSlot ?? bodySlot)))
+            } else if !partGroups.contains(PrimeTower.bondGroup(contact)) {
+                // Contact layers of a material that does not weld (PLA under PETG): they touch the part without a gap.
+                result.append(Recommendation(
+                    id: "support-foot", title: "Kontaktschicht aus \(contact) unter \(part)",
+                    detail: "\(contact) haftet kaum auf \(part): Die Stützen lösen sich leicht. Die Kontaktschichten liegen deshalb ohne Abstand (0 mm) direkt am Teil, dicht und langsam gedruckt; der Stützenkörper ist aus \(part).",
+                    icon: "building.columns", severity: zNow != 0 ? .suggestion : .info, action: zNow != 0 ? .supportTopZ(0) : nil))
             } else if contact.uppercased().hasPrefix("PETG"), zNow < 0.28 || s.supportXYDistance < 0.6 {
                 // PETG sticks to itself: more distance keeps it from welding to the part (0.28 mm Z, 0.6 mm XY).
                 result.append(Recommendation(
@@ -536,6 +548,9 @@ public enum PrintAdvisor {
                 s.filaments[slot].firstLayerBedTemp += delta
                 s.filaments[slot].smoothPlateBedTemp += delta
             }
+        case .supportMaterials(let body, let interface):
+            s.supportSlot = body
+            s.supportInterfaceSlot = interface
         case .useSlot(let from, let to):
             objects = objects.map { $0.movingTool(from: from, to: to) }
         case .removeLeftoverCommands:

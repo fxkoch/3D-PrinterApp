@@ -240,7 +240,9 @@ public final class Slicer: @unchecked Sendable {
             let loops = max(1, Int((s.brimWidth / w).rounded()))
             var brim: [Extrusion] = []
             for k in 0..<loops {
-                let ring = base.offset(w * (Double(k) + 0.5), join: .round)
+                // Simplified: round offsets of a detailed outline give thousands of 0.03 mm pieces, and the printer
+                // stutters over them (41 700 brim segments on a headphone stand).
+                let ring = base.offset(w * (Double(k) + 0.5), join: .round).simplified(toleranceMM: 0.02)
                 for path in ring.paths {
                     brim.append(Extrusion(role: .brim, points: path, closed: true, width: w, speed: s.firstLayerSpeed))
                 }
@@ -251,7 +253,7 @@ public final class Slicer: @unchecked Sendable {
         }
         if s.skirtLoops > 0 {
             // The skirt is a single outline around everything (helps prime the nozzle).
-            let hull = brimOuter.offset(s.skirtDistance + 5, join: .round).offset(-5, join: .round)
+            let hull = brimOuter.offset(s.skirtDistance + 5, join: .round).offset(-5, join: .round).simplified(toleranceMM: 0.02)
             for k in 0..<s.skirtLoops {
                 let ring = hull.offset(w * Double(k), join: .round)
                 for path in ring.paths where Polygons.signedArea(path) > 0 {

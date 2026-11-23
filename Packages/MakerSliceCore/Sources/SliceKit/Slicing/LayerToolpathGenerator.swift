@@ -145,9 +145,10 @@ struct LayerToolpathGenerator {
             }
         }
         if !foot.isEmpty {
-            // Closed and slow: the foot of a support that stands on a material it does not weld to.
+            // Closed and slow: the foot where a support stands on the part. Printed with the support body's material
+            // (the part's own), so it welds to the surface below.
             result += lines(in: foot, angle: layerIndex % 2 == 0 ? 0 : 90, spacing: w, phase: 0).map {
-                Extrusion(role: .supportInterface, points: $0, closed: false, width: w, speed: speed * 0.5)
+                Extrusion(role: .support, points: $0, closed: false, width: w, speed: speed * 0.5)
             }
         }
         if !interface.isEmpty {

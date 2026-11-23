@@ -229,3 +229,23 @@ final class BedEdgeTests: XCTestCase {
         }
     }
 }
+
+final class BrimSegmentTests: XCTestCase {
+    /// A round part with a 5 mm brim: smooth loops, not thousands of 0.03 mm pieces the printer stutters over.
+    func testBrimHasNoMicroSegments() throws {
+        var s = PrintSettings()
+        s.brimWidth = 5
+        let disc = ModelObject(name: "Rund", mesh: MeshCutter.cylinder(center: (135, 135), radius: 30, z0: 0, z1: 2))
+        let layers = try Slicer(settings: s).slice([disc])
+        let brim = layers[0].islands.flatMap(\.extrusions).filter { $0.role == .brim }
+        XCTAssertFalse(brim.isEmpty)
+        var short = 0, total = 0
+        for e in brim {
+            for (p, q) in zip(e.points, e.points.dropFirst()) {
+                total += 1
+                if p.distance(to: q) / Units.perMM < 0.1 { short += 1 }
+            }
+        }
+        XCTAssertLessThan(Double(short), Double(total) * 0.05, "\(short) of \(total) segments shorter than 0.1 mm")
+    }
+}
