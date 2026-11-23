@@ -160,6 +160,7 @@ public struct OrcaJob: Sendable {
             "filament_max_volumetric_speed": num(f.maxVolumetricSpeed),
             "filament_flow_ratio": num(f.flowRatio),
             "filament_retraction_length": num(f.retractLength),
+            "filament_z_hop": f.zHop.map(num) ?? "nil",
             "slow_down_layer_time": num(s.minLayerTime > 0 ? s.minLayerTime : f.minLayerTime),
             "filament_density": num(f.density),
         ]

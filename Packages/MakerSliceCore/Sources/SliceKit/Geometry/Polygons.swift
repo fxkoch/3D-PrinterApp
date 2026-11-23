@@ -93,6 +93,33 @@ public struct Polygons: Sendable, Equatable {
         return inside
     }
 
+    /// The separate parts of the outlines: each outer outline with the holes inside it. A layer with three objects
+    /// gives three parts, so each can be printed completely before the nozzle moves on.
+    public func components() -> [Polygons] {
+        guard paths.count > 1 else { return isEmpty ? [] : [self] }
+        let boxes = paths.map { Polygons([$0]).boundingBox! }
+        let areas = paths.map { abs(Polygons.signedArea($0)) }
+        func encloses(_ j: Int, _ i: Int) -> Bool {
+            let a = boxes[j], b = boxes[i]
+            guard areas[j] > areas[i], a.min.x <= b.min.x, a.min.y <= b.min.y, a.max.x >= b.max.x, a.max.y >= b.max.y else { return false }
+            return Polygons([paths[j]]).contains(paths[i][0])
+        }
+        // Nesting depth: even = outer outline, odd = hole. The parent is the smallest enclosing outline.
+        var depth = [Int](repeating: 0, count: paths.count), parent = [Int?](repeating: nil, count: paths.count)
+        for i in paths.indices {
+            for j in paths.indices where j != i && encloses(j, i) {
+                depth[i] += 1
+                if parent[i] == nil || areas[j] < areas[parent[i]!] { parent[i] = j }
+            }
+        }
+        var parts: [Int: [Path]] = [:], order: [Int] = []
+        for i in paths.indices where depth[i] % 2 == 0 { parts[i] = [paths[i]]; order.append(i) }
+        for i in paths.indices where depth[i] % 2 == 1 {
+            if let p = parent[i], parts[p] != nil { parts[p]!.append(paths[i]) }
+        }
+        return order.map { Polygons(parts[$0]!) }
+    }
+
     // MARK: - Clipper bridge
 
     public enum JoinType { case square, round, miter }

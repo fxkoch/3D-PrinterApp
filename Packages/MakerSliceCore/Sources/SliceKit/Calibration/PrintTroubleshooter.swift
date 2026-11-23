@@ -107,9 +107,9 @@ public enum PrintTroubleshooter {
                                     detail: String(format: "Eingestellt sind %.1f mm. Der Test zeigt die kleinste Länge ohne Fäden. Zu viel Rückzug zieht das weiche Filament in die heiße Zone und kann die Düse verstopfen.", f.retractLength),
                                     calibration: .retraction))
             if let t = cooler { fixes.append(tempFix(t, why: "Heißes Filament läuft während der Leerfahrten nach. In 5-°C-Schritten senken, bis die Fäden weniger werden – aber nicht so weit, dass die Schichten schlecht halten.")) }
-            if petg, s.zHop > 0 {
-                fixes.append(ProblemFix(id: "zhop", title: "Z-Hop aus", detail: "Beim Anheben der Düse zieht PETG den weichen Faden mit hoch. Ohne Z-Hop gibt es weniger Fäden.",
-                                        change: .setting(.zHop(0))))
+            if petg, (f.zHop ?? s.zHop) > 0 {
+                fixes.append(ProblemFix(id: "zhop", title: "Z-Hop aus für PETG", detail: "Beim Anheben der Düse zieht PETG den weichen Faden mit hoch. Ohne Z-Hop gibt es weniger Fäden. Andere Materialien behalten ihn – sonst streift die Düse über ihre Wände.",
+                                        change: .setting(.materialZHop(type: "PETG", value: 0))))
             }
             fixes.append(ProblemFix(id: "temp-test", title: "Temperaturturm drucken", detail: "Zeigt auf einen Blick, bei welcher Temperatur Fäden, Brücken und Oberfläche am besten sind.", calibration: .temperature))
 

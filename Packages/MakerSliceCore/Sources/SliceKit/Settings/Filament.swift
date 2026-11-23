@@ -38,6 +38,8 @@ public struct Filament: Codable, Hashable, Sendable, Identifiable {
     public var color: String
     /// Where the values come from.
     public var source: String
+    /// Lift of the nozzle on travel for this material (nil = the printer setting). PETG: 0 – lifting pulls strings.
+    public var zHop: Double?
     /// Calibrations (raw `CalibrationKind` values) whose results are included in this profile.
     public var calibratedKinds: [String]?
 
@@ -119,7 +121,7 @@ public struct Filament: Codable, Hashable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case name, vendor, type, nozzleTemp, firstLayerNozzleTemp, nozzleTempMin, nozzleTempMax, bedTemp, firstLayerBedTemp
         case smoothPlateBedTemp, fanSpeed, fanMinSpeed, overhangFanSpeed, fanOffLayers, maxVolumetricSpeed, retractLength
-        case flowRatio, pressureAdvance, vitrificationTemp, density, minLayerTime, color, source
+        case flowRatio, pressureAdvance, vitrificationTemp, density, minLayerTime, color, source, zHop
     }
 
     public init(from decoder: Decoder) throws {
@@ -147,6 +149,7 @@ public struct Filament: Codable, Hashable, Sendable, Identifiable {
         minLayerTime = try c.decodeIfPresent(Double.self, forKey: .minLayerTime) ?? 4
         color = try c.decodeIfPresent(String.self, forKey: .color) ?? "#FCE94F"
         source = try c.decodeIfPresent(String.self, forKey: .source) ?? "MakerSlice"
+        zHop = try c.decodeIfPresent(Double.self, forKey: .zHop)
     }
 }
 

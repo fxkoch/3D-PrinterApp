@@ -16,6 +16,26 @@ struct LayerToolpathGenerator {
     var isSpiral: Bool { settings.spiralVase && layerIndex >= settings.bottomLayers }
 
     func generate(region rawRegion: Polygons, above: (Int) -> Polygons?, below: (Int) -> Polygons?) -> [Extrusion] {
+        // Several separate parts (objects, legs, columns): one after the other, each with walls, surfaces and infill.
+        // Printing all walls of all parts first and then all infill sent the nozzle back and forth between them ten
+        // times per layer – across the fresh outer walls, which left strings and X-shaped marks.
+        let parts = isSpiral ? [rawRegion] : rawRegion.components()
+        guard parts.count > 1 else { return generatePart(region: rawRegion, above: above, below: below) }
+        var remaining = parts.map { generatePart(region: $0, above: above, below: below) }.filter { !$0.isEmpty }
+        var result: [Extrusion] = []
+        var position = IntPoint(0, 0)
+        while !remaining.isEmpty {
+            let next = remaining.indices.min { a, b in
+                remaining[a][0].points[0].distanceSquared(to: position) < remaining[b][0].points[0].distanceSquared(to: position)
+            }!
+            let part = remaining.remove(at: next)
+            result += part
+            if let last = part.last?.points { position = part.last!.closed ? last[0] : last[last.count - 1] }
+        }
+        return result
+    }
+
+    private func generatePart(region rawRegion: Polygons, above: (Int) -> Polygons?, below: (Int) -> Polygons?) -> [Extrusion] {
         let s = settings
         let outerW = isFirstLayer ? s.firstLayerLineWidth : s.outerWallLineWidth
         let innerW = isFirstLayer ? s.firstLayerLineWidth : s.lineWidth

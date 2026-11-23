@@ -44,6 +44,8 @@ public struct Recommendation: Identifiable, Sendable, Equatable {
         case filamentBedDelta(slot: Int, delta: Int)
         /// Prints everything of slot `from` with slot `to` (an empty head/slot → the one holding the material).
         case useSlot(from: Int, to: Int)
+        /// Z-hop for every slot holding this material (e.g. PETG: 0), the others keep the printer setting.
+        case materialZHop(type: String, value: Double)
         /// Support body and contact layers from these slots (nil = the part's own material).
         case supportMaterials(body: Int?, interface: Int?)
     }
@@ -81,6 +83,11 @@ public enum PrintAdvisor {
         /// diagonal of its bounding box (mm). Used by the Bambu/Orca auto-brim formula.
         public var footprintTipping: Double = 0
         public var footprintDiagonal: Double = 0
+        /// Most separate parts in one layer (two legs, a column next to a plate …).
+        public var separateParts: Int = 1
+        /// A thin column standing upright (diameter and height in mm, 0 = none). It breaks between the layers.
+        public var columnDiameter: Double = 0
+        public var columnHeight: Double = 0
     }
 
     /// Second moments of area of the first-layer outline (mm⁴) about its centroid, and its bounding box (mm).
@@ -167,6 +174,27 @@ public enum PrintAdvisor {
         if let first = MeshSlicer.slice(mesh, at: [box.min.z + 0.1]).first, let stiff = footprintStiffness(first) {
             result.footprintTipping = stiff.tipping
             result.footprintDiagonal = stiff.diagonal
+        }
+        // Separate parts per layer and thin upright columns (cuts at 30 heights).
+        if box.size.z > 10 {
+            let count = 30, step = box.size.z / Double(count + 1)
+            let cuts = MeshSlicer.slice(mesh, at: (1...count).map { box.min.z + Double($0) * step })
+            var run = 0.0, runD = 0.0
+            for cut in cuts {
+                let parts = cut.components()
+                result.separateParts = max(result.separateParts, parts.count)
+                // Roundish sections under 20 mm across: a column, not a thin wall.
+                let thin = parts.compactMap { p -> Double? in
+                    guard let b = p.boundingBox else { return nil }
+                    let w = Double(b.max.x - b.min.x) / Units.perMM, h = Double(b.max.y - b.min.y) / Units.perMM
+                    return max(w, h) < 20 && max(w, h) < 2 * min(w, h) && min(w, h) > 1 ? (w + h) / 2 : nil
+                }
+                if let d = thin.max() { run += step; runD = max(runD, d) } else { run = 0; runD = 0 }
+                if run > 40, run > 6 * runD, run / runD > (result.columnDiameter > 0 ? result.columnHeight / result.columnDiameter : 0) {
+                    result.columnDiameter = runD
+                    result.columnHeight = run
+                }
+            }
         }
         return result
     }
@@ -429,11 +457,34 @@ public enum PrintAdvisor {
             }
         }
         // PETG strings when the nozzle lifts: Z-hop pulls the soft strand up (Snapmaker PETG guide, community checklists).
-        if materials.contains(where: { $0.type.hasPrefix("PETG") }), s.zHop > 0 {
+        // Only for PETG: other materials keep it, or the nozzle drags over their walls.
+        if materials.contains(where: { $0.type.uppercased().hasPrefix("PETG") && ($0.zHop ?? s.zHop) > 0 }) {
             result.append(Recommendation(
                 id: "petg-zhop", title: "PETG: Z-Hop aus",
-                detail: "Beim Anheben der Düse zieht PETG Fäden. Ohne Z-Hop (0 mm) gibt es weniger Fäden und Klümpchen. Zuerst Filament trocknen (65 °C, 6 Stunden), dann Düse in 5-°C-Schritten kühler.",
-                icon: "scribble", severity: .suggestion, action: .zHop(0)))
+                detail: "Beim Anheben der Düse zieht PETG Fäden. Ohne Z-Hop (0 mm) gibt es weniger Fäden und Klümpchen. Gilt nur für PETG, andere Materialien behalten ihn. Zuerst Filament trocknen (65 °C, 6 Stunden), dann Düse in 5-°C-Schritten kühler.",
+                icon: "scribble", severity: .suggestion, action: .materialZHop(type: "PETG", value: 0)))
+        }
+        // Thin columns printed upright break between the layers – the headphone stand snapped at its 12 mm columns when
+        // it was taken off the plate. More walls make them nearly solid; the bond between layers stays the weak point.
+        if let (object, a) = zip(objects, analyses).filter({ $0.1.columnHeight > 0 })
+            .max(by: { $0.1.columnHeight / $0.1.columnDiameter < $1.1.columnHeight / $1.1.columnDiameter }) {
+            let walls = min(6, max(4, Int((a.columnDiameter / 4 / s.lineWidth).rounded(.up))))
+            if s.wallLoops < walls {
+                result.append(Recommendation(
+                    id: "thin-column", title: "Dünne Stange: \(walls) Wände",
+                    detail: String(format: "„%@“ hat eine dünne Stange (Ø %.0f mm, %.0f mm hoch), stehend gedruckt. Sie bricht am leichtesten zwischen den Schichten – oft schon beim Ablösen. Mit %d Wänden ist sie fast massiv. Zum Ablösen die Platte biegen, nicht an der Stange ziehen; am stabilsten wird sie liegend gedruckt (wenn sie ein eigenes Teil ist).",
+                                   object.name, a.columnDiameter, a.columnHeight, walls),
+                    icon: "line.3.horizontal.decrease", severity: .suggestion, action: .atLeastWalls(walls)))
+            }
+        }
+        // Without Z-hop the nozzle drags over the fresh walls on the way to the next part: X-shaped marks and strings
+        // (headphone stand: two columns and a plate, marks on the sides facing each other).
+        if objects.count > 1 || analyses.contains(where: { $0.separateParts > 1 }),
+           materials.contains(where: { !$0.type.uppercased().hasPrefix("PETG") && ($0.zHop ?? s.zHop) == 0 }) {
+            result.append(Recommendation(
+                id: "zhop-parts", title: "Z-Hop 0,4 mm zwischen den Teilen",
+                detail: "Die Düse fährt in jeder Schicht von Teil zu Teil. Ohne Anheben streift sie die frischen Außenwände: X-förmige Spuren und Fäden auf der Seite zum Nachbarteil.",
+                icon: "arrow.up.and.down", severity: .suggestion, action: .zHop(0.4)))
         }
         // Cooling (OrcaSlicer wiki and community): PETG 30–50 % (more weakens layer bonding and makes it brittle),
         // ABS/ASA 0–30 % (more warps and splits layers).
@@ -531,7 +582,12 @@ public enum PrintAdvisor {
         case .supportTopZ(let value): s.supportTopZDistance = value
         case .supportDistances(let z, let xy): s.supportTopZDistance = z; s.supportXYDistance = xy
         case .outerWallSpeed(let v): s.outerWallSpeed = v
-        case .zHop(let v): s.zHop = v
+        case .zHop(let v):
+            s.zHop = v
+            // A material that had its own value (e.g. from an older "Z-hop off") now follows the printer setting.
+            if v > 0 { for i in s.filaments.indices where !s.filaments[i].type.uppercased().hasPrefix("PETG") { s.filaments[i].zHop = nil } }
+        case .materialZHop(let type, let v):
+            for i in s.filaments.indices where s.filaments[i].type.uppercased().hasPrefix(type) { s.filaments[i].zHop = v }
         case .filamentFan(let slot, let speed):
             if slot < s.filaments.count { s.filaments[slot].fanSpeed = speed; s.filaments[slot].fanMinSpeed = min(s.filaments[slot].fanMinSpeed, speed) }
         case .primeTowerTuning(let width, let volume): s.primeTowerWidth = width; s.purgeVolume = volume

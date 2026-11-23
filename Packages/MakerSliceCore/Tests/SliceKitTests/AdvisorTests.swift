@@ -91,6 +91,7 @@ final class AdvisorTests: XCTestCase {
         case .elephantFoot(let v): return [("elephant foot", "\(v)")]
         case .brim(let w): return [("brim", "\(w)")]
         case .zHop(let v): return [("z hop", "\(v)")]
+        case .materialZHop(let type, let v): return [("z hop \(type)", "\(v)")]
         case .retraction(let slot, let length): return [("retraction \(slot)", "\(length)")]
         case .filamentNozzle(let slot, let temp): return [("nozzle \(slot)", "\(temp)")]
         case .filamentFan(let slot, let speed): return [("fan \(slot)", "\(speed)")]
@@ -222,7 +223,8 @@ final class AdvisorTests: XCTestCase {
         recs = PrintAdvisor.recommendations(objects: objs, settings: s)
         let hop = try XCTUnwrap(recs.first { $0.id == "petg-zhop" })
         try PrintAdvisor.apply(hop.action!, settings: &s, objects: &o)
-        XCTAssertEqual(s.zHop, 0)
+        XCTAssertEqual(s.filaments[0].zHop, 0, "only PETG")
+        XCTAssertEqual(s.zHop, 0.4, "the other materials keep it")
         let kobra = PrintAdvisor.recommendations(objects: objs, settings: PrintSettings(printer: .kobraS1))
         XCTAssertTrue(kobra.contains { $0.id == "kobra-spaghetti" })
     }

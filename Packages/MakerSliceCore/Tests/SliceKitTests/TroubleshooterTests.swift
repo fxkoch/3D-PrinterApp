@@ -27,7 +27,7 @@ final class TroubleshooterTests: XCTestCase {
         let temp = try XCTUnwrap(fixes.first { if case .filament(.temperature, _) = $0.change { return true } else { return false } })
         XCTAssertEqual(temp.change, .filament(.temperature, 245))
         XCTAssertTrue(temp.title.contains("250 → 245"))
-        XCTAssertTrue(fixes.contains { $0.change == .setting(.zHop(0)) })
+        XCTAssertTrue(fixes.contains { $0.change == .setting(.materialZHop(type: "PETG", value: 0)) })
     }
 
     func testChangesAreOnlyOfferedWhenTheyChangeSomething() {
@@ -77,6 +77,7 @@ final class TroubleshooterTests: XCTestCase {
         // Warping +5, first layer +5, elephant foot −5.
         XCTAssertEqual(s.filaments[0].bedTemp, Filament.petg.bedTemp + 5)
         XCTAssertEqual(s.firstLayerSpeed, 30)
-        XCTAssertEqual(s.zHop, 0)
+        XCTAssertEqual(s.filaments[0].zHop, 0, "PETG without Z-hop")
+        XCTAssertGreaterThan(s.zHop, 0, "the printer setting stays for other materials")
     }
 }

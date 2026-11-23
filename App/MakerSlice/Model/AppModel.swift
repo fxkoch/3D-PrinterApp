@@ -86,9 +86,18 @@ final class AppModel {
                     if saved.spiralVase { what.append("Vasenmodus") }
                     cleaned.append((model, what))
                 }
+                // Older versions switched Z-hop off for every material when PETG strung. Without it the nozzle drags
+                // over the walls of PLA parts (X-shaped marks). Now it is off only for PETG.
+                var saved = saved
+                if saved.zHop == 0, !UserDefaults.standard.bool(forKey: "migrated-zhop-per-filament") {
+                    saved.zHop = PrintSettings(printer: model).zHop
+                    for i in saved.filaments.indices where saved.filaments[i].type.uppercased().hasPrefix("PETG") { saved.filaments[i].zHop = 0 }
+                    cleaned.append((model, ["Z-Hop aus für alle Materialien (jetzt nur noch für PETG)"]))
+                }
                 savedSettings[model] = saved.forNewProjects
             }
         }
+        UserDefaults.standard.set(true, forKey: "migrated-zhop-per-filament")
         printers.log = log
         for (model, what) in cleaned {
             remember(savedSettings[model]!)

@@ -328,9 +328,10 @@ public struct GCodeWriter {
         let needsRetract = dist > settings.retractMinTravel
         if needsRetract {
             retract(&g, &state, &stats)
-            if settings.zHop > 0 && !state.hopped {
-                g.line("G1 Z\(fmt(layerZ + settings.zHop)) F\(Int(20 * 60))")
-                stats.move(settings.zHop, speed: 20)
+            let hop = settings.filament(for: state.tool).zHop ?? settings.zHop
+            if hop > 0 && !state.hopped {
+                g.line("G1 Z\(fmt(layerZ + hop)) F\(Int(20 * 60))")
+                stats.move(hop, speed: 20)
                 state.hopped = true
             }
         }
@@ -339,7 +340,7 @@ public struct GCodeWriter {
         state.position = p
         if state.hopped {
             g.line("G1 Z\(fmt(layerZ)) F\(Int(20 * 60))")
-            stats.move(settings.zHop, speed: 20)
+            stats.move(settings.filament(for: state.tool).zHop ?? settings.zHop, speed: 20)
             state.hopped = false
             state.z = layerZ
         }
