@@ -146,6 +146,30 @@ final class PrintProject: Identifiable {
         recommendations.filter { $0.action != nil && !dismissed.contains($0.id) }
     }
 
+    // MARK: - Undo
+
+    /// Arrangements before the last edits of the objects (move, turn, tip, scale, copy, delete, arrange, cut).
+    @ObservationIgnored private var undoStack: [(plates: [[ModelObject]], plate: Int)] = []
+    /// Number of steps that can be undone (observed, for the button).
+    private(set) var undoSteps = 0
+
+    /// Remembers the arrangement before an edit. Meshes are shared copy-on-write, so a step costs little memory.
+    private func rememberForUndo() {
+        undoStack.append((plates, currentPlate))
+        if undoStack.count > 20 { undoStack.removeFirst() }
+        undoSteps = undoStack.count
+    }
+
+    /// Puts the objects back as they were before the last edit.
+    func undo() {
+        guard let last = undoStack.popLast() else { return }
+        undoSteps = undoStack.count
+        plates = last.plates
+        currentPlate = min(max(last.plate, 1), plates.count)
+        invalidate()
+        placementChanged(plate: currentPlate - 1)
+    }
+
     // MARK: - Editing
 
     private func locate(_ id: ModelObject.ID) -> (plate: Int, index: Int)? {
@@ -207,12 +231,14 @@ final class PrintProject: Identifiable {
 
     func remove(_ objectID: ModelObject.ID) {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         plates[loc.plate].remove(at: loc.index)
         changed(plate: loc.plate + 1)
     }
 
     func duplicate(_ objectID: ModelObject.ID) {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         var copy = plates[loc.plate][loc.index]
         copy.id = UUID()
         put([copy], preferred: loc.plate)
@@ -240,6 +266,7 @@ final class PrintProject: Identifiable {
     /// Moves one object by (dx, dy) mm; the others stay where they are.
     func move(_ objectID: ModelObject.ID, dx: Double, dy: Double) {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         plates[loc.plate][loc.index] = plates[loc.plate][loc.index].moved(dx: dx, dy: dy, bedSize: settings.bedSize)
         placementChanged(plate: loc.plate)
     }
@@ -255,6 +282,7 @@ final class PrintProject: Identifiable {
     /// when it would stick out. The rest of the plate is not rearranged.
     func transformInPlace(_ objectID: ModelObject.ID, _ t: Transform3D) {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         plates[loc.plate][loc.index] = plates[loc.plate][loc.index].transformedInPlace(t, bedSize: settings.bedSize)
         placementChanged(plate: loc.plate)
     }
@@ -283,6 +311,7 @@ final class PrintProject: Identifiable {
     /// Replaces the shape of a simple (one-colour) object, e.g. with a reinforced variant.
     func replaceMesh(_ objectID: ModelObject.ID, with mesh: TriangleMesh) {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         var list = plates[loc.plate]
         list[loc.index].mesh = mesh
         list[loc.index].volumes = []
@@ -297,6 +326,7 @@ final class PrintProject: Identifiable {
 
     /// Arranges the current plate again; what no longer fits moves to the next plates.
     func autoArrange() {
+        rememberForUndo()
         rearrangePlate(currentPlate - 1, objects)
     }
 
@@ -324,6 +354,7 @@ final class PrintProject: Identifiable {
     /// Replaces an object by the pieces of a cut. Pieces that no longer fit next to the others move to other plates.
     func cut(_ objectID: ModelObject.ID, options: CutOptions) throws {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         let parts = try MeshCutter.cut(plates[loc.plate][loc.index], options)
         plates[loc.plate].remove(at: loc.index)
         put(parts, preferred: loc.plate)
@@ -376,6 +407,7 @@ final class PrintProject: Identifiable {
             warning = "Das Objekt passt nicht mehr auf Platte \(target)."
             return
         }
+        rememberForUndo()
         plates[loc.plate].remove(at: loc.index)
         object.plate = target
         plates[target - 1] = arranged.map { var o = $0; o.plate = target; return o }

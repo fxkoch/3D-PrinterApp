@@ -63,9 +63,22 @@ final class Library {
     func add(data: Data, fileName: String, name: String? = nil, origin: LibraryItem.Source = .file,
              makerWorldID: Int? = nil, coverURL: URL? = nil, hints: PrintHints? = nil) throws -> LibraryItem {
         let ext = (fileName as NSString).pathExtension.lowercased()
+        let displayName = name ?? (fileName as NSString).deletingPathExtension
+        // The same file again (opened twice, downloaded again): reuse the entry instead of a second copy.
+        if let existing = items.first(where: { $0.name == displayName && $0.source == origin && $0.makerWorldID == makerWorldID
+                                                && ($0.fileName as NSString).pathExtension.lowercased() == (ext.isEmpty ? "3mf" : ext) }),
+           let old = try? Data(contentsOf: url(for: existing)), old == data {
+            var item = existing
+            item.added = Date()
+            if let coverURL { item.coverURL = coverURL }
+            if let hints { item.hints = hints }
+            items.removeAll { $0.id == existing.id }
+            items.insert(item, at: 0)
+            save()
+            return item
+        }
         let stored = "\(UUID().uuidString).\(ext.isEmpty ? "3mf" : ext)"
         try data.write(to: folder.appendingPathComponent(stored), options: .atomic)
-        let displayName = name ?? (fileName as NSString).deletingPathExtension
         let item = LibraryItem(name: displayName, fileName: stored, source: origin,
                                makerWorldID: makerWorldID, coverURL: coverURL, hints: hints)
         items.insert(item, at: 0)

@@ -24,7 +24,18 @@ final class PrinterManager {
     }
     var actionFailure: ActionFailure?
 
+    /// How each printer was reached last (home network or its address on the way). Kept across launches, so the app
+    /// (and the background check) starts with the way that worked.
+    private(set) var routes: [UUID: RemoteAccess.Route] = [:] {
+        didSet {
+            guard routes != oldValue else { return }
+            UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: routes.map { ($0.key.uuidString, $0.value.rawValue) }), forKey: "printerRoutes")
+        }
+    }
+
     @ObservationIgnored private var drivers: [UUID: PrinterDriver] = [:]
+    @ObservationIgnored private var remoteDrivers: [UUID: PrinterDriver] = [:]
+    @ObservationIgnored private var lastHomeTry: [UUID: Date] = [:]
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored weak var log: EventLog?
     @ObservationIgnored private var lastEventFetch: [UUID: Date] = [:]
@@ -35,6 +46,21 @@ final class PrinterManager {
             printers = saved
         }
         selectedID = UserDefaults.standard.string(forKey: "selectedPrinter").flatMap(UUID.init) ?? printers.first?.id
+        if let saved = UserDefaults.standard.dictionary(forKey: "printerRoutes") as? [String: String] {
+            routes = Dictionary(uniqueKeysWithValues: saved.compactMap { key, value in
+                guard let id = UUID(uuidString: key), let route = RemoteAccess.Route(rawValue: value),
+                      printers.contains(where: { $0.id == id && $0.remote != nil }) else { return nil }
+                return (id, route)
+            })
+        }
+    }
+
+    /// Closes every connection (both ways to each printer).
+    func disconnectAll() {
+        drivers.values.forEach { $0.disconnect() }
+        remoteDrivers.values.forEach { $0.disconnect() }
+        drivers = [:]
+        remoteDrivers = [:]
     }
 
     var selected: PrinterConnection? {
@@ -53,13 +79,29 @@ final class PrinterManager {
         statuses[printer.id] != nil && errors[printer.id] == nil
     }
 
+    /// The driver for the way the printer was reached last (home address or remote address).
     func driver(for printer: PrinterConnection) -> PrinterDriver {
-        if let d = drivers[printer.id], d.connection == printer { return d }
+        driver(for: printer, route: routes[printer.id] ?? .home)
+    }
+
+    private func driver(for printer: PrinterConnection, route: RemoteAccess.Route) -> PrinterDriver {
+        let target = route == .remote ? (printer.remote ?? printer) : printer
+        if route == .remote {
+            if let d = remoteDrivers[printer.id], d.connection == target { return d }
+            remoteDrivers[printer.id]?.disconnect()
+            let d = PrinterDrivers.make(for: target)
+            remoteDrivers[printer.id] = d
+            return d
+        }
+        if let d = drivers[printer.id], d.connection == target { return d }
         drivers[printer.id]?.disconnect()
-        let d = PrinterDrivers.make(for: printer)
+        let d = PrinterDrivers.make(for: target)
         drivers[printer.id] = d
         return d
     }
+
+    /// True when the app reaches the printer at its remote address (away from home).
+    func isRemote(_ printer: PrinterConnection) -> Bool { routes[printer.id] == .remote && isOnline(printer) }
 
     // MARK: - Editing
 
@@ -73,9 +115,11 @@ final class PrinterManager {
     func update(_ printer: PrinterConnection) {
         guard let idx = printers.firstIndex(where: { $0.id == printer.id }) else { return }
         printers[idx] = printer
-        drivers[printer.id]?.disconnect()
-        drivers[printer.id] = nil
+        drivers.removeValue(forKey: printer.id)?.disconnect()
+        remoteDrivers.removeValue(forKey: printer.id)?.disconnect()
+        routes[printer.id] = nil
         statuses[printer.id] = nil
+        errors[printer.id] = nil
         save()
         restartPolling()
     }
@@ -83,6 +127,9 @@ final class PrinterManager {
     func remove(_ printer: PrinterConnection) {
         printers.removeAll { $0.id == printer.id }
         drivers.removeValue(forKey: printer.id)?.disconnect()
+        remoteDrivers.removeValue(forKey: printer.id)?.disconnect()
+        routes[printer.id] = nil
+        errors[printer.id] = nil
         statuses[printer.id] = nil
         if selectedID == printer.id { selectedID = printers.first?.id }
         save()
@@ -118,38 +165,76 @@ final class PrinterManager {
         startPolling()
     }
 
+    /// All printers at the same time: one that does not answer must not hold up the others.
     func refreshAll() async {
-        for printer in printers {
-            await refresh(printer)
+        await withTaskGroup(of: Void.self) { group in
+            for printer in printers {
+                group.addTask { await self.refresh(printer) }
+            }
         }
     }
 
+    /// Asks the printer for its status – at home under its home address, away from home (when it has one) under its
+    /// remote address. The way that worked is kept; the home address is tried again every minute.
     func refresh(_ printer: PrinterConnection) async {
-        let driver = driver(for: printer)
-        do {
-            let new = try await driver.status()
-            let old = statuses[printer.id]
-            statuses[printer.id] = new
-            if errors[printer.id] != nil { log?.add(.info, "Verbindung wiederhergestellt", source: printer.name) }
-            errors[printer.id] = nil
-            noteChanges(printer, old: old, new: new)
-            NotificationService.shared.observe(printer: printer, status: new)
-            // Printer-side messages (console / reports) every 30 s.
-            if Date().timeIntervalSince(lastEventFetch[printer.id] ?? .distantPast) > 30 {
-                lastEventFetch[printer.id] = Date()
-                if let events = try? await driver.recentEvents() {
-                    log?.merge(events.map { (event: PrinterEvent) -> PrinterEvent in
-                        var e = event
-                        e.source = "\(printer.name) · \(event.source)"
-                        return e
-                    })
+        let order = RemoteAccess.order(last: routes[printer.id], hasRemote: printer.remote != nil,
+                                       sinceHomeTry: Date().timeIntervalSince(lastHomeTry[printer.id] ?? .distantPast))
+        var lastError: Error?
+        for (i, route) in order.enumerated() {
+            if route == .home, routes[printer.id] == .remote {
+                // Back home? A quick knock first, so a missing home network does not cost a full timeout every minute.
+                lastHomeTry[printer.id] = Date()
+                guard await RemoteAccess.answers(printer, timeout: 1.5) else { continue }
+            }
+            let driver = driver(for: printer, route: route)
+            do {
+                let new = try await driver.status()
+                if routes[printer.id] != route, routes[printer.id] != nil || route == .remote {
+                    log?.add(.info, route == .remote ? "Verbunden über die Adresse unterwegs (\(printer.remoteAddress ?? ""))"
+                                                     : "Wieder im Heimnetz verbunden", source: printer.name)
                 }
+                routes[printer.id] = route
+                // The way that did not work is closed (a live MQTT connection would keep retrying it).
+                if i > 0 {
+                    if route == .home { remoteDrivers.removeValue(forKey: printer.id)?.disconnect() }
+                    else { drivers.removeValue(forKey: printer.id)?.disconnect() }
+                }
+                await received(new, from: printer, driver: driver)
+                return
+            } catch {
+                lastError = error
             }
-        } catch {
-            if errors[printer.id] == nil {
-                log?.add(.warning, "Nicht erreichbar: \(error.localizedDescription)", source: printer.name)
+        }
+        if let error = lastError { failed(printer, error) }
+    }
+
+    private func failed(_ printer: PrinterConnection, _ error: Error) {
+        guard printers.contains(where: { $0.id == printer.id }) else { return }
+        if errors[printer.id] == nil {
+            log?.add(.warning, "Nicht erreichbar: \(error.localizedDescription)", source: printer.name)
+        }
+        errors[printer.id] = error.localizedDescription
+    }
+
+    private func received(_ new: PrinterStatus, from printer: PrinterConnection, driver: PrinterDriver) async {
+        // The printer may have been removed while the request was under way.
+        guard printers.contains(where: { $0.id == printer.id }) else { return }
+        let old = statuses[printer.id]
+        statuses[printer.id] = new
+        if errors[printer.id] != nil { log?.add(.info, "Verbindung wiederhergestellt", source: printer.name) }
+        errors[printer.id] = nil
+        noteChanges(printer, old: old, new: new)
+        NotificationService.shared.observe(printer: printer, status: new)
+        // Printer-side messages (console / reports) every 30 s.
+        if Date().timeIntervalSince(lastEventFetch[printer.id] ?? .distantPast) > 30 {
+            lastEventFetch[printer.id] = Date()
+            if let events = try? await driver.recentEvents() {
+                log?.merge(events.map { (event: PrinterEvent) -> PrinterEvent in
+                    var e = event
+                    e.source = "\(printer.name) · \(event.source)"
+                    return e
+                })
             }
-            errors[printer.id] = error.localizedDescription
         }
     }
 

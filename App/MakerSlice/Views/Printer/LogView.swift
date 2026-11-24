@@ -9,7 +9,7 @@ struct LogView: View {
 
     private var entries: [PrinterEvent] {
         app.log.entries.filter { e in
-            (source == nil || e.source.hasPrefix(source!)) && (!errorsOnly || e.level != .info)
+            (source.map { e.source.hasPrefix($0) } ?? true) && (!errorsOnly || e.level != .info)
         }
     }
 
@@ -38,6 +38,7 @@ struct LogView: View {
                 }
             }
         }
+        .onAppear { app.log.markSeen() }
         .navigationTitle("Protokoll")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {

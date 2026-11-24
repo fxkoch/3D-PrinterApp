@@ -20,6 +20,20 @@ final class EventLog {
 
     var errorCount: Int { entries.filter { $0.level == .error }.count }
 
+    /// When the log was last looked at: older errors are known and no longer flagged on the tab.
+    private(set) var seenUntil: Date = UserDefaults.standard.object(forKey: "logSeenUntil") as? Date ?? .distantPast
+
+    /// Errors of the last day the user has not looked at yet.
+    var unseenErrorCount: Int {
+        let since = max(seenUntil, Date().addingTimeInterval(-24 * 3600))
+        return entries.filter { $0.level == .error && $0.date > since }.count
+    }
+
+    func markSeen() {
+        seenUntil = Date()
+        UserDefaults.standard.set(seenUntil, forKey: "logSeenUntil")
+    }
+
     func add(_ level: PrinterEvent.Level, _ message: String, source: String) {
         // Avoid flooding the log with the same message while polling.
         if let last = entries.first, last.message == message, last.source == source,

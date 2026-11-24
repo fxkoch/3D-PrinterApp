@@ -22,6 +22,20 @@ struct SettingsView: View {
                 } footer: {
                     Text("Beim Öffnen eines Modells übernimmt die App ihre Empfehlungen selbst: Stützen, Brim, Schichthöhe, Glätten, Material-Werte. Was sie geändert hat, steht im Vorbereiten-Bildschirm – mit „Rückgängig“.")
                 }
+                Section {
+                    NavigationLink {
+                        RemoteAccessView()
+                    } label: {
+                        LabeledContent {
+                            Text(RemoteAccess.tailnetAddress() != nil ? "Tailscale an" : "Einrichten")
+                        } label: {
+                            Label("Fernzugriff (unterwegs)", systemImage: "globe")
+                        }
+                    }
+                    .accessibilityIdentifier("remoteAccessLink")
+                } footer: {
+                    Text("Drucker von unterwegs sehen und steuern – verschlüsselt über Tailscale, ohne Portfreigabe am Router.")
+                }
                 NotificationSettingsSection()
                 if app.expertMode {
                 Section {

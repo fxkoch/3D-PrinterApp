@@ -33,9 +33,13 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
     public var kind: ConnectionKind
     /// Serial number (Bambu Lab LAN mode: the MQTT topics contain it; the access code is stored in `apiKey`).
     public var serial: String?
+    /// Address on the way (e.g. the printer's Tailscale name or 100.x address), tried when the home address does not answer.
+    /// Empty/nil: only the home address (which also works away from home through a VPN that routes the home network).
+    public var remoteHost: String?
 
     public init(id: UUID = UUID(), name: String, host: String, apiKey: String? = nil,
-                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker, serial: String? = nil) {
+                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker, serial: String? = nil,
+                remoteHost: String? = nil) {
         self.serial = serial
         self.id = id
         self.name = name
@@ -43,9 +47,10 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
         self.apiKey = apiKey
         self.model = model
         self.kind = kind
+        self.remoteHost = remoteHost
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind, serial }
+    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind, serial, remoteHost }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -56,6 +61,22 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? "snapmakerU1"
         kind = try c.decodeIfPresent(ConnectionKind.self, forKey: .kind) ?? .moonraker
         serial = try c.decodeIfPresent(String.self, forKey: .serial)
+        remoteHost = try c.decodeIfPresent(String.self, forKey: .remoteHost)
+    }
+
+    /// The remote address, when one is set and differs from the home address.
+    public var remoteAddress: String? {
+        guard let r = remoteHost?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty, r != host else { return nil }
+        return r
+    }
+
+    /// The same printer, reached at its remote address (nil when it has none).
+    public var remote: PrinterConnection? {
+        guard let r = remoteAddress else { return nil }
+        var c = self
+        c.host = r
+        c.remoteHost = nil
+        return c
     }
 
     /// Bare host name or IP without scheme/port.

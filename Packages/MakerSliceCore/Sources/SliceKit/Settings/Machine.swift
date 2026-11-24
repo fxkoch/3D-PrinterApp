@@ -16,6 +16,15 @@ public enum PrinterModel: String, Codable, CaseIterable, Sendable, Identifiable 
         }
     }
 
+    /// Short name for narrow places (segmented pickers).
+    public var shortName: String {
+        switch self {
+        case .snapmakerU1: return "U1"
+        case .kobraS1: return "Kobra S1"
+        case .bambuP1S: return "P1S"
+        }
+    }
+
     public var machine: MachineProfile {
         switch self {
         case .snapmakerU1: return .snapmakerU1

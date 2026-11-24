@@ -74,7 +74,9 @@ struct LivePrintView: View {
     private func startCamera() {
         #if canImport(Network)
         guard let lan = app.printers.driver(for: printer) as? AnycubicLANClient else { return }
-        let url = status?.cameraStreamURL ?? URL(string: "http://\(printer.hostOnly):18088/flv")!
+        // The address the printer answers under right now (at home or on the way).
+        let host = lan.connection.hostOnly
+        guard let url = status?.cameraStreamURL ?? URL(string: "http://\(host):18088/flv") else { return }
         camera.start(streamURL: url, prepare: { try await lan.startCamera() }, finish: { try? await lan.stopCamera() })
         #endif
     }

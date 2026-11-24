@@ -23,6 +23,10 @@ struct PrepareView: View {
     @State private var showAddPrinter = false
     @State private var placementObject: ModelObject?
     @State private var confirmClose = false
+    /// The object picked in the 3D view (tap); dragging it moves it.
+    @State private var selectedObject: ModelObject.ID?
+    @State private var bigPreview = false
+    @State private var faces: [LyingFace] = []
 
     struct SlotSelection: Identifiable {
         let id: Int
@@ -33,9 +37,12 @@ struct PrepareView: View {
             VStack(spacing: 0) {
                 preview
                     .frame(maxWidth: .infinity)
-                    .frame(height: 280)
+                    .frame(height: bigPreview ? 460 : 280)
                     .background(Color(.secondarySystemBackground))
                     .overlay(alignment: .topTrailing) { previewToggle }
+                    .overlay(alignment: .topLeading) { previewButtons }
+                    .overlay(alignment: .bottom) { objectBar }
+                    .animation(.easeInOut(duration: 0.2), value: bigPreview)
                 if app.expertMode || project.plateCount > 1 { plateStrip }
                 ScrollView {
                     VStack(spacing: Theme.spacing) {
@@ -108,11 +115,14 @@ struct PrepareView: View {
                 ObjectPlacementView(project: project, selectedID: object.id)
                     .presentationDetents([.medium, .large])
                     .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                    // Opaque: a see-through sheet over the settings is hard to read.
+                    .presentationBackground(Color(.systemGroupedBackground))
             }
             .sheet(isPresented: $showAssistant) {
                 AssistantView(isSheet: true)
                     .presentationDetents([.medium, .large])
                     .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                    .presentationBackground(Color(.systemBackground))
             }
             .sheet(item: $filamentSlot) { slot in
                 FilamentPickerView(settings: $project.settings, slot: slot.id,
@@ -159,6 +169,11 @@ struct PrepareView: View {
                     }
                 }))
             }
+            // A picked object that was deleted, cut or moved to another plate is no longer picked.
+            .onChange(of: project.objects.map(\.id)) { _, ids in
+                if let id = selectedObject, !ids.contains(id) { selectedObject = nil }
+            }
+            .task(id: selectedFaceKey) { await loadFaces() }
             // "An den Drucker gesendet" belongs to the plate that was sent, not to the next one or a new slice.
             .onChange(of: project.currentPlate) { _, _ in if app.sendState != .uploading { app.sendState = .idle } }
             .onChange(of: project.output != nil) { _, sliced in
@@ -270,8 +285,166 @@ struct PrepareView: View {
                 .padding(.bottom, 6)
             }
         } else {
-            ModelSceneView(objects: project.objects, filaments: project.settings.filaments, bedSize: project.settings.bedSize)
+            ModelSceneView(objects: project.objects, filaments: project.settings.filaments, bedSize: project.settings.bedSize,
+                           selection: $selectedObject, overlapping: project.overlapping) { id, dx, dy in
+                project.move(id, dx: dx, dy: dy)
+            }
+            .accessibilityIdentifier("scene3D")
         }
+    }
+
+    // MARK: - Arranging in the 3D view
+
+    private var selected: ModelObject? { selectedObject.flatMap { id in project.objects.first { $0.id == id } } }
+
+    /// Undo and a bigger view for arranging.
+    @ViewBuilder
+    private var previewButtons: some View {
+        if !showLayers {
+            HStack(spacing: 8) {
+                Button { bigPreview.toggle() } label: {
+                    Image(systemName: bigPreview ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                        .frame(width: 34, height: 34)
+                }
+                .accessibilityLabel(bigPreview ? "Ansicht verkleinern" : "Ansicht vergrößern")
+                .accessibilityIdentifier("previewSize")
+                if project.undoSteps > 0 {
+                    Button { project.undo() } label: {
+                        Image(systemName: "arrow.uturn.backward").frame(width: 34, height: 34)
+                    }
+                    .accessibilityLabel("Rückgängig")
+                    .accessibilityIdentifier("undoPlacement")
+                }
+            }
+            .buttonStyle(.plain)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Color.accentColor)
+            .background(.regularMaterial, in: Capsule())
+            .padding(8)
+        }
+    }
+
+    /// Tools for the picked object, or a hint how to pick one.
+    @ViewBuilder
+    private var objectBar: some View {
+        if !showLayers, project.calibration == nil {
+            if let object = selected {
+                VStack(spacing: 6) {
+                    Text("\(object.name) · ziehen zum Verschieben")
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    HStack(spacing: 0) {
+                        Menu {
+                            Button { project.rotate(object.id, degrees: -90) } label: { Label("90° nach rechts", systemImage: "rotate.right") }
+                            Button { project.rotate(object.id, degrees: 90) } label: { Label("90° nach links", systemImage: "rotate.left") }
+                            Button { project.rotate(object.id, degrees: 45) } label: { Label("45°", systemImage: "rotate.left") }
+                            Button { project.rotate(object.id, degrees: 15) } label: { Label("15° nach links", systemImage: "rotate.left") }
+                            Button { project.rotate(object.id, degrees: -15) } label: { Label("15° nach rechts", systemImage: "rotate.right") }
+                        } label: {
+                            toolLabel("Drehen", "rotate.right")
+                        } primaryAction: {
+                            project.rotate(object.id, degrees: -90)
+                        }
+                        .accessibilityIdentifier("toolRotate")
+                        Menu {
+                            if faces.isEmpty {
+                                Text("Keine ebene Fläche gefunden")
+                            }
+                            ForEach(faces) { face in
+                                Button { project.lay(object.id, on: face) } label: {
+                                    Text("Fläche \(face.id + 1)" + (face.id == 0 ? " – empfohlen" : ""))
+                                    Text(String(format: "%.0f mm hoch · %@", face.height,
+                                                face.overhangArea < 50 ? "kaum Stützen" : String(format: "%.0f cm² Überhang", face.overhangArea / 100)))
+                                }
+                            }
+                            Section("Kippen") {
+                                Button { project.tilt(object.id, aroundX: true, degrees: 90) } label: { Label("Nach vorn", systemImage: "arrow.down.forward") }
+                                Button { project.tilt(object.id, aroundX: true, degrees: -90) } label: { Label("Nach hinten", systemImage: "arrow.up.backward") }
+                                Button { project.tilt(object.id, aroundX: false, degrees: -90) } label: { Label("Nach links", systemImage: "arrow.uturn.left") }
+                                Button { project.tilt(object.id, aroundX: false, degrees: 90) } label: { Label("Nach rechts", systemImage: "arrow.uturn.right") }
+                                Button { project.tilt(object.id, aroundX: true, degrees: 180) } label: { Label("Umdrehen", systemImage: "arrow.up.arrow.down") }
+                            }
+                        } label: {
+                            toolLabel("Hinlegen", "arrow.down.to.line")
+                        }
+                        .accessibilityIdentifier("toolLay")
+                        Button { project.duplicate(object.id) } label: { toolLabel("Kopie", "plus.square.on.square") }
+                            .accessibilityIdentifier("toolDuplicate")
+                        Button(role: .destructive) { project.remove(object.id) } label: { toolLabel("Löschen", "trash") }
+                            .accessibilityIdentifier("toolDelete")
+                        Menu { objectMenu(object) } label: { toolLabel("Mehr", "ellipsis.circle") }
+                            .accessibilityIdentifier("toolMore")
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 6)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(8)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("objectBar")
+            } else if !project.objects.isEmpty {
+                Label("Objekt antippen zum Drehen und Verschieben", systemImage: "hand.tap")
+                    .font(.caption)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(8)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func toolLabel(_ title: String, _ symbol: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: symbol).font(.body)
+            Text(title).font(.caption2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 40)
+        .contentShape(Rectangle())
+    }
+
+    /// Everything else for one object (also in the object list).
+    @ViewBuilder
+    private func objectMenu(_ object: ModelObject) -> some View {
+        Button { placementObject = object } label: { Label("Genau positionieren …", systemImage: "move.3d") }
+            .accessibilityIdentifier("placementMenu")
+        Button { project.place(object.id, centerX: project.settings.bedSize / 2, centerY: project.settings.bedSize / 2) } label: {
+            Label("In die Bettmitte", systemImage: "scope")
+        }
+        Menu {
+            ForEach([0.5, 0.8, 0.9, 1.1, 1.25, 1.5, 2.0], id: \.self) { f in
+                Button("\(Int(f * 100)) %") { project.scale(object.id, factor: f) }
+            }
+        } label: { Label("Größe ändern", systemImage: "arrow.up.left.and.arrow.down.right") }
+        if project.plateCount > 1 {
+            Menu {
+                ForEach(1...project.plateCount, id: \.self) { plate in
+                    Button("Platte \(plate)") { project.move(object.id, toPlate: plate) }
+                        .disabled(plate == project.currentPlate)
+                }
+            } label: { Label("Auf Platte verschieben", systemImage: "rectangle.on.rectangle") }
+        }
+        Divider()
+        Button { cutObject = object } label: { Label("Teilen …", systemImage: "scissors") }
+            .disabled(object.isMultiColor)
+        Button { colorObject = object } label: { Label("Farbwechsel bei Höhe …", systemImage: "paintpalette") }
+            .accessibilityIdentifier("colorChangeMenu")
+        Button { strengthObject = object } label: { Label("Festigkeit prüfen …", systemImage: "checkmark.shield") }
+            .accessibilityIdentifier("strengthMenu")
+        if project.objects.count > 1 {
+            Button { project.autoArrange() } label: { Label("Alle automatisch anordnen", systemImage: "square.grid.3x3") }
+        }
+    }
+
+    /// Changes when the picked object's shape or orientation changes (not when it only moves).
+    private var selectedFaceKey: String {
+        guard let o = selected else { return "" }
+        let s = o.boundingBox.size
+        return "\(o.id)-\(Int(s.x * 10))-\(Int(s.y * 10))-\(Int(s.z * 10))-\(o.mesh.vertices.first.map { "\(Int($0.z * 100))" } ?? "")"
+    }
+
+    private func loadFaces() async {
+        guard let o = selected else { faces = []; return }
+        let mesh = o.mesh, angle = project.settings.supportAngle
+        faces = await Task.detached(priority: .userInitiated) { mesh.lyingFaces(limit: 4, supportAngle: angle) }.value
     }
 
     @ViewBuilder
@@ -358,7 +531,7 @@ struct PrepareView: View {
                     }
                 }
             )) {
-                ForEach(PrinterModel.allCases) { Text($0.displayName).tag($0) }
+                ForEach(PrinterModel.allCases) { Text($0.shortName).tag($0) }
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier("printerPicker")
@@ -444,39 +617,20 @@ struct PrepareView: View {
             ForEach(project.objects) { object in
                 ObjectRow(object: object, filaments: project.settings.filaments, toolCount: project.settings.machine.toolCount,
                           bedSize: project.settings.bedSize, maxHeight: project.settings.maxHeight,
+                          isSelected: object.id == selectedObject,
+                          onSelect: { selectedObject = selectedObject == object.id ? nil : object.id },
                           onTool: { tool in project.setTool(tool, for: object.id) },
                           onPartTool: { part, tool in project.setPartTool(tool, part: part, for: object.id) }) {
-                    Button { placementObject = object } label: { Label("Position & Drehen …", systemImage: "move.3d") }
-                        .accessibilityIdentifier("placementMenu")
-                    Button { cutObject = object } label: { Label("Teilen …", systemImage: "scissors") }
-                        .disabled(object.isMultiColor)
-                    Button { colorObject = object } label: { Label("Farbwechsel bei Höhe …", systemImage: "paintpalette") }
-                        .accessibilityIdentifier("colorChangeMenu")
-                    Button { strengthObject = object } label: { Label("Festigkeit prüfen …", systemImage: "checkmark.shield") }
-                        .accessibilityIdentifier("strengthMenu")
-                    Button { project.layFlat(object.id) } label: { Label("Auf beste Fläche legen", systemImage: "arrow.down.to.line") }
-                    Button { project.rotate(object.id, degrees: 90) } label: { Label("90° drehen", systemImage: "rotate.right") }
+                    objectMenu(object)
                     Button { project.duplicate(object.id) } label: { Label("Duplizieren", systemImage: "plus.square.on.square") }
-                    if project.plateCount > 1 {
-                        Menu {
-                            ForEach(1...project.plateCount, id: \.self) { plate in
-                                Button("Platte \(plate)") { project.move(object.id, toPlate: plate) }
-                                    .disabled(plate == project.currentPlate)
-                            }
-                        } label: { Label("Auf Platte verschieben", systemImage: "rectangle.on.rectangle") }
-                    }
-                    Menu {
-                        ForEach([0.5, 0.8, 1.25, 1.5, 2.0], id: \.self) { f in
-                            Button("\(Int(f * 100)) %") { project.scale(object.id, factor: f) }
-                        }
-                    } label: { Label("Skalieren", systemImage: "arrow.up.left.and.arrow.down.right") }
                     Button(role: .destructive) { project.remove(object.id) } label: { Label("Entfernen", systemImage: "trash") }
                 }
                 if object.id != project.objects.last?.id { Divider() }
             }
-            if app.expertMode {
+            if project.objects.count > 1 {
                 Button { project.autoArrange() } label: { Label("Automatisch anordnen", systemImage: "square.grid.3x3") }
                     .font(.subheadline)
+                    .accessibilityIdentifier("autoArrange")
             }
             if app.expertMode, project.plateCount > 1 {
                 Button { project.redistributeAll() } label: { Label("Alle Platten neu verteilen", systemImage: "rectangle.grid.2x2") }
@@ -546,21 +700,23 @@ struct PrepareView: View {
 
     private var qualityPanel: some View {
         Panel(title: "Druck", systemImage: "slider.horizontal.3") {
-            Picker("Qualität", selection: Binding(
+            // The goal decides the most (walls, infill, layers); the surface only fine-tunes the layer height.
+            purposePicker
+            Divider()
+            Text("Oberfläche").font(.subheadline)
+            Picker("Oberfläche", selection: Binding(
                 get: { PrintSettings.Quality.allCases.first { $0.layerHeight == project.settings.layerHeight } },
                 set: { if let q = $0 { project.settings.apply(q) } }
             )) {
                 ForEach(PrintSettings.Quality.allCases) { q in Text(q.displayName).tag(Optional(q)) }
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("qualityPicker")
             if app.expertMode {
                 Text(String(format: "Schichthöhe %.2f mm", project.settings.layerHeight)).font(.caption).foregroundStyle(.secondary)
             } else {
                 Text(qualityHint).font(.caption).foregroundStyle(.secondary)
             }
-
-            Divider()
-            purposePicker
             if app.expertMode { expertInfill }
 
             Divider()
@@ -575,8 +731,11 @@ struct PrepareView: View {
             }
             if project.settings.machine.supportsPlateTypes.count > 1 {
                 HelpRow(key: .plateType) {
-                    Picker("Druckplatte", selection: $project.settings.plateType) {
-                        ForEach(project.settings.machine.supportsPlateTypes) { Text($0.displayName).tag($0) }
+                    LabeledContent("Druckplatte") {
+                        Picker("Druckplatte", selection: $project.settings.plateType) {
+                            ForEach(project.settings.machine.supportsPlateTypes) { Text($0.displayName).tag($0) }
+                        }
+                        .labelsHidden()
                     }
                 }
             }
@@ -662,18 +821,24 @@ struct PrepareView: View {
 
     @ViewBuilder private var expertSupport: some View {
         HelpRow(key: .support) {
-            Picker("Stützen", selection: $project.settings.support) {
-                ForEach(SupportMode.allCases) { Text($0.displayName).tag($0) }
+            LabeledContent("Stützen") {
+                Picker("Stützen", selection: $project.settings.support) {
+                    ForEach(SupportMode.allCases) { Text($0.displayName).tag($0) }
+                }
+                .labelsHidden()
             }
         }
         if project.settings.support != .off, project.settings.machine.toolCount > 1 {
-            Picker("Stütz-Material", selection: $project.settings.supportSlot) {
-                Text("Wie das Objekt").tag(Int?.none)
-                ForEach(0..<project.settings.machine.toolCount, id: \.self) { s in
-                    Text("Slot \(s + 1): \(project.settings.filament(for: s).name)").tag(Int?.some(s))
+            LabeledContent("Stütz-Material") {
+                Picker("Stütz-Material", selection: $project.settings.supportSlot) {
+                    Text("Wie das Objekt").tag(Int?.none)
+                    ForEach(0..<project.settings.machine.toolCount, id: \.self) { s in
+                        Text("Slot \(s + 1): \(project.settings.filament(for: s).name)").tag(Int?.some(s))
+                    }
                 }
+                .labelsHidden()
+                .accessibilityIdentifier("supportSlot")
             }
-            .accessibilityIdentifier("supportSlot")
         }
     }
 
@@ -825,6 +990,8 @@ private struct ObjectRow<MenuContent: View>: View {
     let toolCount: Int
     let bedSize: Double
     let maxHeight: Double
+    var isSelected = false
+    var onSelect: () -> Void = {}
     let onTool: (Int) -> Void
     let onPartTool: (Int, Int) -> Void
     @ViewBuilder let menu: () -> MenuContent
@@ -836,6 +1003,8 @@ private struct ObjectRow<MenuContent: View>: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(object.name).lineLimit(1)
+                        .foregroundStyle(isSelected ? Color.accentColor : .primary)
+                        .fontWeight(isSelected ? .semibold : .regular)
                     Text(String(format: "%.0f × %.0f × %.0f mm", size.x, size.y, size.z))
                         .font(.caption).foregroundStyle(tooBig ? .orange : .secondary)
                     if !object.colorChanges.isEmpty {
@@ -845,6 +1014,10 @@ private struct ObjectRow<MenuContent: View>: View {
                             .font(.caption2).foregroundStyle(Color.accentColor).lineLimit(2)
                     }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onSelect)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint("Im 3D-Bild auswählen")
                 Spacer(minLength: 4)
                 swatches(selected: object.tool, action: onTool)
                 Menu { menu() } label: {

@@ -419,7 +419,7 @@ final class MakerSliceUITests: XCTestCase {
         let picker = app.segmentedControls["printerPicker"]
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
         for _ in 0..<3 where !slice.exists {
-            picker.buttons["Anycubic Kobra S1"].tap()
+            picker.buttons["Kobra S1"].tap()
             _ = slice.waitForExistence(timeout: 5)
         }
         XCTAssertTrue(slice.exists, "switching to the Kobra S1 should reset the slice")
@@ -474,6 +474,50 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("23-Download-geslicet")
     }
 
+    /// Arranging directly in the 3D view: tap picks the object, the tool bar copies it, undo takes it back,
+    /// dragging the picked object moves it.
+    func testArrangeIn3DView() {
+        app.launchArguments += ["-uiTestSampleModel"]
+        app.launch()
+        XCTAssertTrue(app.buttons["sliceButton"].waitForExistence(timeout: 20))
+        let scene = app.otherElements["scene3D"].firstMatch
+        XCTAssertTrue(scene.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Objekt antippen zum Drehen und Verschieben"].exists, "a hint shows how to start")
+        sleep(1)
+        // The cube sits in the middle of the bed, which the camera looks at.
+        let bar = app.buttons["toolDuplicate"]
+        for y in [0.55, 0.5, 0.6, 0.45] where !bar.exists {
+            scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: y)).tap()
+            _ = bar.waitForExistence(timeout: 2)
+        }
+        XCTAssertTrue(bar.exists, "tapping the cube shows its tools")
+        snapshot("33-Objekt-gewaehlt")
+
+        let cubes = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Würfel 20 mm'"))
+        XCTAssertEqual(cubes.count, 1)
+        bar.tap()
+        let undo = app.buttons["undoPlacement"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), "an edit can be undone")
+        XCTAssertEqual(cubes.count, 2, "the copy is on the plate")
+        snapshot("34-Kopie")
+        undo.tap()
+        sleep(1)
+        XCTAssertEqual(cubes.count, 1, "undo removes the copy again")
+
+        // Drag the picked cube to the side: the arrangement changes, so undo is offered again.
+        if !bar.exists { scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)).tap() }
+        XCTAssertTrue(bar.waitForExistence(timeout: 3))
+        let from = scene.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        from.press(forDuration: 0.1, thenDragTo: scene.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.55)))
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), "dragging the picked object moves it")
+        snapshot("35-Verschoben")
+
+        // The bigger view for arranging.
+        app.buttons["previewSize"].tap()
+        sleep(1)
+        snapshot("36-Grosse-Ansicht")
+    }
+
     /// Cut the sample cube with the cut tool and check that two parts result.
     func testCutTool() {
         app.launchArguments += ["-uiTestSampleModel"]
@@ -501,7 +545,9 @@ final class MakerSliceUITests: XCTestCase {
         sleep(2)
         snapshot("30-Teilen")
         app.buttons["confirmCut"].tap()
-        XCTAssertTrue(app.staticTexts["Würfel 20 mm – Teil 2"].waitForExistence(timeout: 10), "cut should create two parts")
+        // Object rows can be tapped (they pick the object in the 3D view), so they are buttons, not plain texts.
+        let part2 = app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Würfel 20 mm – Teil 2'")).firstMatch
+        XCTAssertTrue(part2.waitForExistence(timeout: 10), "cut should create two parts")
         snapshot("31-Geteilt")
         app.buttons["sliceButton"].tap()
         XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 60))
@@ -533,7 +579,7 @@ final class MakerSliceUITests: XCTestCase {
         sleep(1)
         snapshot("95-Farbwechsel")
         app.buttons["colorChangesDone"].tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Slot 2'")).firstMatch.waitForExistence(timeout: 5),
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Slot 2'")).firstMatch.waitForExistence(timeout: 5),
                       "the object row should list the colour change")
         app.buttons["sliceButton"].tap()
         XCTAssertTrue(app.buttons["printButton"].waitForExistence(timeout: 60))
@@ -650,6 +696,23 @@ final class MakerSliceUITests: XCTestCase {
         snapshot("35-Einstellungen-unten")
         XCTAssertTrue(toggle.waitForExistence(timeout: 10), "notification switch in the settings")
         snapshot("35-Benachrichtigungen")
+    }
+
+    /// Away from home: the home address of the (virtual) U1 does not answer, so the app switches to its remote address
+    /// and says so; the remote access screen shows the way.
+    func testRemoteAccessUsesTheAddressOnTheWay() throws {
+        app.launchArguments += ["-uiTestRemoteU1"]
+        app.launch()
+        app.tabBars.buttons["Drucker"].tap()
+        let badge = app.buttons["remoteBadge"].firstMatch
+        XCTAssertTrue(badge.waitForExistence(timeout: 60), "the printer is reached at its remote address")
+        snapshot("98-Unterwegs")
+        badge.tap()
+        XCTAssertTrue(app.otherElements["tailscaleState"].waitForExistence(timeout: 5) || app.staticTexts["Tailscale ist aus"].exists
+                      || app.staticTexts["Tailscale ist an"].exists)
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Unterwegs über 127.0.0.1:17125'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the remote access screen names the way to the printer")
+        snapshot("99-Fernzugriff")
     }
 
     /// Live view of the virtual Kobra S1: its camera is started over MQTT and the FLV video arrives.

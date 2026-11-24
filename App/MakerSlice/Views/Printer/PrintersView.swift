@@ -7,7 +7,8 @@ struct PrintersView: View {
     @State private var showAdd = false
 
     var body: some View {
-        NavigationStack {
+        @Bindable var app = app
+        NavigationStack(path: $app.printerPath) {
             Group {
                 if app.printers.printers.isEmpty {
                     ContentUnavailableView {
@@ -22,9 +23,7 @@ struct PrintersView: View {
                 } else {
                     List {
                         ForEach(app.printers.printers) { printer in
-                            NavigationLink {
-                                PrinterDetailView(printer: printer)
-                            } label: {
+                            NavigationLink(value: printer.id) {
                                 PrinterRow(printer: printer)
                             }
                         }
@@ -33,12 +32,17 @@ struct PrintersView: View {
                 }
             }
             .navigationTitle("Drucker")
+            .navigationDestination(for: UUID.self) { id in
+                if let printer = app.printers.printers.first(where: { $0.id == id }) {
+                    PrinterDetailView(printer: printer)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink {
                         LogView()
                     } label: {
-                        Label("Protokoll", systemImage: app.log.errorCount > 0 ? "exclamationmark.bubble" : "list.bullet.rectangle")
+                        Label("Protokoll", systemImage: app.log.unseenErrorCount > 0 ? "exclamationmark.bubble" : "list.bullet.rectangle")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -65,9 +69,12 @@ private struct PrinterRow: View {
                 Text(app.printers.model(of: printer).displayName).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if let status {
+            if let status, app.printers.isOnline(printer) {
                 VStack(alignment: .trailing, spacing: 2) {
                     StatusBadge(text: status.state.displayName, color: status.state.color)
+                    if app.printers.isRemote(printer) {
+                        Label("unterwegs", systemImage: "globe").font(.caption2).foregroundStyle(.blue)
+                    }
                     if status.state == .printing {
                         Text("\(Int(status.progress * 100)) %").font(.caption.monospacedDigit())
                     }

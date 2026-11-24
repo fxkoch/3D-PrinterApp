@@ -134,8 +134,13 @@ struct PrinterDetailView: View {
                 }
             }
             Spacer()
-            StatusBadge(text: app.printers.isOnline(printer) ? "Online" : "Offline",
-                        color: app.printers.isOnline(printer) ? .green : .secondary)
+            if app.printers.isRemote(printer) {
+                NavigationLink { RemoteAccessView() } label: { StatusBadge(text: "Unterwegs", color: .blue) }
+                    .accessibilityIdentifier("remoteBadge")
+            } else {
+                StatusBadge(text: app.printers.isOnline(printer) ? "Online" : "Offline",
+                            color: app.printers.isOnline(printer) ? .green : .secondary)
+            }
         }
     }
 
@@ -427,7 +432,15 @@ struct PrinterDetailView: View {
                  ? "Am P1S: Einstellungen → WLAN → LAN-Modus einschalten und prüfen, dass Seriennummer und Zugangscode (steht dort auch) stimmen. iPhone und Drucker müssen im selben WLAN sein."
                  : "Prüfe, ob der Drucker eingeschaltet und im selben WLAN ist.")
                 .font(.caption).foregroundStyle(.secondary)
-            Button("Erneut versuchen") { Task { await app.printers.refresh(printer) } }.buttonStyle(.bordered)
+            HStack {
+                Button("Erneut versuchen") { Task { await app.printers.refresh(printer) } }.buttonStyle(.bordered)
+                Spacer()
+                NavigationLink { RemoteAccessView() } label: {
+                    Label(RemoteAccess.tailnetAddress() == nil ? "Unterwegs? Fernzugriff" : "Fernzugriff prüfen", systemImage: "globe")
+                }
+                .font(.subheadline)
+                .accessibilityIdentifier("offlineRemoteAccess")
+            }
         }
     }
 

@@ -157,7 +157,9 @@ public enum CalibrationFactory {
             CalibrationStep(index: i, value: v, label: String(format: "%.1f mm", v), zFrom: Double(i) * segment, zTo: Double(i + 1) * segment)
         }
         s.retractLengthSteps = steps.map { HeightValue(z: $0.zFrom, value: $0.value) }
+        // No Z-hop in the test – neither the printer's nor a material's own (it would hide the stringing).
         s.zHop = 0
+        for i in s.filaments.indices { s.filaments[i].zHop = nil }
         let object = pillarTower(segments: steps.count, segment: segment)
         return CalibrationPlan(kind: .retraction, steps: steps, object: object, settings: s, name: "Rückzug-Turm",
                                note: "\(steps.count) Stufen von \(String(format: "%.1f", values.first!)) mm (unten) bis \(String(format: "%.1f", values.last!)) mm (oben).")

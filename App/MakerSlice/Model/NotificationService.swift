@@ -120,7 +120,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             await withTaskGroup(of: Void.self) { group in
                 for printer in manager.printers { group.addTask { @MainActor in await manager.refresh(printer) } }
             }
-            manager.printers.forEach { manager.driver(for: $0).disconnect() }
+            manager.disconnectAll()
         }
         task.expirationHandler = { work.cancel() }
         await work.value

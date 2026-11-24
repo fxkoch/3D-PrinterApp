@@ -25,6 +25,8 @@ final class AppModel {
     let assistant = AssistantSession()
 
     var tab: AppTab = .discover
+    /// Open printer screens on the printers tab (with several printers: the list, then one printer).
+    var printerPath: [UUID] = []
     /// Printer whose filament check is shown (after tapping a filament notification).
     var filamentCheckPrinter: PrinterRef?
     /// Set when the user wants to enter the result of a calibration print.
@@ -114,6 +116,13 @@ final class AppModel {
            !printers.printers.contains(where: { $0.host == "127.0.0.1" }) {
             printers.add(PrinterConnection(name: "Virtueller Kobra S1", host: "127.0.0.1",
                                            model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        }
+        // UI tests: the virtual U1 "away from home" – its home address does not answer, its remote address does.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestRemoteU1"),
+           !printers.printers.contains(where: { $0.remoteHost == "127.0.0.1:17125" }) {
+            printers.add(PrinterConnection(name: "U1 unterwegs", host: "10.255.255.1:17125",
+                                           model: PrinterModel.snapmakerU1.rawValue, kind: .moonraker,
+                                           remoteHost: "127.0.0.1:17125"))
         }
         // UI tests: a virtual Snapmaker U1 with multiACE (tools/virtualprinters/u1_multiace_sim.py) on this Mac.
         if ProcessInfo.processInfo.arguments.contains("-uiTestVirtualU1ACE"),
@@ -216,9 +225,15 @@ final class AppModel {
     // MARK: - Notifications
 
     func openFromNotification(printer id: UUID, kind: PrintAlert.Kind) {
+        show(printer: id)
+        if kind == .filament { filamentCheckPrinter = PrinterRef(id: id) }
+    }
+
+    /// Opens the printers tab at this printer.
+    func show(printer id: UUID) {
         tab = .printers
         printers.selectedID = id
-        if kind == .filament { filamentCheckPrinter = PrinterRef(id: id) }
+        printerPath = printers.printers.count > 1 ? [id] : []
     }
 
     // MARK: - Opening models
