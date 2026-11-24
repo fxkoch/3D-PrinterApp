@@ -19,6 +19,9 @@ VERSION=${TS_VERSION:-1.104.7}
 DIR=/userdata/tailscale
 SOCK=/run/tailscale/tailscaled.sock
 SSH_OPTS=(-o ConnectTimeout=8 -o ServerAliveInterval=10)
+# Extra ssh options, e.g. SSH_EXTRA_OPTS="-o UserKnownHostsFile=/path/known_hosts"
+# shellcheck disable=SC2206
+[ -n "${SSH_EXTRA_OPTS:-}" ] && SSH_OPTS+=(${SSH_EXTRA_OPTS})
 
 remote() { ssh "${SSH_OPTS[@]}" "root@$HOST" "$@"; }
 
