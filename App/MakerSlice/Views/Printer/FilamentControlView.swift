@@ -27,8 +27,19 @@ struct FilamentControlView: View {
     private var driver: PrinterDriver { app.printers.driver(for: printer) }
     private var support: FilamentControlSupport { driver.filamentControl }
     private var status: PrinterStatus? { app.printers.status(of: printer) }
-    private var busy: Bool { status.map { $0.state == .printing || $0.state == .paused } ?? false }
-    private var nozzle: Double { status?.tools.map(\.temperature).max() ?? 0 }
+    /// A command still running (ACE loads take minutes): the buttons stay locked so nothing is sent twice.
+    @State private var running: String?
+    private var printing: Bool { status.map { $0.state == .printing || $0.state == .paused } ?? false }
+    private var busy: Bool { running != nil || printing }
+    /// The temperature of the head that moves the filament (U1: the active one), not the hottest of all.
+    private var nozzle: Double {
+        guard let tools = status?.tools, !tools.isEmpty else { return 0 }
+        return tools.indices.contains(activeHead) ? tools[activeHead].temperature : tools.map(\.temperature).max() ?? 0
+    }
+
+    /// The head that moves filament: on the U1 the active one of four, elsewhere the only nozzle.
+    private var activeHead: Int { printer.kind == .moonraker ? (status?.activeTool ?? 0) : 0 }
+    private var headName: String { printer.kind == .moonraker && (status?.tools.count ?? 1) > 1 ? " von Kopf \(activeHead + 1)" : "" }
 
     var body: some View {
         NavigationStack {
@@ -37,8 +48,17 @@ struct FilamentControlView: View {
                     if let note = support.note {
                         Panel(title: "Hinweis", systemImage: "info.circle") { Text(note).font(.footnote) }
                     }
-                    if busy {
+                    if printing {
                         Panel { Label("Während eines Drucks ist das Filament gesperrt.", systemImage: "lock").foregroundStyle(.orange) }
+                    }
+                    if let running {
+                        Panel {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text("\(running) … das kann einige Minuten dauern.").font(.subheadline)
+                            }
+                        }
+                        .accessibilityIdentifier("filamentCommandRunning")
                     }
                     if support.loadSlot || support.unload { slotPanel }
                     if support.extrude { extrudePanel }
@@ -98,9 +118,10 @@ struct FilamentControlView: View {
             if nozzle < FilamentMove.minimumNozzleTemperature, printer.kind != .anycubicLAN {
                 Button { heatConfirm = true } label: { Label("Düse aufheizen …", systemImage: "flame") }
                     .buttonStyle(.bordered).font(.footnote)
-                    .confirmationDialog("Düse auf \(heatTemperature) °C heizen?", isPresented: $heatConfirm, titleVisibility: .visible) {
+                    .confirmationDialog("Düse\(headName) auf \(heatTemperature) °C heizen?", isPresented: $heatConfirm, titleVisibility: .visible) {
                         Button("Heizen auf \(heatTemperature) °C") {
-                            Task { await app.printers.perform(on: printer, "Düse auf \(heatTemperature) °C geheizt") { try await $0.setToolTemperature(tool: 0, heatTemperature) } }
+                            let head = activeHead
+                            Task { await app.printers.perform(on: printer, "Düse\(headName) auf \(heatTemperature) °C geheizt") { try await $0.setToolTemperature(tool: head, heatTemperature) } }
                         }
                     } message: { Text("Die Düse wird heiß. Nichts anfassen.") }
             }
@@ -163,7 +184,9 @@ struct FilamentControlView: View {
     }
 
     private func run(_ a: Action) {
+        running = buttonTitle(a)
         Task {
+            defer { running = nil }
             await app.printers.perform(on: printer, buttonTitle(a)) { d in
                 switch a {
                 case .load(let s): try await d.loadSlot(s)

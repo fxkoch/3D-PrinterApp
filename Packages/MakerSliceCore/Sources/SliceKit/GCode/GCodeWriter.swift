@@ -107,7 +107,14 @@ public struct GCodeWriter {
             body.line(dialect.pressureAdvance(pa))
         }
 
-        var pendingLayerGCodes = s.layerGCodes.map { ($0.z, $0.lines.filter(LayerGCode.isAllowed)) }.filter { !$0.1.isEmpty }
+        // Pressure advance in the printer's own words (Bambu: M900 K), whatever the calibration or project wrote.
+        func native(_ line: String) -> String {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            guard t.uppercased().hasPrefix("SET_PRESSURE_ADVANCE"), let r = t.range(of: "ADVANCE=", options: .caseInsensitive),
+                  let v = Double(t[r.upperBound...].split(separator: " ").first ?? "") else { return line }
+            return dialect.pressureAdvance(v)
+        }
+        var pendingLayerGCodes = s.layerGCodes.map { ($0.z, $0.lines.filter(LayerGCode.isAllowed).map(native)) }.filter { !$0.1.isEmpty }
         for layer in layers {
             let height = layer.height
             if !s.retractLengthSteps.isEmpty { state.retractLength = s.retractLength(atHeight: layer.z, tool: state.tool) }
@@ -167,9 +174,13 @@ public struct GCodeWriter {
                     }
                     if state.lastRole != extrusion.role {
                         body.line(";TYPE:\(extrusion.role.gcodeLabel)")
-                        if extrusion.role == .outerWall {
-                            body.line(dialect.acceleration(Int(s.outerWallAcceleration)))
-                        } else if state.lastRole == .outerWall {
+                        // Overhangs are part of the outer wall: same (gentle) acceleration.
+                        let outer: Set<ExtrusionRole> = [.outerWall, .overhangWall]
+                        if outer.contains(extrusion.role) {
+                            if !outer.contains(state.lastRole ?? .innerWall) {
+                                body.line(dialect.acceleration(Int(s.outerWallAcceleration)))
+                            }
+                        } else if outer.contains(state.lastRole ?? .innerWall) {
                             body.line(dialect.acceleration(Int(s.acceleration)))
                         }
                         setFan(&body, &state, filament: filament, layerIndex: layer.index, role: extrusion.role)
@@ -268,7 +279,7 @@ public struct GCodeWriter {
         if !state.retracted {
             out.line("G1 E-\(fmt5(state.retractLength ?? s.filament(for: state.tool).retractLength)) F\(Int(s.retractSpeed * 60))")
         }
-        let footer = s.footerGCode.filter(LayerGCode.isAllowed)
+        let footer = s.footerGCode.filter(LayerGCode.isAllowed).map(native)
         if !footer.isEmpty {
             out.line("; Kalibrierung: Werte zurücksetzen")
             footer.forEach { out.line($0) }
@@ -317,9 +328,10 @@ public struct GCodeWriter {
         let needsRetract = dist > settings.retractMinTravel
         if needsRetract {
             retract(&g, &state, &stats)
-            if settings.zHop > 0 && !state.hopped {
-                g.line("G1 Z\(fmt(layerZ + settings.zHop)) F\(Int(20 * 60))")
-                stats.move(settings.zHop, speed: 20)
+            let hop = settings.filament(for: state.tool).zHop ?? settings.zHop
+            if hop > 0 && !state.hopped {
+                g.line("G1 Z\(fmt(layerZ + hop)) F\(Int(20 * 60))")
+                stats.move(hop, speed: 20)
                 state.hopped = true
             }
         }
@@ -328,7 +340,7 @@ public struct GCodeWriter {
         state.position = p
         if state.hopped {
             g.line("G1 Z\(fmt(layerZ)) F\(Int(20 * 60))")
-            stats.move(settings.zHop, speed: 20)
+            stats.move(settings.filament(for: state.tool).zHop ?? settings.zHop, speed: 20)
             state.hopped = false
             state.z = layerZ
         }
@@ -383,7 +395,7 @@ public struct GCodeWriter {
     /// Part cooling: off for the first layers, full for bridges/overhangs, filament default otherwise.
     private func setFan(_ g: inout GCodeBuffer, _ state: inout MachineState, filament: Filament, layerIndex: Int, role: ExtrusionRole?) {
         var speed = layerIndex < filament.fanOffLayers ? 0 : filament.fanSpeed
-        if layerIndex > 0, role == .bridge { speed = max(speed, filament.overhangFanSpeed) }
+        if layerIndex > 0, role == .bridge || role == .overhangWall { speed = max(speed, filament.overhangFanSpeed) }
         let target = Int((speed * 255).rounded())
         guard target != state.fan else { return }
         g.line(target == 0 ? "M107" : "M106 S\(target)")

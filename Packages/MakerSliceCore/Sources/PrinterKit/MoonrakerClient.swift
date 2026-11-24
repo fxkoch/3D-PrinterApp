@@ -33,9 +33,13 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
     public var kind: ConnectionKind
     /// Serial number (Bambu Lab LAN mode: the MQTT topics contain it; the access code is stored in `apiKey`).
     public var serial: String?
+    /// Address on the way (e.g. the printer's Tailscale name or 100.x address), tried when the home address does not answer.
+    /// Empty/nil: only the home address (which also works away from home through a VPN that routes the home network).
+    public var remoteHost: String?
 
     public init(id: UUID = UUID(), name: String, host: String, apiKey: String? = nil,
-                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker, serial: String? = nil) {
+                model: String = "snapmakerU1", kind: ConnectionKind = .moonraker, serial: String? = nil,
+                remoteHost: String? = nil) {
         self.serial = serial
         self.id = id
         self.name = name
@@ -43,9 +47,10 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
         self.apiKey = apiKey
         self.model = model
         self.kind = kind
+        self.remoteHost = remoteHost
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind, serial }
+    enum CodingKeys: String, CodingKey { case id, name, host, apiKey, model, kind, serial, remoteHost }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -56,6 +61,22 @@ public struct PrinterConnection: Codable, Hashable, Sendable, Identifiable {
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? "snapmakerU1"
         kind = try c.decodeIfPresent(ConnectionKind.self, forKey: .kind) ?? .moonraker
         serial = try c.decodeIfPresent(String.self, forKey: .serial)
+        remoteHost = try c.decodeIfPresent(String.self, forKey: .remoteHost)
+    }
+
+    /// The remote address, when one is set and differs from the home address.
+    public var remoteAddress: String? {
+        guard let r = remoteHost?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty, r != host else { return nil }
+        return r
+    }
+
+    /// The same printer, reached at its remote address (nil when it has none).
+    public var remote: PrinterConnection? {
+        guard let r = remoteAddress else { return nil }
+        var c = self
+        c.host = r
+        c.remoteHost = nil
+        return c
     }
 
     /// Bare host name or IP without scheme/port.
@@ -101,7 +122,8 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         } else {
             let config = URLSessionConfiguration.default
             config.timeoutIntervalForRequest = 10
-            config.timeoutIntervalForResource = 600
+            // multiACE load/unload commands answer only when done: up to about 25 minutes.
+            config.timeoutIntervalForResource = 1800
             self.session = URLSession(configuration: config)
         }
     }
@@ -161,6 +183,38 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         try check(response, data)
     }
 
+    /// multiACE (0.99.8b and later): hands the sliced file to the multiACE preflight on the printer's web page, where
+    /// the spools are matched to the heads. Nothing is printed: the user starts it there. One file waits at a time.
+    public func sendToMultiACE(gcode: Data, fileName: String) async throws {
+        guard let base = connection.baseURL, var comps = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw PrinterError.invalidAddress
+        }
+        comps.port = nil   // the multiACE web backend runs behind the printer's web server (port 80)
+        comps.path = "/multiace/api/preflight/inbox"
+        guard let url = comps.url else { throw PrinterError.invalidAddress }
+        var probe = URLRequest(url: url)
+        probe.timeoutInterval = 10
+        let (_, probeResponse) = try await perform { try await self.session.data(for: probe) }
+        if (probeResponse as? HTTPURLResponse)?.statusCode == 404 {
+            throw PrinterError.unsupported("Die multiACE-Version auf dem Drucker kennt die Übergabe an die Vorschau noch nicht (ab 0.99.8b). Bitte multiACE aktualisieren oder „Nur hochladen“ nutzen.")
+        }
+        let boundary = "MakerSlice-\(UUID().uuidString)"
+        var body = Data()
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(Self.sanitize(fileName))\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8))
+        body.append(gcode)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 600
+        let (data, response) = try await perform { try await self.session.upload(for: request, from: body) }
+        switch (response as? HTTPURLResponse)?.statusCode ?? 0 {
+        case 409: throw PrinterError.unsupported("multiACE hat diese Datei schon verarbeitet. Bitte neu slicen und die frische Datei senden.")
+        case 413: throw PrinterError.unsupported("Die Datei ist für die multiACE-Vorschau zu groß.")
+        default: try check(response, data)
+        }
+    }
+
     public func startPrint(fileName: String) async throws {
         let encoded = fileName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? fileName
         _ = try await postJSON("/printer/print/start?filename=\(encoded)")
@@ -171,10 +225,14 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public func cancel() async throws { _ = try await postJSON("/printer/print/cancel") }
 
     /// Runs arbitrary G-code (e.g. "M140 S60").
-    public func runGCode(_ script: String) async throws {
+    /// - Parameter timeout: seconds to wait for the printer's answer (Moonraker answers when the command is done).
+    public func runGCode(_ script: String, timeout: TimeInterval = 10) async throws {
         let encoded = script.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? script
-        _ = try await postJSON("/printer/gcode/script?script=\(encoded)")
+        _ = try await postJSON("/printer/gcode/script?script=\(encoded)", timeout: timeout)
     }
+
+    /// multiACE moves filament through metres of tube and retries on its own: its commands take minutes.
+    static let aceCommandTimeout: TimeInterval = 1800
 
     public var filamentControl: FilamentControlSupport {
         if hasMultiACE {
@@ -188,31 +246,49 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
     public func loadSlot(_ slot: Int) async throws {
         guard hasMultiACE else { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
         try await requireIdleForACE(head: slot)
-        try await runGCode(MultiACECommand.load(head: slot))
+        try await runGCode(MultiACECommand.load(head: slot), timeout: Self.aceCommandTimeout)
     }
 
     /// multiACE: pulls the filament of tool head `slot` back into the ACE.
     public func retractSlot(_ slot: Int) async throws {
         guard hasMultiACE else { throw PrinterError.unsupported(filamentControl.note ?? "Nicht möglich.") }
         try await requireIdleForACE(head: slot)
-        try await runGCode(MultiACECommand.unload(head: slot))
+        try await runGCode(MultiACECommand.unload(head: slot), timeout: Self.aceCommandTimeout)
     }
 
     /// multiACE: starts or stops the dryer of ACE `unit`.
     public func setACEDrying(_ on: Bool, unit: Int = 0, temperature: Int = 45, minutes: Int = 240) async throws {
         guard hasMultiACE else { throw PrinterError.unsupported("Der ACE ist an diesem Drucker nicht eingerichtet.") }
-        try await requireIdleForACE(head: nil)
-        try await runGCode(on ? MultiACECommand.startDrying(unit: unit, temperature: temperature, minutes: minutes)
-                              : MultiACECommand.stopDrying(unit: unit))
+        let s = try await requireIdleForACE(head: nil)
+        let kind = s.ace?.units.first { $0.index == unit }?.kind
+        let temp = min(temperature, MultiACECommand.maxDryingTemperature(kind: kind))
+        try await runGCode(on ? MultiACECommand.startDrying(unit: unit, temperature: temp, minutes: minutes)
+                              : MultiACECommand.stopDrying(unit: unit), timeout: Self.aceCommandTimeout)
     }
 
-    /// The ACE commands move filament and heat the nozzle: never during a print.
-    private func requireIdleForACE(head: Int?) async throws {
+    /// The ACE commands move filament and heat the nozzle: never during a print (Moonraker would run them between the
+    /// print's own lines) and never while multiACE is swapping filament itself.
+    @discardableResult
+    private func requireIdleForACE(head: Int?) async throws -> PrinterStatus {
         if let head, !(0..<4).contains(head) { throw PrinterError.unsupported("Werkzeugkopf \(head + 1) gibt es nicht.") }
         let s = try await status()
         if s.state == .printing || s.state == .paused {
             throw PrinterError.unsupported("Während eines Drucks bewegt die App kein Filament.")
         }
+        if s.ace?.swapInProgress == true {
+            throw PrinterError.unsupported("multiACE wechselt gerade Filament. Bitte warten, bis der Wechsel fertig ist.")
+        }
+        return s
+    }
+
+    /// multiACE on the U1: measures the pressure advance of `head` (about 3½ minutes, heats and moves the head) and
+    /// returns the value the printer then uses for that head.
+    public func measurePressureAdvance(head: Int) async throws -> Double? {
+        guard hasMultiACE else { throw PrinterError.unsupported("Die Messung ohne Testdruck braucht multiACE auf dem U1.") }
+        try await requireIdleForACE(head: head)
+        try await runGCode(MultiACECommand.calibratePressureAdvance(head: head), timeout: Self.aceCommandTimeout)
+        let name = head == 0 ? "extruder" : "extruder\(head)"
+        return try await calibration().pressureAdvance[name]
     }
 
     public func extrude(millimetres: Double) async throws {
@@ -393,8 +469,9 @@ public final class MoonrakerClient: PrinterDriver, @unchecked Sendable {
         return try parse(data)
     }
 
-    private func postJSON(_ path: String) async throws -> [String: Any] {
-        let request = try makeRequest(path, method: "POST")
+    private func postJSON(_ path: String, timeout: TimeInterval? = nil) async throws -> [String: Any] {
+        var request = try makeRequest(path, method: "POST")
+        if let timeout { request.timeoutInterval = timeout }
         let (data, response) = try await perform { try await self.session.data(for: request) }
         try check(response, data)
         return try parse(data)

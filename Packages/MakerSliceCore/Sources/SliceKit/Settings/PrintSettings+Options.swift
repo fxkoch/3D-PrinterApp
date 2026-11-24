@@ -49,6 +49,9 @@ extension PrintSettings {
         case "fuzzy_skin_point_distance": handled = set(\.fuzzySkinPointDistance)
         case "support_threshold_angle": handled = set(\.supportAngle)
         case "support_top_z_distance": handled = set(\.supportTopZDistance)
+        case "support_bottom_z_distance": handled = set(\.supportBottomZDistance)
+        case "overhang_3_4_speed": handled = set(\.overhangSpeed)
+        case "enable_overhang_speed": slowDownOverhangs = bool(); handled = true
         case "support_object_xy_distance": handled = set(\.supportXYDistance)
         case "support_base_pattern_spacing": handled = set(\.supportSpacing)
         case "skirt_distance": handled = set(\.skirtDistance)

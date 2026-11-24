@@ -39,6 +39,10 @@ struct FilamentCheckView: View {
         }
     }
 
+    /// The head that moves filament: on the U1 the active one of four, elsewhere the only nozzle.
+    private var activeHead: Int { printer.kind == .moonraker ? (status?.activeTool ?? 0) : 0 }
+    private var headName: String { printer.kind == .moonraker && (status?.tools.count ?? 1) > 1 ? " von Kopf \(activeHead + 1)" : "" }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -56,9 +60,10 @@ struct FilamentCheckView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
             }
             .task { await recheck() }
-            .confirmationDialog("Düse auf \(heatTemperature) °C heizen?", isPresented: $confirmHeat, titleVisibility: .visible) {
+            .confirmationDialog("Düse\(headName) auf \(heatTemperature) °C heizen?", isPresented: $confirmHeat, titleVisibility: .visible) {
                 Button("Heizen auf \(heatTemperature) °C") {
-                    Task { await app.printers.perform(on: printer, "Düse auf \(heatTemperature) °C geheizt") { try await $0.setToolTemperature(tool: 0, heatTemperature) } }
+                    let head = activeHead
+                    Task { await app.printers.perform(on: printer, "Düse\(headName) auf \(heatTemperature) °C geheizt") { try await $0.setToolTemperature(tool: head, heatTemperature) } }
                 }
             } message: { Text("Die Düse wird heiß. Nichts anfassen, bis sie wieder abgekühlt ist.") }
             .confirmationDialog("Druck wirklich abbrechen?", isPresented: $confirmCancel, titleVisibility: .visible) {

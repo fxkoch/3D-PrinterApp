@@ -29,10 +29,10 @@ public enum SettingKey: String, CaseIterable, Sendable {
     case infillPattern, infillDensity, infillOverlap
     case topSurfacePattern, bottomSurfacePattern
     case ironing, ironingSpeed, ironingFlow, ironingSpacing
-    case detectBridges, bridgeSpeed, bridgeFlow
+    case detectBridges, bridgeSpeed, bridgeFlow, slowDownOverhangs, overhangSpeed
     case outerWallSpeed, innerWallSpeed, infillSpeed, solidInfillSpeed, topSurfaceSpeed, firstLayerSpeed, travelSpeed
     case acceleration, outerWallAcceleration, minLayerTime
-    case support, supportAngle, supportTopZDistance, supportXYDistance, supportSpacing
+    case support, supportAngle, supportTopZDistance, supportBottomZDistance, supportXYDistance, supportSpacing
     case brimWidth, skirtLoops, skirtDistance, elephantFootCompensation
     case primeTower, primeTowerWidth
     case zHop, retractSpeed, retractMinTravel
@@ -143,6 +143,16 @@ public enum SettingsHelp {
             "Brücken erkennen", "Frei gespannte Flächen werden in der günstigsten Richtung, langsamer und mit voller Kühlung gedruckt.",
             increase: "Saubere Brücken ohne Durchhängen.",
             decrease: "Brücken werden wie normale Füllung gedruckt und hängen eher durch."),
+        .slowDownOverhangs: SettingHelp(
+            "Überhänge langsamer", "Teile der Außenwand, die mehr als zur Hälfte frei in der Luft hängen, werden langsam und mit vollem Lüfter gedruckt (wie in OrcaSlicer).",
+            increase: "Sauberere Überhänge ohne hochgebogene Kanten und Durchhängen.",
+            decrease: "Etwas schneller, Überhänge rollen sich eher ein.",
+            tip: "Eingeschaltet lassen. Der Unterschied in der Druckzeit ist meist klein."),
+        .overhangSpeed: SettingHelp(
+            "Tempo an Überhängen", "Geschwindigkeit für Außenwände über freier Luft.",
+            increase: "Schneller, Überhänge hängen eher durch.",
+            decrease: "Mehr Zeit zum Abkühlen, schärfere Überhangkanten.",
+            tip: "OrcaSlicer nutzt 30 mm/s für Überhänge über 50 %."),
         .bridgeSpeed: SettingHelp(
             "Brücken-Geschwindigkeit", "Tempo über freier Luft.",
             increase: "Weniger Durchhängen durch Zeit, aber Linien reißen eher.",
@@ -212,6 +222,11 @@ public enum SettingsHelp {
             increase: "Stützen lösen sich leichter, Unterseite wird rauer.",
             decrease: "Schönere Unterseite, Stützen kleben fester.",
             tip: "0,2 mm bei PLA, 0,25–0,3 mm bei PETG (klebt stärker)."),
+        .supportBottomZDistance: SettingHelp(
+            "Abstand unten (Z)", "Luftspalt, wo eine Stütze auf dem Modell selbst steht (nicht auf dem Druckbett).",
+            increase: "Die Stütze löst sich leichter von der Oberseite darunter, ihr Fuß hält etwas schlechter.",
+            decrease: "Fester Stand, aber die Stütze verschweißt mit der Oberfläche und hinterlässt Spuren.",
+            tip: "0,2 mm wie oben. Bei Stützen aus einem anderen Material (PLA auf PETG) setzt die App selbst 0 mm und einen dichten Fuß."),
         .supportXYDistance: SettingHelp(
             "Abstand seitlich", "Seitlicher Abstand der Stützen zum Modell.",
             increase: "Stützen berühren die Wände nicht, leichter zu entfernen.",

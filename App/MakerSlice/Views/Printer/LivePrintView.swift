@@ -8,6 +8,7 @@ struct LivePrintView: View {
     @Environment(\.dismiss) private var dismiss
     let printer: PrinterConnection
     @State private var camera = LiveCamera()
+    @State private var confirmCancel = false
 
     private var status: PrinterStatus? { app.printers.status(of: printer) }
 
@@ -18,6 +19,7 @@ struct LivePrintView: View {
                     cameraPanel
                     if let status {
                         phasePanel(status)
+                        controls(status)
                         SpeedPanel(printer: printer, status: status)
                         statsPanel(status)
                     } else {
@@ -72,7 +74,9 @@ struct LivePrintView: View {
     private func startCamera() {
         #if canImport(Network)
         guard let lan = app.printers.driver(for: printer) as? AnycubicLANClient else { return }
-        let url = status?.cameraStreamURL ?? URL(string: "http://\(printer.hostOnly):18088/flv")!
+        // The address the printer answers under right now (at home or on the way).
+        let host = lan.connection.hostOnly
+        guard let url = status?.cameraStreamURL ?? URL(string: "http://\(host):18088/flv") else { return }
         camera.start(streamURL: url, prepare: { try await lan.startCamera() }, finish: { try? await lan.stopCamera() })
         #endif
     }
@@ -92,6 +96,33 @@ struct LivePrintView: View {
                 if let detail = phase.detail { Text(detail).font(.subheadline).foregroundStyle(.secondary).monospacedDigit() }
                 if s.state == .printing || s.state == .paused {
                     ProgressView(value: s.progress).tint(s.state.color)
+                }
+            }
+        }
+    }
+
+    /// Pause, resume and cancel right next to the camera: seen spaghetti should not need a detour.
+    @ViewBuilder private func controls(_ s: PrinterStatus) -> some View {
+        if (s.state == .printing || s.state == .paused) && !s.isIdle {
+            HStack {
+                if s.state == .printing {
+                    Button {
+                        Task { await app.printers.perform(on: printer, "Druck pausiert") { try await $0.pause() } }
+                    } label: { Label("Pause", systemImage: "pause.fill").frame(maxWidth: .infinity) }
+                } else {
+                    Button {
+                        Task { await app.printers.perform(on: printer, "Druck fortgesetzt") { try await $0.resume() } }
+                    } label: { Label("Fortsetzen", systemImage: "play.fill").frame(maxWidth: .infinity) }
+                }
+                Button(role: .destructive) { confirmCancel = true } label: {
+                    Label("Abbrechen", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("liveControls")
+            .confirmationDialog("Druck wirklich abbrechen?", isPresented: $confirmCancel, titleVisibility: .visible) {
+                Button("Druck abbrechen", role: .destructive) {
+                    Task { await app.printers.perform(on: printer, "Druck abgebrochen") { try await $0.cancel() } }
                 }
             }
         }
@@ -177,6 +208,15 @@ struct SpeedPanel: View {
                     .accessibilityIdentifier("speedPresets")
                     Stepper(value: Binding(get: { current }, set: { set($0) }), in: SpeedControl.percentRange, step: 10) {
                         Text("\(current) % der geplanten Geschwindigkeit")
+                    }
+                    if current > SpeedControl.percentRange.upperBound {
+                        // Set by the G-code itself (a calibration's speed steps): the extruder cannot keep up.
+                        Label("\(current) % ist zu schnell: Der Extruder kommt nicht nach, zermahlt das Filament und der Druck wird lückenhaft. Das stammt meist aus Befehlen einer Kalibrierung im Druck.",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote).foregroundStyle(.orange)
+                        Button("Auf 100 % stellen") { set(100) }
+                            .buttonStyle(.borderedProminent).tint(.orange)
+                            .accessibilityIdentifier("speedReset")
                     }
                     Text("Leise ist halbes Tempo: ruhigere Bewegungen, der Druck dauert etwa doppelt so lang. Lüfter bleiben unverändert.")
                         .font(.footnote).foregroundStyle(.secondary)

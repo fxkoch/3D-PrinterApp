@@ -20,6 +20,11 @@ public struct CalibrationPlan: Sendable {
     public var name: String
     /// Short note shown above the print ("Flow-Treppe: 9 Stufen …").
     public var note: String
+    /// Slot (0-based) the test prints with: the head or ACE slot that holds the filament.
+    public var tool = 0
+
+    /// The filament being calibrated.
+    public var filament: Filament { settings.filament(for: tool) }
 
     /// Step to the printed height (mm).
     public func step(atHeight z: Double) -> CalibrationStep? { steps.last { $0.zFrom <= z + 1e-6 } }
@@ -27,7 +32,24 @@ public struct CalibrationPlan: Sendable {
 
 /// Builds the calibration prints from the filament profile and the printer.
 public enum CalibrationFactory {
-    public static func plan(_ kind: CalibrationKind, filament: Filament, base: PrintSettings) -> CalibrationPlan {
+    /// - Parameter tool: slot that holds the filament. On the U1 every head has its own spool: a test of the PETG in
+    ///   head 3 must print with head 3, not with whatever head 1 holds.
+    public static func plan(_ kind: CalibrationKind, filament: Filament, base: PrintSettings, tool: Int = 0) -> CalibrationPlan {
+        var plan = slotZeroPlan(kind, filament: filament, base: base)
+        guard tool > 0, tool < max(base.machine.toolCount, 1) else { return plan }
+        // Built for slot 0 (the steps refer to it); move the tuned filament and the model to the chosen slot.
+        var s = plan.settings
+        while s.filaments.count <= tool { s.filaments.append(base.filament(for: s.filaments.count)) }
+        s.filaments[tool] = s.filaments[0]
+        s.filaments[0] = base.filament(for: 0)
+        plan.settings = s
+        plan.object.tool = tool
+        plan.object.colorChanges = []
+        plan.tool = tool
+        return plan
+    }
+
+    private static func slotZeroPlan(_ kind: CalibrationKind, filament: Filament, base: PrintSettings) -> CalibrationPlan {
         var s = base
         s.filaments = [filament] + Array(base.filaments.dropFirst())
         s.support = .off
@@ -56,7 +78,8 @@ public enum CalibrationFactory {
         let maxAllowed = 300
         let low = f.nozzleTempMin > 150 ? f.nozzleTempMin - 5 : f.nozzleTemp - 25
         var top = f.nozzleTemp + 15
-        top = min(max(top, low + 30), maxAllowed)
+        // Never above what the filament allows (PETG profiles end at 260 °C, not 270).
+        top = min(max(top, low + 30), maxAllowed, max(f.nozzleTempMax, f.nozzleTemp))
         let temps = (0..<7).map { top - 5 * $0 }
         let segment = 8.0
         let steps = temps.enumerated().map { i, t in
@@ -86,9 +109,10 @@ public enum CalibrationFactory {
         s.bottomLayers = 4
         s.infillDensity = 0.15
         s.wallLoops = 2
-        // M221 scales the flow the G-code already contains; the first tier starts at 92 %.
+        // M221 scales the flow the G-code already contains; the first tier starts at 92 %. Each factor starts on the
+        // first layer ABOVE the tier below: that tier's top surface – the one being judged – still has its own factor.
         s.layerGCodes = steps.enumerated().map { i, st in
-            LayerGCode(z: i == 0 ? 0 : st.zFrom - s.layerHeight, lines: ["M221 S\(Int((100 * (1 + deltas[i])).rounded()))"])
+            LayerGCode(z: i == 0 ? 0 : st.zFrom + 0.01, lines: ["M221 S\(Int((100 * (1 + deltas[i])).rounded()))"])
         }
         s.footerGCode = ["M221 S100"]
         let object = staircase(tiers: steps.count, height: tier)
@@ -112,8 +136,10 @@ public enum CalibrationFactory {
         s.infillDensity = 0
         s.outerWallSpeed = max(s.outerWallSpeed, 120)
         s.innerWallSpeed = max(s.innerWallSpeed, 120)
+        // Small layers must not be slowed down for cooling: PA shows only at speed. (0 would mean "filament default".)
+        s.minLayerTime = 0.001
         s.layerGCodes = steps.enumerated().map { i, st in
-            LayerGCode(z: i == 0 ? 0 : st.zFrom - s.layerHeight, lines: ["SET_PRESSURE_ADVANCE ADVANCE=\(String(format: "%.3f", st.value))"])
+            LayerGCode(z: i == 0 ? 0 : st.zFrom + 0.01, lines: ["SET_PRESSURE_ADVANCE ADVANCE=\(String(format: "%.3f", st.value))"])
         }
         s.footerGCode = ["SET_PRESSURE_ADVANCE ADVANCE=\(String(format: "%.3f", f.pressureAdvance ?? 0.02))"]
         let object = hollowTower(size: 36, wall: 0.9, height: segment * Double(steps.count))
@@ -131,7 +157,9 @@ public enum CalibrationFactory {
             CalibrationStep(index: i, value: v, label: String(format: "%.1f mm", v), zFrom: Double(i) * segment, zTo: Double(i + 1) * segment)
         }
         s.retractLengthSteps = steps.map { HeightValue(z: $0.zFrom, value: $0.value) }
+        // No Z-hop in the test – neither the printer's nor a material's own (it would hide the stringing).
         s.zHop = 0
+        for i in s.filaments.indices { s.filaments[i].zHop = nil }
         let object = pillarTower(segments: steps.count, segment: segment)
         return CalibrationPlan(kind: .retraction, steps: steps, object: object, settings: s, name: "Rückzug-Turm",
                                note: "\(steps.count) Stufen von \(String(format: "%.1f", values.first!)) mm (unten) bis \(String(format: "%.1f", values.last!)) mm (oben).")
@@ -149,7 +177,9 @@ public enum CalibrationFactory {
         s.bottomLayers = 4
         s.outerWallSpeed = baseSpeed
         s.innerWallSpeed = baseSpeed
-        s.minLayerTime = 0
+        // No slowdown for cooling, or the small vase layers never reach the flow written on the step.
+        // (0 would mean "use the filament's minimum layer time".)
+        s.minLayerTime = 0.001
         // M220 scales the speed; the safety margin is applied to the stored result.
         let steps = targets.enumerated().map { i, t in
             CalibrationStep(index: i, value: (t * 0.85 * 10).rounded() / 10, label: String(format: "%.0f mm³/s", t),

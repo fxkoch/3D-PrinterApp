@@ -113,6 +113,9 @@ public struct OrcaJob: Sendable {
             "support_on_build_plate_only": s.support == .buildPlateOnly ? "1" : "0",
             "support_threshold_angle": num(s.supportAngle),
             "support_top_z_distance": num(s.supportTopZDistance),
+            "support_bottom_z_distance": num(s.supportBottomZDistance),
+            "enable_overhang_speed": s.slowDownOverhangs ? "1" : "0",
+            "overhang_3_4_speed": num(s.overhangSpeed),
             "support_object_xy_distance": num(s.supportXYDistance),
             "support_base_pattern_spacing": num(s.supportSpacing),
             "brim_type": s.brimWidth > 0 ? "outer_only" : "no_brim",
@@ -157,6 +160,7 @@ public struct OrcaJob: Sendable {
             "filament_max_volumetric_speed": num(f.maxVolumetricSpeed),
             "filament_flow_ratio": num(f.flowRatio),
             "filament_retraction_length": num(f.retractLength),
+            "filament_z_hop": f.zHop.map(num) ?? "nil",
             "slow_down_layer_time": num(s.minLayerTime > 0 ? s.minLayerTime : f.minLayerTime),
             "filament_density": num(f.density),
         ]

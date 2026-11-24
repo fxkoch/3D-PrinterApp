@@ -16,6 +16,26 @@ struct LayerToolpathGenerator {
     var isSpiral: Bool { settings.spiralVase && layerIndex >= settings.bottomLayers }
 
     func generate(region rawRegion: Polygons, above: (Int) -> Polygons?, below: (Int) -> Polygons?) -> [Extrusion] {
+        // Several separate parts (objects, legs, columns): one after the other, each with walls, surfaces and infill.
+        // Printing all walls of all parts first and then all infill sent the nozzle back and forth between them ten
+        // times per layer – across the fresh outer walls, which left strings and X-shaped marks.
+        let parts = isSpiral ? [rawRegion] : rawRegion.components()
+        guard parts.count > 1 else { return generatePart(region: rawRegion, above: above, below: below) }
+        var remaining = parts.map { generatePart(region: $0, above: above, below: below) }.filter { !$0.isEmpty }
+        var result: [Extrusion] = []
+        var position = IntPoint(0, 0)
+        while !remaining.isEmpty {
+            let next = remaining.indices.min { a, b in
+                remaining[a][0].points[0].distanceSquared(to: position) < remaining[b][0].points[0].distanceSquared(to: position)
+            }!
+            let part = remaining.remove(at: next)
+            result += part
+            if let last = part.last?.points { position = part.last!.closed ? last[0] : last[last.count - 1] }
+        }
+        return result
+    }
+
+    private func generatePart(region rawRegion: Polygons, above: (Int) -> Polygons?, below: (Int) -> Polygons?) -> [Extrusion] {
         let s = settings
         let outerW = isFirstLayer ? s.firstLayerLineWidth : s.outerWallLineWidth
         let innerW = isFirstLayer ? s.firstLayerLineWidth : s.lineWidth
@@ -52,6 +72,13 @@ struct LayerToolpathGenerator {
             if loop + 1 < s.wallLoops {
                 current = current.offset(-(width / 2 + innerW / 2))
             }
+        }
+
+        // Overhangs: material of this layer that the layer below does not carry. Where the outer wall's centre lies
+        // there, more than half of the line hangs in the air: slow and with full cooling (OrcaSlicer does the same).
+        if s.slowDownOverhangs, !isFirstLayer, !walls.isEmpty, let lower = below(1) {
+            let zone = region.difference(lower).offset(-0.05).offset(0.05)
+            if !zone.isEmpty { walls[0] = walls[0].flatMap { splitOverhangs($0, zone: zone) } }
         }
 
         // Area left for infill, overlapping the innermost wall slightly.
@@ -122,7 +149,8 @@ struct LayerToolpathGenerator {
         return extrusions
     }
 
-    func supportPaths(area: Polygons, interface: Polygons, foot: Polygons = Polygons()) -> [Extrusion] {
+    /// - Parameter dense: contact layers of a support that does not weld to the part: 100 % lines, slower, so they hold.
+    func supportPaths(area: Polygons, interface: Polygons, foot: Polygons = Polygons(), dense: Bool = false) -> [Extrusion] {
         let s = settings
         let w = isFirstLayer ? s.firstLayerLineWidth : s.lineWidth
         let speed = isFirstLayer ? s.firstLayerSpeed : s.supportSpeed
@@ -137,20 +165,79 @@ struct LayerToolpathGenerator {
             }
         }
         if !foot.isEmpty {
-            // Closed and slow: the foot of a support that stands on a material it does not weld to.
+            // Closed and slow: the foot where a support stands on the part. Printed with the support body's material
+            // (the part's own), so it welds to the surface below.
             result += lines(in: foot, angle: layerIndex % 2 == 0 ? 0 : 90, spacing: w, phase: 0).map {
-                Extrusion(role: .supportInterface, points: $0, closed: false, width: w, speed: speed * 0.5)
+                Extrusion(role: .support, points: $0, closed: false, width: w, speed: speed * 0.5)
             }
         }
         if !interface.isEmpty {
-            result += lines(in: interface, angle: layerIndex % 2 == 0 ? 0 : 90, spacing: w * 1.6, phase: 0).map {
-                Extrusion(role: .supportInterface, points: $0, closed: false, width: w, speed: speed * 0.6)
+            let spacing = dense ? w : w * 1.6
+            let factor = dense ? 0.5 : 0.6
+            result += lines(in: interface, angle: layerIndex % 2 == 0 ? 0 : 90, spacing: spacing, phase: 0).map {
+                Extrusion(role: .supportInterface, points: $0, closed: false, width: w, speed: speed * factor)
             }
         }
         return result
     }
 
     // MARK: - Helpers
+
+    /// Splits a closed outer wall into runs over the layer below and runs over the air (`zone`). The runs follow each
+    /// other without travel, starting at the seam; the ones over air print at `overhangSpeed`.
+    func splitOverhangs(_ wall: Extrusion, zone: Polygons) -> [Extrusion] {
+        guard wall.closed, wall.points.count >= 3, let box = zone.boundingBox else { return [wall] }
+        var minX = Int64.max, minY = Int64.max, maxX = Int64.min, maxY = Int64.min
+        for p in wall.points { minX = min(minX, p.x); maxX = max(maxX, p.x); minY = min(minY, p.y); maxY = max(maxY, p.y) }
+        guard maxX >= box.min.x, minX <= box.max.x, maxY >= box.min.y, minY <= box.max.y else { return [wall] }
+
+        // The loop as a polyline back to its start, long edges cut into pieces of at most 1 mm for a clean split.
+        let loop = wall.points + [wall.points[0]]
+        var points: Path = [loop[0]]
+        for k in 1..<loop.count {
+            let a = loop[k - 1], b = loop[k]
+            let pieces = Int((a.distance(to: b) / Units.perMM).rounded(.up))
+            if pieces > 1 {
+                for j in 1..<pieces {
+                    let t = Double(j) / Double(pieces)
+                    points.append(IntPoint(a.x + Int64(Double(b.x - a.x) * t), a.y + Int64(Double(b.y - a.y) * t)))
+                }
+            }
+            points.append(b)
+        }
+        // Edge k (points[k] → points[k + 1]) hangs when its middle lies over the air.
+        var hangs = (0..<(points.count - 1)).map { k in
+            zone.contains(IntPoint((points[k].x + points[k + 1].x) / 2, (points[k].y + points[k + 1].y) / 2))
+        }
+        guard hangs.contains(true) else { return [wall] }
+        let slow = min(wall.speed, settings.overhangSpeed)
+        if !hangs.contains(false) {
+            var all = wall
+            all.role = .overhangWall
+            all.speed = slow
+            return [all]
+        }
+        // Runs shorter than 1 mm take the kind of the run before: no constant speed and fan changes at ragged edges.
+        var runStart = 0
+        var length = 0.0
+        for k in 0..<hangs.count {
+            if k > 0, hangs[k] != hangs[k - 1] {
+                if length < 1, runStart > 0 { for j in runStart..<k { hangs[j] = hangs[runStart - 1] } }
+                runStart = k
+                length = 0
+            }
+            length += points[k].distance(to: points[k + 1]) / Units.perMM
+        }
+        var result: [Extrusion] = []
+        var start = 0
+        for k in 1...hangs.count where k == hangs.count || hangs[k] != hangs[start] {
+            let over = hangs[start]
+            result.append(Extrusion(role: over ? .overhangWall : wall.role, points: Array(points[start...k]), closed: false,
+                                    width: wall.width, speed: over ? slow : wall.speed, flow: wall.flow))
+            start = k
+        }
+        return result
+    }
 
     /// Part of `area` that is not covered by all of the next `layers` neighbours.
     private func uncovered(_ area: Polygons, layers: Int, neighbor: (Int) -> Polygons?) -> Polygons {

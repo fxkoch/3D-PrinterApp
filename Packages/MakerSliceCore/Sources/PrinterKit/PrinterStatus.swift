@@ -70,6 +70,8 @@ public struct PrinterStatus: Sendable, Equatable {
         public struct Unit: Sendable, Equatable {
             public var index: Int
             public var model: String
+            /// multiACE unit kind: "v1" ACE Pro, "v2" ACE 2 Pro, … (decides the dryer limit).
+            public var kind: String?
             public var connected: Bool
             public var humidity: Double?
             public var temperature: Double?
@@ -227,6 +229,7 @@ public struct PrinterStatus: Sendable, Equatable {
         var units: [MultiACE.Unit] = []
         for u in ace["aces"] as? [[String: Any]] ?? [] {
             var unit = MultiACE.Unit(index: Int(number(u["idx"]) ?? Double(units.count)), model: (u["model"] as? String) ?? "ACE",
+                                     kind: (u["kind"] as? String) ?? (u["protocol"] as? String),
                                      connected: (u["connected"] as? Bool) ?? true)
             unit.humidity = number(u["humidity_effective"]) ?? number(u["humidity"])
             unit.temperature = number(u["temp"])

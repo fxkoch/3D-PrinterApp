@@ -2,32 +2,45 @@ import Foundation
 
 /// Arranges objects on the build plate.
 public enum PlateArranger {
-    /// Places every object on the bed (z = 0) using simple shelf packing,
-    /// centring the whole group. Returns nil when the objects don't fit.
+    /// Places every object on the bed (z = 0), packed bottom-left into a compact, nearly square group that is centred
+    /// on the bed. Big parts first; every candidate corner is tried and the one that keeps the group smallest wins.
+    /// Returns nil when the objects don't fit.
     public static func arrange(_ objects: [ModelObject], bedSize: Double, spacing: Double = 6) -> [ModelObject]? {
         guard !objects.isEmpty else { return objects }
         var dropped = objects.map { $0.placedOnBed(center: (0, 0)) }
-        // Largest footprints first.
+        let sizes = dropped.map { $0.boundingBox.size }
         let order = dropped.indices.sorted {
-            let a = dropped[$0].boundingBox.size, b = dropped[$1].boundingBox.size
-            return a.y == b.y ? a.x > b.x : a.y > b.y
+            let a = sizes[$0].x * sizes[$0].y, b = sizes[$1].x * sizes[$1].y
+            return a == b ? $0 < $1 : a > b
         }
-        var x = 0.0, y = 0.0, rowHeight = 0.0, usedWidth = 0.0
+        struct Rect { var x, y, w, h: Double }
+        func clash(_ a: Rect, _ b: Rect) -> Bool {
+            a.x < b.x + b.w + spacing - 1e-6 && b.x < a.x + a.w + spacing - 1e-6 &&
+                a.y < b.y + b.h + spacing - 1e-6 && b.y < a.y + a.h + spacing - 1e-6
+        }
+        var placed: [Rect] = []
         var positions = [Int: (Double, Double)]()
+        var corners: [(Double, Double)] = [(0, 0)]
         for i in order {
-            let size = dropped[i].boundingBox.size
-            if x > 0 && x + size.x > bedSize {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
+            let w = sizes[i].x, h = sizes[i].y
+            guard w <= bedSize + 0.01, h <= bedSize + 0.01 else { return nil }
+            var best: Rect?
+            var bestScore = Double.infinity
+            let groupW = placed.map { $0.x + $0.w }.max() ?? 0, groupH = placed.map { $0.y + $0.h }.max() ?? 0
+            for (cx, cy) in corners where cx + w <= bedSize + 0.01 && cy + h <= bedSize + 0.01 {
+                let r = Rect(x: cx, y: cy, w: w, h: h)
+                if placed.contains(where: { clash($0, r) }) { continue }
+                let gw = max(groupW, cx + w), gh = max(groupH, cy + h)
+                // Smallest square first, then the smallest area, then bottom-left.
+                let score = max(gw, gh) * 1e6 + gw * gh + cy * 1e-3 + cx * 1e-6
+                if score < bestScore { bestScore = score; best = r }
             }
-            positions[i] = (x + size.x / 2, y + size.y / 2)
-            x += size.x + spacing
-            usedWidth = max(usedWidth, x - spacing)
-            rowHeight = max(rowHeight, size.y)
+            guard let r = best else { return nil }
+            placed.append(r)
+            positions[i] = (r.x + w / 2, r.y + h / 2)
+            corners += [(r.x + w + spacing, r.y), (r.x, r.y + h + spacing), (r.x + w + spacing, 0), (0, r.y + h + spacing)]
         }
-        let usedHeight = y + rowHeight
-        guard usedWidth <= bedSize + 0.01, usedHeight <= bedSize + 0.01 else { return nil }
+        let usedWidth = placed.map { $0.x + $0.w }.max() ?? 0, usedHeight = placed.map { $0.y + $0.h }.max() ?? 0
         let offsetX = (bedSize - usedWidth) / 2, offsetY = (bedSize - usedHeight) / 2
         for i in dropped.indices {
             guard let p = positions[i] else { continue }

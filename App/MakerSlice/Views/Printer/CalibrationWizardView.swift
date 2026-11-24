@@ -10,6 +10,19 @@ struct CalibrationHomeView: View {
     @State private var settings: PrintSettings
     @State private var showPicker = false
     @State private var refresh = 0
+    /// Slot the tests print with (the head or ACE slot that holds the filament).
+    @State private var tool = 0
+    @State private var bookVersion = 0
+    /// The loaded spool is taken once; coming back from a test must not undo the user's choice.
+    @State private var pickedLoaded = false
+    /// U1 with multiACE: pressure advance measured by the printer instead of a test print.
+    @State private var confirmAutoPA = false
+    @State private var measuringPA = false
+    @State private var autoPAMessage: String?
+    private var aceClient: MoonrakerClient? {
+        guard model == .snapmakerU1, let c = app.printers.driver(for: printer) as? MoonrakerClient, c.hasMultiACE else { return nil }
+        return c
+    }
 
     init(printer: PrinterConnection, model: PrinterModel) {
         self.printer = printer
@@ -43,8 +56,17 @@ struct CalibrationHomeView: View {
                             var f = match
                             f.color = spool.color ?? f.color
                             settings.filaments[0] = f
+                            tool = i
                         } label: { Label("Eingelegtes Filament nehmen – Slot \(i + 1): \(spool.displayName)", systemImage: "dot.radiowaves.left.and.right") }
                     }
+                }
+                if settings.machine.toolCount > 1 {
+                    Picker("Gedruckt wird mit", selection: $tool) {
+                        ForEach(0..<settings.machine.toolCount, id: \.self) { i in
+                            Text("\(settings.machine.slotLabel)\(i + 1)" + (loaded.indices.contains(i) && loaded[i].present ? " · \(loaded[i].type ?? "?")" : "")).tag(i)
+                        }
+                    }
+                    .accessibilityIdentifier("calibrationSlot")
                 }
                 Button { showPicker = true } label: { Label("Anderes Filament wählen", systemImage: "list.bullet") }
                     .accessibilityIdentifier("calibrationFilament")
@@ -54,9 +76,11 @@ struct CalibrationHomeView: View {
                 Text("Kalibriert wird immer ein bestimmtes Filament an diesem Drucker. Die Werte gelten danach für jeden Druck mit diesem Filamentprofil.")
             }
 
+            setupSection
+
             Section {
                 NavigationLink {
-                    CalibrationOverviewView(filament: filament, settings: settings)
+                    CalibrationOverviewView(filament: filament, settings: settings, tool: tool)
                 } label: {
                     Label("Komplett-Kalibrierung – alle Tests und alle Werte auf einmal speichern", systemImage: "list.bullet.clipboard")
                 }
@@ -66,7 +90,7 @@ struct CalibrationHomeView: View {
             Section("Kalibrierdrucke") {
                 ForEach(CalibrationKind.allCases) { kind in
                     NavigationLink {
-                        CalibrationTestView(kind: kind, filament: filament, settings: settings)
+                        CalibrationTestView(kind: kind, filament: filament, settings: settings, tool: tool)
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: kind.symbol).frame(width: 28).foregroundStyle(Color.accentColor)
@@ -106,20 +130,102 @@ struct CalibrationHomeView: View {
             }
         }
         .id(refresh)
+        .onAppear { bookVersion += 1 }   // results entered in a test change the plan (redraw, same identity)
+        .confirmationDialog("Pressure Advance messen?", isPresented: $confirmAutoPA, titleVisibility: .visible) {
+            Button("Kopf \(tool + 1) messen") { measureAutoPA() }
+        } message: {
+            Text("Kopf \(tool + 1) heizt auf, fährt zur Abstreifposition und spült etwas Filament (etwa 4 Minuten). Es darf kein Druck laufen. Der Wert gilt danach für \(filament.name) an diesem Drucker.")
+        }
         .navigationTitle("Kalibrieren")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showPicker) {
             FilamentPickerView(settings: $settings, slot: 0, loaded: nil)
         }
         .task {
-            // Start with what the printer reports, if anything.
-            if let spool = loaded.first(where: { $0.present && $0.type != nil }), let type = spool.type,
-               let match = FilamentLibrary.bestMatch(type: type, vendor: spool.vendor, printer: model) {
+            // Start with what the printer reports, if anything (once per visit).
+            if !pickedLoaded, let i = loaded.firstIndex(where: { $0.present && $0.type != nil }), let type = loaded[i].type,
+               let match = FilamentLibrary.bestMatch(type: type, vendor: loaded[i].vendor, printer: model) {
                 var f = match
-                f.color = spool.color ?? f.color
+                f.color = loaded[i].color ?? f.color
                 settings.filaments[0] = f
+                tool = i
             }
+            pickedLoaded = true
             await app.syncCalibrations()
+        }
+    }
+
+    private func measureAutoPA() {
+        guard let client = aceClient else { return }
+        let head = tool, name = filament.name, printerModel = model
+        measuringPA = true
+        autoPAMessage = nil
+        Task {
+            defer { measuringPA = false }
+            do {
+                if let k = try await client.measurePressureAdvance(head: head) {
+                    app.saveCalibration(CalibrationResult(printer: printerModel.rawValue, filament: name, kind: .pressureAdvance, value: k, source: "auto"))
+                    autoPAMessage = "Gemessen: \(String(format: "%.3f", k)) – gespeichert für \(name)."
+                    bookVersion += 1
+                } else {
+                    autoPAMessage = "Die Messung lief, der Drucker hat aber keinen Wert gemeldet."
+                }
+            } catch {
+                autoPAMessage = "Messung nicht möglich: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// The shortest way to set up this filament: only the tests it still needs, optional ones only on demand.
+    @ViewBuilder private var setupSection: some View {
+        let plan = FilamentSetup.plan(for: filament, printer: model)
+        let _ = bookVersion
+        Section {
+            if !plan.seeds.isEmpty {
+                let from = Set(plan.seeds.map(\.filament)).sorted().joined(separator: ", ")
+                Label("Startwerte von \(from): " + plan.seeds.map { "\($0.kind.displayName) \($0.kind.format($0.value))" }.joined(separator: ", ")
+                      + ". Die Tests prüfen sie nur noch nach.", systemImage: "arrow.triangle.branch")
+                    .font(.caption)
+            }
+            ForEach(Array(plan.steps.enumerated()), id: \.element.id) { i, step in
+                NavigationLink {
+                    CalibrationTestView(kind: step.kind, filament: plan.filament, settings: settings, tool: tool)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: step.kind.symbol).frame(width: 28).foregroundStyle(step.onlyIf == nil ? Color.accentColor : .secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(i + 1). \(step.kind.displayName)" + (step.onlyIf == nil ? "" : " (bei Bedarf)")).font(.subheadline.weight(.semibold))
+                            Text(step.onlyIf ?? step.why).font(.caption).foregroundStyle(.secondary)
+                            Text(step.kind.effort).font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("setup-\(step.kind.rawValue)")
+                if step.kind == .pressureAdvance, aceClient != nil {
+                    // Saves a test print: the U1 measures PA with its coil sensor (multiACE).
+                    Button { confirmAutoPA = true } label: {
+                        if measuringPA {
+                            HStack { ProgressView(); Text("Kopf \(tool + 1) misst … (etwa 4 Minuten)") }
+                        } else {
+                            Label("Ohne Testdruck messen (Kopf \(tool + 1), ca. 4 Min.)", systemImage: "waveform.path.ecg")
+                        }
+                    }
+                    .disabled(measuringPA)
+                    .font(.subheadline)
+                    .accessibilityIdentifier("measurePAWithoutPrint")
+                }
+            }
+            if let autoPAMessage { Text(autoPAMessage).font(.caption).foregroundStyle(.secondary) }
+            ForEach(plan.skipped) { skip in
+                Label("\(skip.kind.displayName): \(skip.reason)", systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Neues Filament einrichten")
+        } footer: {
+            Text(plan.steps.isEmpty ? "Dieses Filament ist an diesem Drucker fertig eingerichtet."
+                 : "Nötig: etwa \(plan.requiredMinutes) Minuten Druckzeit" + (plan.optionalMinutes > 0 ? ", bei Bedarf bis zu \(plan.optionalMinutes) Minuten mehr." : ".")
+                   + " Nach jedem Test die beste Stufe eintragen – die Werte gelten danach für jeden Druck mit diesem Filament.")
         }
     }
 
@@ -134,8 +240,9 @@ struct CalibrationTestView: View {
     let kind: CalibrationKind
     let filament: Filament
     let settings: PrintSettings
+    var tool = 0
 
-    private var plan: CalibrationPlan { CalibrationFactory.plan(kind, filament: filament, base: settings) }
+    private var plan: CalibrationPlan { CalibrationFactory.plan(kind, filament: filament, base: settings, tool: tool) }
 
     var body: some View {
         let plan = plan
@@ -230,7 +337,7 @@ struct CalibrationResultSection: View {
         }
         if noneGood {
             Section("Was jetzt?") {
-                ForEach(CalibrationAdvice.whenNoStepIsGood(plan.kind, filamentType: plan.settings.filament(for: 0).type)) { item in
+                ForEach(CalibrationAdvice.whenNoStepIsGood(plan.kind, filamentType: plan.filament.type)) { item in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.title).font(.subheadline.weight(.semibold))
                         Text(item.detail).font(.caption).foregroundStyle(.secondary)
@@ -264,7 +371,7 @@ struct CalibrationResultSheet: View {
 
     var body: some View {
         NavigationStack {
-            List { CalibrationResultSection(plan: plan, filamentName: plan.settings.filament(for: 0).name) }
+            List { CalibrationResultSection(plan: plan, filamentName: plan.filament.name) }
                 .navigationTitle("Ergebnis")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {

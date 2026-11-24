@@ -46,19 +46,22 @@ struct RootView: View {
         @Bindable var model = model
         TabView(selection: $model.tab) {
             DiscoverView()
+                .safeAreaInset(edge: .bottom) { ActivePrintBanner() }
                 .tabItem { Label("Entdecken", systemImage: "magnifyingglass") }
                 .tag(AppTab.discover)
             LibraryView()
+                .safeAreaInset(edge: .bottom) { ActivePrintBanner() }
                 .tabItem { Label("Bibliothek", systemImage: "square.stack.3d.up") }
                 .tag(AppTab.library)
             PrintersView()
                 .tabItem { Label("Drucker", systemImage: "printer") }
                 .tag(AppTab.printers)
-                .badge(model.log.errorCount > 0 ? Text("!") : nil)
+                .badge(model.log.unseenErrorCount > 0 ? Text("!") : nil)
             AssistantView()
                 .tabItem { Label("Claude", systemImage: "sparkles") }
                 .tag(AppTab.assistant)
             SettingsView()
+                .safeAreaInset(edge: .bottom) { ActivePrintBanner() }
                 .tabItem { Label("Einstellungen", systemImage: "gearshape") }
                 .tag(AppTab.settings)
         }

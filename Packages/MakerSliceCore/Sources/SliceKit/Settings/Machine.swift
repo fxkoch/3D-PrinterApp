@@ -16,6 +16,15 @@ public enum PrinterModel: String, Codable, CaseIterable, Sendable, Identifiable 
         }
     }
 
+    /// Short name for narrow places (segmented pickers).
+    public var shortName: String {
+        switch self {
+        case .snapmakerU1: return "U1"
+        case .kobraS1: return "Kobra S1"
+        case .bambuP1S: return "P1S"
+        }
+    }
+
     public var machine: MachineProfile {
         switch self {
         case .snapmakerU1: return .snapmakerU1
@@ -47,7 +56,7 @@ public struct MachineProfile: Equatable, Sendable {
 
     public static let snapmakerU1 = MachineProfile(
         model: .snapmakerU1, bedSize: 270, maxHeight: 270, toolCount: 4, multiMaterial: .toolChanger,
-        filamentScope: "u1", supportsPlateTypes: PlateType.allCases, slotLabel: "T"
+        filamentScope: "u1", supportsPlateTypes: PlateType.allCases, slotLabel: "Kopf "
     )
 
     public static let kobraS1 = MachineProfile(

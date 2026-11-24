@@ -44,8 +44,8 @@ final class CalibrationTests: XCTestCase {
         XCTAssertEqual(plan.steps.count, 13)
         XCTAssertEqual(plan.steps.last?.value ?? 0, 0.06, accuracy: 1e-9)
         let gcode = try slice(plan).gcode
-        XCTAssertTrue(gcode.contains("SET_PRESSURE_ADVANCE ADVANCE=0.030"))
-        XCTAssertTrue(gcode.contains("SET_PRESSURE_ADVANCE ADVANCE=0.060"))
+        XCTAssertTrue(gcode.contains("SET_PRESSURE_ADVANCE ADVANCE=0.03\n"))
+        XCTAssertTrue(gcode.contains("SET_PRESSURE_ADVANCE ADVANCE=0.06\n"))
     }
 
     func testRetractionTowerChangesTheRetractLengthPerHeight() throws {
@@ -69,6 +69,15 @@ final class CalibrationTests: XCTestCase {
         let gcode = try slice(plan).gcode
         XCTAssertTrue(gcode.contains("M220 S433"), "26 / 6 of the base speed")
         XCTAssertTrue(gcode.contains("M220 S100"))
+    }
+
+    /// The U1 keeps the speed factor of the last job, so every print must reset it at the start and at the end.
+    func testU1PrintResetsSpeedFactorAtStartAndEnd() throws {
+        let (f, base) = petg(.snapmakerU1)
+        let plan = CalibrationFactory.plan(.flow, filament: f, base: base)
+        let gcode = try slice(plan).gcode
+        XCTAssertTrue(gcode.contains("M220 S100 ; reset speed factor"), "start resets the speed factor")
+        XCTAssertTrue(gcode.contains("M220 S100 ; reset speed factor\nM107"), "end resets the speed factor")
     }
 
     func testResultsChangeTheLibraryProfileForThatPrinterOnly() {
@@ -98,5 +107,51 @@ final class CalibrationTests: XCTestCase {
         XCTAssertEqual(book.merge([old]), 0, "an older result does not replace a newer one")
         let data = CalibrationBook.encode(book.all)!
         XCTAssertEqual(CalibrationBook.decode(data), book.all)
+    }
+}
+
+final class CalibrationAccuracyTests: XCTestCase {
+    private func gcode(_ plan: CalibrationPlan) throws -> String {
+        let arranged = try XCTUnwrap(PlateArranger.arrange([plan.object], bedSize: plan.settings.bedSize))
+        return try SliceJob(name: "test", objects: arranged, settings: plan.settings).run().gcode
+    }
+
+    /// The top surface of each tier – the one being judged – prints with that tier's own flow factor.
+    func testFlowStaircaseTopSurfaceKeepsItsTiersFactor() throws {
+        let plan = CalibrationFactory.plan(.flow, filament: .pla, base: PrintSettings())
+        let text = try gcode(plan)
+        var factor = 100
+        var topFactors: [Double: Int] = [:]   // tier index → factor active on its last top surface
+        var z = 0.0
+        for line in text.split(separator: "\n") {
+            if line.hasPrefix("M221 S"), let v = Int(line.dropFirst(6)) { factor = v }
+            if line.hasPrefix(";Z:"), let v = Double(line.dropFirst(3)) { z = v }
+            if line == ";TYPE:Top surface", let step = plan.step(atHeight: z - 0.01) { topFactors[Double(step.index)] = factor }
+        }
+        for step in plan.steps.dropLast() {
+            let expected = Int((100 * (step.value / PrintSettings().filament(for: 0).flowRatio)).rounded())
+            if let got = topFactors[Double(step.index)] { XCTAssertEqual(got, expected, "tier \(step.index)") }
+        }
+        XCTAssertFalse(topFactors.isEmpty)
+    }
+
+    func testMaxFlowTowerIsNotSlowedDownForCooling() throws {
+        let plan = CalibrationFactory.plan(.maxFlow, filament: .pla, base: PrintSettings())
+        XCTAssertGreaterThan(plan.settings.minLayerTime, 0)
+        XCTAssertLessThan(plan.settings.minLayerTime(for: [0]), 0.01)
+    }
+
+    func testTemperatureTowerStaysBelowTheFilamentsMaximum() {
+        var f = Filament.petg
+        f.nozzleTempMax = 260
+        let plan = CalibrationFactory.plan(.temperature, filament: f, base: PrintSettings())
+        XCTAssertLessThanOrEqual(plan.steps.map(\.value).max() ?? 0, 260)
+    }
+
+    func testPressureAdvanceTowerSpeaksBambu() throws {
+        let plan = CalibrationFactory.plan(.pressureAdvance, filament: .pla, base: PrintSettings(printer: .bambuP1S))
+        let text = try gcode(plan)
+        XCTAssertFalse(text.contains("SET_PRESSURE_ADVANCE"))
+        XCTAssertTrue(text.contains("M900 K0.03"))
     }
 }

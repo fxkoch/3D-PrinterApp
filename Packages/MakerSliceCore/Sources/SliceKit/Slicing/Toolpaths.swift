@@ -4,10 +4,13 @@ public enum ExtrusionRole: String, CaseIterable, Codable, Sendable {
     case outerWall, innerWall, topSurface, bottomSurface, solidInfill, sparseInfill
     case bridge, ironing, primeTower
     case support, supportInterface, skirt, brim
+    /// Part of the outer wall that hangs over air by more than half its width (printed slowly with full cooling).
+    case overhangWall
 
     /// Label used in ";TYPE:" comments (Orca-compatible, so G-code viewers understand it).
     public var gcodeLabel: String {
         switch self {
+        case .overhangWall: return "Overhang wall"
         case .outerWall: return "Outer wall"
         case .innerWall: return "Inner wall"
         case .topSurface: return "Top surface"
@@ -26,6 +29,7 @@ public enum ExtrusionRole: String, CaseIterable, Codable, Sendable {
 
     public var displayName: String {
         switch self {
+        case .overhangWall: return "Überhang"
         case .outerWall: return "Außenwand"
         case .innerWall: return "Innenwand"
         case .topSurface: return "Oberfläche"

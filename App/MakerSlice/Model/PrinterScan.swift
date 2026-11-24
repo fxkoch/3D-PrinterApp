@@ -9,6 +9,8 @@ final class PrinterScan {
     private(set) var found: [DiscoveredPrinter] = []
     private(set) var scanning = false
     private(set) var progress = 0.0
+    /// True once a search has been started (an empty list means "nothing found" only then).
+    private(set) var didScan = false
 
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private let bonjour = PrinterDiscovery()
@@ -19,6 +21,7 @@ final class PrinterScan {
         found = []
         progress = 0
         scanning = true
+        didScan = true
         bonjour.start()
         bonjourTask = Task { [weak self] in
             // Bonjour answers within a few seconds; merge what it learned.

@@ -16,6 +16,26 @@ struct SettingsView: View {
                 } footer: {
                     Text("Zeigt zusätzlich alle Slicer-Einstellungen mit Erklärungen, Filament-Werte, Cloud-Slicing und Gerätedetails. Ohne Expertenmodus bleibt die App bewusst einfach – die App wählt passende Werte selbst.")
                 }
+                Section {
+                    Toggle("Einstellungen ans Modell anpassen", isOn: $app.autoOptimize)
+                        .accessibilityIdentifier("autoOptimizeToggle")
+                } footer: {
+                    Text("Beim Öffnen eines Modells übernimmt die App ihre Empfehlungen selbst: Stützen, Brim, Schichthöhe, Glätten, Material-Werte. Was sie geändert hat, steht im Vorbereiten-Bildschirm – mit „Rückgängig“.")
+                }
+                Section {
+                    NavigationLink {
+                        RemoteAccessView()
+                    } label: {
+                        LabeledContent {
+                            Text(RemoteAccess.tailnetAddress() != nil ? "Tailscale an" : "Einrichten")
+                        } label: {
+                            Label("Fernzugriff (unterwegs)", systemImage: "globe")
+                        }
+                    }
+                    .accessibilityIdentifier("remoteAccessLink")
+                } footer: {
+                    Text("Drucker von unterwegs sehen und steuern – verschlüsselt über Tailscale, ohne Portfreigabe am Router.")
+                }
                 NotificationSettingsSection()
                 if app.expertMode {
                 Section {
@@ -75,7 +95,7 @@ private struct DefaultSettingsEditor: View {
     @State private var settings = PrintSettings()
 
     var body: some View {
-        AdvancedSettingsView(settings: $settings)
+        AdvancedSettingsView(settings: $settings, forDefaults: true)
             .navigationTitle(model.displayName)
             .onAppear { settings = app.settings(for: model) }
             .onDisappear { app.remember(settings) }
@@ -118,7 +138,7 @@ private struct NotificationSettingsSection: View {
         } header: {
             Text("Benachrichtigungen")
         } footer: {
-            Text("Bei geöffneter App kommt die Mitteilung sofort. Im Hintergrund fragt iOS die Drucker nur etwa alle 15–30 Minuten ab – eine fertige oder gestörte Druckerei kann also verzögert gemeldet werden. Sofortige Push-Mitteilungen bei geschlossener App brauchen einen Server und ein bezahltes Entwicklerkonto.")
+            Text("Bei geöffneter App kommt die Mitteilung sofort. Im Hintergrund fragt iOS die Drucker nur etwa alle 15–30 Minuten ab – ein fertiger oder gestörter Druck kann also verzögert gemeldet werden. Sofortige Push-Mitteilungen bei geschlossener App brauchen einen Server und ein bezahltes Entwicklerkonto.")
         }
     }
 }

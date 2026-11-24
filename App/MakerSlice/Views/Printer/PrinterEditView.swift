@@ -14,6 +14,7 @@ struct PrinterEditView: View {
     @State private var host = ""
     @State private var apiKey = ""
     @State private var serial = ""
+    @State private var remoteHost = ""
     @State private var testing = false
     @State private var testResult: String?
     @State private var scan = PrinterScan()
@@ -61,11 +62,11 @@ struct PrinterEditView: View {
                         .accessibilityIdentifier("found-\(printer.host)")
                     }
                     if !scan.scanning {
-                        if scan.found.isEmpty {
+                        if scan.found.isEmpty, scan.didScan {
                             Text("Kein Drucker gefunden. Ist er eingeschaltet, im selben WLAN – und beim Kobra S1 der LAN-Modus an?")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
-                        Button { scan.start() } label: { Label("Erneut suchen", systemImage: "arrow.clockwise") }
+                        Button { scan.start() } label: { Label(scan.didScan ? "Erneut suchen" : "Im WLAN suchen", systemImage: "arrow.clockwise") }
                             .accessibilityIdentifier("scanAgain")
                     }
                 } header: {
@@ -95,6 +96,21 @@ struct PrinterEditView: View {
                     Text("Adresse")
                 } footer: {
                     Text(footer)
+                }
+
+                Section {
+                    TextField("z. B. snapmaker-u1 oder 100.101.102.103", text: $remoteHost)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("printerRemoteHost")
+                    NavigationLink { RemoteAccessView() } label: {
+                        Label("So richtest du den Fernzugriff ein", systemImage: "globe")
+                    }
+                } header: {
+                    Text("Adresse unterwegs (optional)")
+                } footer: {
+                    Text("Nur nötig, wenn der Drucker über Tailscale eine eigene Adresse hat. Gibt eine Brücke zu Hause dein ganzes Heimnetz frei, bleibt das Feld leer – die App erreicht den Drucker dann unterwegs unter seiner gewohnten Adresse.")
                 }
 
                 Section {
@@ -138,6 +154,7 @@ struct PrinterEditView: View {
                     host = existing.host
                     apiKey = existing.apiKey ?? ""
                     serial = existing.serial ?? ""
+                    remoteHost = existing.remoteHost ?? ""
                 } else {
                     scan.start()
                     name = model.displayName
@@ -163,22 +180,29 @@ struct PrinterEditView: View {
     private var connection: PrinterConnection {
         PrinterConnection(id: existing?.id ?? UUID(), name: name.isEmpty ? model.displayName : name,
                           host: host.trimmingCharacters(in: .whitespaces), apiKey: apiKey.isEmpty ? nil : apiKey,
-                          model: model.rawValue, kind: kind, serial: serial.trimmingCharacters(in: .whitespaces).isEmpty ? nil : serial.trimmingCharacters(in: .whitespaces))
+                          model: model.rawValue, kind: kind, serial: serial.trimmingCharacters(in: .whitespaces).isEmpty ? nil : serial.trimmingCharacters(in: .whitespaces),
+                          remoteHost: remoteHost.trimmingCharacters(in: .whitespaces).isEmpty ? nil : remoteHost.trimmingCharacters(in: .whitespaces))
     }
 
+    /// Tries the home address and, when set, the address on the way.
     private func test() async {
         testing = true
         defer { testing = false }
-        let driver = PrinterDrivers.make(for: connection)
-        defer { driver.disconnect() }
-        do {
-            let status = try await driver.status()
-            var text = "✅ Verbunden – Status: \(status.state.displayName)"
-            if let fw = status.firmware { text += ", Firmware \(fw)" }
-            testResult = text
-        } catch {
-            testResult = "❌ \(error.localizedDescription)"
+        var lines: [String] = []
+        let targets = [(connection, connection.remote == nil ? "" : "Zuhause: ")] + (connection.remote.map { [($0, "Unterwegs: ")] } ?? [])
+        for (target, label) in targets {
+            let driver = PrinterDrivers.make(for: target)
+            do {
+                let status = try await driver.status()
+                var text = "✅ \(label)Verbunden – Status: \(status.state.displayName)"
+                if let fw = status.firmware { text += ", Firmware \(fw)" }
+                lines.append(text)
+            } catch {
+                lines.append("❌ \(label)\(error.localizedDescription)")
+            }
+            driver.disconnect()
         }
+        testResult = lines.joined(separator: "\n")
     }
 
     /// Takes over a printer found on the network: model, connection type, address and name.

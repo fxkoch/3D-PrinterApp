@@ -4,6 +4,8 @@ import SwiftUI
 /// Expert mode: every slicer parameter, each with an explanation (ⓘ).
 struct AdvancedSettingsView: View {
     @Binding var settings: PrintSettings
+    /// Editing the printer's defaults: what belongs to one print only (vase mode) is not offered.
+    var forDefaults = false
     @AppStorage("showInlineHelp") private var inlineHelp = false
 
     var body: some View {
@@ -50,9 +52,13 @@ struct AdvancedSettingsView: View {
                     number(.bridgeSpeed, $settings.bridgeSpeed, "mm/s", 10...150, step: 5)
                     number(.bridgeFlow, percent(\.bridgeFlow), "%", 60...120, step: 5)
                 }
+                toggle(.slowDownOverhangs, $settings.slowDownOverhangs)
+                if settings.slowDownOverhangs {
+                    number(.overhangSpeed, $settings.overhangSpeed, "mm/s", 10...100, step: 5)
+                }
             }
             Section {
-                toggle(.spiralVase, $settings.spiralVase)
+                if !forDefaults { toggle(.spiralVase, $settings.spiralVase) }
                 toggle(.fuzzySkin, $settings.fuzzySkin)
                 if settings.fuzzySkin {
                     number(.fuzzySkinThickness, $settings.fuzzySkinThickness, "mm", 0.1...1, step: 0.05)
@@ -61,7 +67,9 @@ struct AdvancedSettingsView: View {
             } header: {
                 Text("Spezialmodi")
             } footer: {
-                if settings.spiralVase {
+                if forDefaults {
+                    Text("Den Vasenmodus gibt es nur für einen einzelnen Druck, nicht als Vorgabe: als Vorgabe würde jedes Modell nur eine Wand bekommen.")
+                } else if settings.spiralVase {
                     Text("Vasenmodus aktiv: 1 Wand, keine Füllung, kein Deckel. Die \(settings.bottomLayers) unteren Schichten bilden den Boden.")
                 }
             }
@@ -81,7 +89,10 @@ struct AdvancedSettingsView: View {
                 picker(.support, $settings.support)
                 if settings.support != .off {
                     number(.supportAngle, $settings.supportAngle, "°", 10...80, step: 5)
-                    number(.supportTopZDistance, $settings.supportTopZDistance, "mm", 0.1...0.4, step: 0.05)
+                    number(.supportTopZDistance, $settings.supportTopZDistance, "mm", 0...0.4, step: 0.05)
+                    if settings.support == .everywhere {
+                        number(.supportBottomZDistance, $settings.supportBottomZDistance, "mm", 0...0.4, step: 0.05)
+                    }
                     number(.supportXYDistance, $settings.supportXYDistance, "mm", 0.2...2, step: 0.05)
                     number(.supportSpacing, $settings.supportSpacing, "mm", 1...6, step: 0.5)
                 }

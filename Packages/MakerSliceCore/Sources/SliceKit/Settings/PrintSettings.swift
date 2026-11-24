@@ -113,6 +113,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var outerWallLineWidth: Double = 0.42
     public var firstLayerLineWidth: Double = 0.5
 
+    /// The goal chosen for the print (robust, light, fast …); the advisor then leaves layer height and infill alone.
+    public var purpose: PrintPurpose = .balanced
+
     // Strength
     public var wallLoops: Int = 2
     public var topLayers: Int = 5
@@ -146,6 +149,9 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var detectBridges: Bool = true
     public var bridgeSpeed: Double = 50
     public var bridgeFlow: Double = 0.9
+    /// Outer walls over air (more than half the line width unsupported) print at `overhangSpeed` with the overhang fan.
+    public var slowDownOverhangs: Bool = true
+    public var overhangSpeed: Double = 30
     public var topSurfacePattern: SurfacePattern = .monotonic
     public var bottomSurfacePattern: SurfacePattern = .monotonic
 
@@ -165,6 +171,8 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var support: SupportMode = .off
     public var supportAngle: Double = 30
     public var supportTopZDistance: Double = 0.2
+    /// Gap where a support stands on the model itself (supports of the part's own material; others get a dense foot).
+    public var supportBottomZDistance: Double = 0.2
     public var supportXYDistance: Double = 0.35
     public var supportSpacing: Double = 2.5
     /// Slot (0-based) that prints the support; nil = the first slot used by the objects.
@@ -213,6 +221,35 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     public var retractLengthSteps: [HeightValue] = []
     /// Harmless commands written at the end of the print (calibration prints reset speed/flow factors here).
     public var footerGCode: [String] = []
+
+    /// The settings as a starting point for the next project. What belongs to one print only is dropped: commands at a
+    /// height (temperature towers, the speed steps of the max-flow test), retraction steps, the end commands of a
+    /// calibration and the vase mode. Kept as defaults, a max-flow test once raised the speed of every later print
+    /// to 400 % from 28 mm up, and the vase mode turned every model into a single wall.
+    public var forNewProjects: PrintSettings {
+        var s = self
+        s.layerGCodes = []
+        s.retractLengthSteps = []
+        s.footerGCode = []
+        s.spiralVase = false
+        return s
+    }
+
+    /// True when `forNewProjects` drops something.
+    public var hasProjectOnlyValues: Bool {
+        !layerGCodes.isEmpty || !retractLengthSteps.isEmpty || !footerGCode.isEmpty || spiralVase
+    }
+
+    /// Commands at a height that change the speed or flow factor of the printer (M220/M221). A normal print never
+    /// needs them; they are left over from a calibration or come from a downloaded project.
+    public var factorCommands: [LayerGCode] {
+        layerGCodes.filter { code in
+            code.lines.contains { line in
+                let c = line.trimmingCharacters(in: .whitespaces).uppercased()
+                return c.hasPrefix("M220") || c.hasPrefix("M221")
+            }
+        }
+    }
 
     /// Retraction length at height `z`.
     public func retractLength(atHeight z: Double, tool: Int) -> Double {
@@ -345,6 +382,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
             if let v = try? c.decodeIfPresent(T.self, forKey: key) { value = v }
         }
         d(.printer, &printer)
+        d(.purpose, &purpose)
         d(.layerHeight, &layerHeight); d(.firstLayerHeight, &firstLayerHeight); d(.nozzleDiameter, &nozzleDiameter)
         d(.lineWidth, &lineWidth); d(.outerWallLineWidth, &outerWallLineWidth); d(.firstLayerLineWidth, &firstLayerLineWidth)
         d(.wallLoops, &wallLoops); d(.topLayers, &topLayers); d(.bottomLayers, &bottomLayers)
@@ -355,6 +393,7 @@ public struct PrintSettings: Codable, Equatable, Sendable {
         d(.acceleration, &acceleration); d(.outerWallAcceleration, &outerWallAcceleration); d(.minLayerTime, &minLayerTime)
         d(.ironing, &ironing); d(.ironingSpeed, &ironingSpeed); d(.ironingFlow, &ironingFlow); d(.ironingSpacing, &ironingSpacing)
         d(.detectBridges, &detectBridges); d(.bridgeSpeed, &bridgeSpeed); d(.bridgeFlow, &bridgeFlow)
+        d(.slowDownOverhangs, &slowDownOverhangs); d(.overhangSpeed, &overhangSpeed); d(.supportBottomZDistance, &supportBottomZDistance)
         d(.support, &support); d(.supportAngle, &supportAngle); d(.supportTopZDistance, &supportTopZDistance)
         d(.supportXYDistance, &supportXYDistance); d(.supportSpacing, &supportSpacing)
         d(.supportSlot, &supportSlot); d(.supportInterfaceSlot, &supportInterfaceSlot)

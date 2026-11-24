@@ -28,7 +28,7 @@ extension PrinterStatus {
             let cur = tools.first ?? Heater(temperature: 0, target: 0)
             let heater = Heater(temperature: jsonNumber(p["nozzle_temper"]) ?? cur.temperature, target: jsonNumber(p["nozzle_target_temper"]) ?? cur.target)
             if tools.isEmpty { tools = [heater] } else { tools[0] = heater }
-            activeTool = 0
+            // One nozzle: the AMS tray in use is filamentBox.activeSlot, not a tool number (else slot 1 always looked active).
         }
         if p["bed_temper"] != nil || p["bed_target_temper"] != nil {
             bed = Heater(temperature: jsonNumber(p["bed_temper"]) ?? bed.temperature, target: jsonNumber(p["bed_target_temper"]) ?? bed.target)
@@ -48,7 +48,11 @@ extension PrinterStatus {
         var slots: [LoadedFilament] = []
         var humidity: Double?
         for unit in units {
-            if let h = jsonNumber(unit["humidity_raw"]) { humidity = h }
+            // AMS 2 Pro/HT report %; the classic AMS (P1S) only a level 1 (wet, ≥ 80 %) … 5 (dry, < 20 %).
+            let percent = jsonNumber(unit["humidity_raw"]) ?? jsonNumber(unit["humidity"]).flatMap { level -> Double? in
+                [1: 85.0, 2: 70, 3: 50, 4: 30, 5: 15][Int(level)]
+            }
+            if let h = percent { humidity = max(humidity ?? 0, h) }   // several units: the wettest one counts
             let trays = unit["tray"] as? [[String: Any]] ?? []
             for tray in trays {
                 let type = tray["tray_type"] as? String ?? ""

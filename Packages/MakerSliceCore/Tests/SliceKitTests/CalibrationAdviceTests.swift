@@ -14,7 +14,7 @@ final class CalibrationAdviceTests: XCTestCase {
         XCTAssertEqual(CalibrationAdvice.open(printer: .kobraS1, filament: "Generic PETG", book: book), CalibrationAdvice.order)
         book.set(CalibrationResult(printer: PrinterModel.kobraS1.rawValue, filament: "Generic PETG", kind: .temperature, value: 235))
         let open = CalibrationAdvice.open(printer: .kobraS1, filament: "Generic PETG", book: book)
-        XCTAssertEqual(open.first, .retraction)
+        XCTAssertEqual(open.first, .maxFlow, "OrcaSlicer's order: temperature, max flow, PA, flow, retraction")
         XCTAssertFalse(open.contains(.temperature))
         XCTAssertEqual(CalibrationAdvice.open(printer: .kobraS1, filament: "Other", book: book).first, .temperature, "results are per filament")
     }

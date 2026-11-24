@@ -25,6 +25,8 @@ final class AppModel {
     let assistant = AssistantSession()
 
     var tab: AppTab = .discover
+    /// Open printer screens on the printers tab (with several printers: the list, then one printer).
+    var printerPath: [UUID] = []
     /// Printer whose filament check is shown (after tapping a filament notification).
     var filamentCheckPrinter: PrinterRef?
     /// Set when the user wants to enter the result of a calibration print.
@@ -55,6 +57,11 @@ final class AppModel {
         didSet { UserDefaults.standard.set(expertMode, forKey: "expertMode") }
     }
 
+    /// New models get the advisor's safe settings at once (supports, brim, layer height, material tips), with undo.
+    var autoOptimize: Bool = UserDefaults.standard.object(forKey: "autoOptimize") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoOptimize, forKey: "autoOptimize") }
+    }
+
     /// Settings the user last used per printer model; new projects start from these.
     @ObservationIgnored private var savedSettings: [PrinterModel: PrintSettings] = [:]
 
@@ -66,13 +73,38 @@ final class AppModel {
             for key in ["levelingLog", "alertLastState", "alertPosted"] { UserDefaults.standard.removeObject(forKey: key) }
         }
         expertMode = UserDefaults.standard.bool(forKey: "expertMode")
+        var cleaned: [(PrinterModel, [String])] = []
         for model in PrinterModel.allCases {
             if let data = UserDefaults.standard.data(forKey: "settings-\(model.rawValue)"),
                let saved = try? JSONDecoder().decode(PrintSettings.self, from: data), saved.printer == model {
-                savedSettings[model] = saved
+                // Older versions kept the commands of one print (a calibration's speed steps, vase mode) as defaults.
+                if saved.hasProjectOnlyValues {
+                    var what: [String] = []
+                    if let top = saved.factorCommands.flatMap(\.lines).compactMap({ Int($0.uppercased().components(separatedBy: "S").last ?? "") }).max() {
+                        what.append("Tempo-/Fluss-Stufen bis \(top) %")
+                    }
+                    if saved.layerGCodes.count > saved.factorCommands.count { what.append("Befehle bei bestimmten Höhen") }
+                    if !saved.retractLengthSteps.isEmpty { what.append("Rückzugsstufen") }
+                    if saved.spiralVase { what.append("Vasenmodus") }
+                    cleaned.append((model, what))
+                }
+                // Older versions switched Z-hop off for every material when PETG strung. Without it the nozzle drags
+                // over the walls of PLA parts (X-shaped marks). Now it is off only for PETG.
+                var saved = saved
+                if saved.zHop == 0, !UserDefaults.standard.bool(forKey: "migrated-zhop-per-filament") {
+                    saved.zHop = PrintSettings(printer: model).zHop
+                    for i in saved.filaments.indices where saved.filaments[i].type.uppercased().hasPrefix("PETG") { saved.filaments[i].zHop = 0 }
+                    cleaned.append((model, ["Z-Hop aus für alle Materialien (jetzt nur noch für PETG)"]))
+                }
+                savedSettings[model] = saved.forNewProjects
             }
         }
+        UserDefaults.standard.set(true, forKey: "migrated-zhop-per-filament")
         printers.log = log
+        for (model, what) in cleaned {
+            remember(savedSettings[model]!)
+            log.add(.warning, "Vorgaben für \(model.displayName) bereinigt: \(what.isEmpty ? "Endbefehle einer Kalibrierung" : what.joined(separator: ", ")). Sie stammten aus einem einzelnen Druck (meist einer Kalibrierung) und galten bisher für jeden neuen Druck.", source: "App")
+        }
         browser.log = log
         setUpCalibration()
         // UI tests start without printers saved by an earlier test run.
@@ -84,6 +116,13 @@ final class AppModel {
            !printers.printers.contains(where: { $0.host == "127.0.0.1" }) {
             printers.add(PrinterConnection(name: "Virtueller Kobra S1", host: "127.0.0.1",
                                            model: PrinterModel.kobraS1.rawValue, kind: .anycubicLAN))
+        }
+        // UI tests: the virtual U1 "away from home" – its home address does not answer, its remote address does.
+        if ProcessInfo.processInfo.arguments.contains("-uiTestRemoteU1"),
+           !printers.printers.contains(where: { $0.remoteHost == "127.0.0.1:17125" }) {
+            printers.add(PrinterConnection(name: "U1 unterwegs", host: "10.255.255.1:17125",
+                                           model: PrinterModel.snapmakerU1.rawValue, kind: .moonraker,
+                                           remoteHost: "127.0.0.1:17125"))
         }
         // UI tests: a virtual Snapmaker U1 with multiACE (tools/virtualprinters/u1_multiace_sim.py) on this Mac.
         if ProcessInfo.processInfo.arguments.contains("-uiTestVirtualU1ACE"),
@@ -124,8 +163,12 @@ final class AppModel {
 
     /// Starts another calibration print for the same printer and filament (closes the current project first).
     func startCalibration(_ kind: CalibrationKind, like plan: CalibrationPlan) {
-        let filament = plan.settings.filament(for: 0)
-        let next = CalibrationFactory.plan(kind, filament: filament, base: settings(for: plan.settings.printer))
+        // The filament as it is now (with the result just saved), not as the last test changed it (e.g. the tower's hottest step).
+        let printer = plan.settings.printer
+        var filament = FilamentLibrary.entries(for: printer).first { $0.filament.name == plan.filament.name }?.filament
+            ?? CalibrationBook.shared.apply(to: plan.filament, printer: printer)
+        filament.color = plan.filament.color
+        let next = CalibrationFactory.plan(kind, filament: filament, base: settings(for: printer), tool: plan.tool)
         project = nil
         Task {
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -159,7 +202,20 @@ final class AppModel {
         savedSettings[model] ?? PrintSettings(printer: model)
     }
 
-    func remember(_ settings: PrintSettings) {
+    /// The user's own choices (goal, printer options, filaments) on top of the settings before auto-tuning.
+    private func keepChoices(of current: PrintSettings, over original: PrintSettings) -> PrintSettings {
+        var s = original
+        if current.purpose != original.purpose { s.apply(current.purpose) }
+        s.filaments = current.filaments
+        s.plateType = current.plateType
+        s.enableBedLeveling = current.enableBedLeveling
+        s.enableTimelapse = current.enableTimelapse
+        return s
+    }
+
+    /// Keeps the settings as the starting point of the next project – without what belongs to this one print only.
+    func remember(_ new: PrintSettings) {
+        let settings = new.forNewProjects
         savedSettings[settings.printer] = settings
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "settings-\(settings.printer.rawValue)")
@@ -169,9 +225,15 @@ final class AppModel {
     // MARK: - Notifications
 
     func openFromNotification(printer id: UUID, kind: PrintAlert.Kind) {
+        show(printer: id)
+        if kind == .filament { filamentCheckPrinter = PrinterRef(id: id) }
+    }
+
+    /// Opens the printers tab at this printer.
+    func show(printer id: UUID) {
         tab = .printers
         printers.selectedID = id
-        if kind == .filament { filamentCheckPrinter = PrinterRef(id: id) }
+        printerPath = printers.printers.count > 1 ? [id] : []
     }
 
     // MARK: - Opening models
@@ -187,6 +249,16 @@ final class AppModel {
 
     /// Handles files opened from other apps (Files, AirDrop, "Öffnen in …").
     func handleIncoming(_ url: URL) {
+        // ZIPs from Thingiverse/Printables are unpacked like downloads.
+        if url.pathExtension.lowercased() == "zip" {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            if let data = try? Data(contentsOf: url) {
+                tab = .library
+                addDownloaded(data: data, fileName: url.lastPathComponent, title: nil, source: .file)
+                return
+            }
+        }
         do {
             let item = try library.importFile(at: url)
             tab = .library
@@ -240,10 +312,10 @@ final class AppModel {
             switch result {
             case .success(let model):
                 // What is loaded in the printer decides the material; a PLA file is then printed in the PETG that is in the machine.
-                let p = PrintProject(name: name, imported: model, settings: settings, useModelMaterials: loaded.allSatisfy { ($0 ?? "").isEmpty || $0 == "NONE" })
+                let p = PrintProject(name: name, imported: model, settings: settings, useModelMaterials: loaded.allSatisfy { ($0 ?? "").isEmpty || $0 == "NONE" || $0 == "?" })
                 p.loadedTypes = loaded
                 p.dryerHumidity = humidity
-                p.refreshRecommendations()
+                if autoOptimize { p.autoOptimize() } else { p.refreshRecommendations() }
                 sendState = .idle
                 project = p
             case .failure(let error):
@@ -299,6 +371,22 @@ final class AppModel {
 
     // MARK: - Printing
 
+    /// U1 with multiACE: hands the sliced file to the multiACE preflight on the printer's web page (spool matching,
+    /// swap plan). Nothing prints until the user starts it there.
+    func sendToMultiACE(_ project: PrintProject) async {
+        guard let output = project.output, let printer = printers.selected,
+              let client = printers.driver(for: printer) as? MoonrakerClient else { return }
+        sendState = .uploading
+        do {
+            try await client.sendToMultiACE(gcode: Data(output.gcode.utf8), fileName: project.gcodeFileName)
+            sendState = .done
+            log.add(.info, "An die multiACE-Vorschau gesendet: \(project.gcodeFileName) – starten auf der multiACE-Seite des Druckers", source: printer.name)
+        } catch {
+            sendState = .failed(error.localizedDescription)
+            log.add(.error, "multiACE-Vorschau: \(error.localizedDescription)", source: printer.name)
+        }
+    }
+
     func send(_ project: PrintProject, startPrint: Bool = true) async {
         guard let output = project.output else { return }
         guard let printer = printers.selected else {
@@ -310,8 +398,15 @@ final class AppModel {
             sendState = .failed("Geslicet für \(project.settings.printer.displayName), ausgewählt ist aber „\(printer.name)“ (\(model.displayName)).")
             return
         }
+        // A printer that is busy would refuse the start after the upload (or queue the file unnoticed).
+        if startPrint, let status = printers.status(of: printer), status.state == .printing || status.state == .paused, !status.isIdle {
+            sendState = .failed("„\(printer.name)“ druckt gerade. Warte, bis der Druck fertig ist, oder wähle „Nur hochladen“.")
+            return
+        }
         sendState = .uploading
-        let mapping = project.usedTools.map { tool -> SlotMapping in
+        // Every slot that extrudes in the G-code (supports may print with their own slot), not only the models' slots.
+        let printed = Set(project.usedTools).union(output.estimate.filamentMM.filter { $0.value > 0 }.keys).sorted()
+        let mapping = printed.map { tool -> SlotMapping in
             let f = project.settings.filament(for: tool)
             return SlotMapping(tool: tool, slot: tool, materialType: f.type, color: Color(hex: f.color).rgbBytes)
         }
@@ -327,10 +422,14 @@ final class AppModel {
             try await printers.driver(for: printer).upload(gcode: data, fileName: project.gcodeFileName,
                                                            startPrint: startPrint, mapping: mapping)
             sendState = .done
+            // After a test print the user wants to enter what they see – also from the printer page.
+            if let plan = project.calibration, startPrint { pendingCalibrationResult = plan }
             if startPrint, project.settings.enableBedLeveling { LevelingLog.record(printer: project.settings.printer, plate: project.settings.plateType) }
             log.add(.info, startPrint ? "Druck gestartet: \(project.gcodeFileName)" : "Hochgeladen: \(project.gcodeFileName)",
                     source: printer.name)
-            remember(project.settings)
+            // A calibration print has its own settings (e.g. vase mode for the flow test): they must not become the defaults.
+            // What the app tuned for this model stays with the model: the defaults keep the settings from before.
+            if project.calibration == nil { remember(project.autoTuned.map { keepChoices(of: project.settings, over: $0.original) } ?? project.settings) }
             await printers.refresh(printer)
         } catch {
             sendState = .failed(error.localizedDescription)

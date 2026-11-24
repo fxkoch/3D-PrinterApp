@@ -212,7 +212,9 @@ extension PrinterDriver {
     /// Refuses to move filament through a cold nozzle (it would grind the filament or clog the extruder).
     func requireHotNozzle() async throws {
         let s = try await status()
-        let hot = s.tools.map(\.temperature).max() ?? 0
+        // The extruder that moves is the active one (U1: four heads, only one of them may be hot).
+        let active = s.activeTool.flatMap { s.tools.indices.contains($0) ? s.tools[$0].temperature : nil }
+        let hot = active ?? s.tools.map(\.temperature).max() ?? 0
         guard hot >= FilamentMove.minimumNozzleTemperature else {
             throw PrinterError.unsupported("Die Düse ist nur \(Int(hot)) °C warm. Zum Vorschieben oder Zurückziehen muss sie mindestens \(Int(FilamentMove.minimumNozzleTemperature)) °C haben – erst aufheizen.")
         }

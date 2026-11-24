@@ -78,7 +78,14 @@ public struct TriangleMesh: Sendable, Equatable {
     }
 
     /// Rotates the mesh so the largest roughly-coplanar face group faces down.
+    /// Laid on its best face (most contact, least overhang – see `lyingFaces`).
     public func laidFlat() -> TriangleMesh {
+        if let best = lyingFaces(limit: 1).first { return transformed(best.rotation) }
+        return laidFlatByDirection()
+    }
+
+    /// The old rule: the face direction with the most area in total.
+    func laidFlatByDirection() -> TriangleMesh {
         var areaByNormal: [Vec3: (area: Double, normal: Vec3)] = [:]
         for t in 0..<triangleCount {
             let a = vertices[Int(indices[t * 3])]

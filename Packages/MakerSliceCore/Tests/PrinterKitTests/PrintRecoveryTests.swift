@@ -46,4 +46,25 @@ final class PrintRecoveryTests: XCTestCase {
     func testPlainUserPauseCanContinue() {
         XCTAssertEqual(PrintRecovery.advice(for: status(.paused, message: nil, progress: 0.5))?.verdict, .resume)
     }
+
+    /// multiACE pauses when the extruder grinds the filament. The message names the filament, but it is not used up:
+    /// "insert new filament and resume" would be the wrong advice.
+    func testGrindingFilamentIsNotARunout() throws {
+        let message = "[multiACE] Kopf 1 druckt gegen massiven Widerstand (Coil-Delta 26982, anhaltend) - das Filament wird zermahlen statt gefördert (Unterextrusion läuft). Spule / Bowden / Düse prüfen, dann RESUME"
+        let advice = try XCTUnwrap(PrintRecovery.advice(for: status(.paused, message: message, progress: 0.4)))
+        XCTAssertEqual(advice.verdict, .checkFirst)
+        XCTAssertFalse(advice.steps.joined().contains("Neues Filament"))
+        XCTAssertTrue(advice.steps.contains { $0.contains("Spule") })
+    }
+
+    func testTooHighSpeedFactorComesFirst() throws {
+        var s = status(.paused, message: "[multiACE] Kopf 1 druckt gegen massiven Widerstand", progress: 0.4)
+        s.speedPercent = 400
+        let advice = try XCTUnwrap(PrintRecovery.advice(for: s))
+        XCTAssertTrue(advice.steps.first?.contains("400 %") == true, advice.steps.first ?? "")
+        XCTAssertTrue(advice.reasons.contains { $0.contains("400 %") })
+        // Normal speed: no such step.
+        s.speedPercent = 100
+        XCTAssertFalse(try XCTUnwrap(PrintRecovery.advice(for: s)).steps.contains { $0.contains("Tempo steht") })
+    }
 }

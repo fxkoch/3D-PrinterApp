@@ -59,6 +59,13 @@ final class PrintProject: Identifiable {
 
     /// What is special in the profile the downloaded model brings along; shown to the user before anything is taken over.
     private(set) var profileReport: ProfileReport?
+    /// Settings the app picked for this model by itself (with the settings before, for undo).
+    private(set) var autoTuned: AutoTuneResult?
+    private(set) var autoTuning = false
+    /// Slots of the objects before the automatic tuning moved them (for undo).
+    @ObservationIgnored private var toolsBeforeAutoTune: [ModelObject.ID: ModelObject] = [:]
+    /// Tuning waits for the colour mapping and the profile question.
+    @ObservationIgnored private var pendingAutoTune = false
 
     @ObservationIgnored private var sliceTasks: [Int: Task<Void, Never>] = [:]
     /// Plates still waiting while "alle Platten slicen" runs.
@@ -96,9 +103,13 @@ final class PrintProject: Identifiable {
     func applyProfile(_ changes: [ProfileChange]) {
         settings = ProfileAdvisor.apply(changes, to: settings)
         profileReport = nil
+        if pendingAutoTune { autoOptimize() }
     }
 
-    func dismissProfile() { profileReport = nil }
+    func dismissProfile() {
+        profileReport = nil
+        if pendingAutoTune { autoOptimize() }
+    }
 
     /// Offers the differences of a profile file (OrcaSlicer/Bambu process or filament JSON) to take over – nothing changes
     /// before the user has chosen. Returns a message when there is nothing to offer.
@@ -133,6 +144,30 @@ final class PrintProject: Identifiable {
 
     var openRecommendations: [Recommendation] {
         recommendations.filter { $0.action != nil && !dismissed.contains($0.id) }
+    }
+
+    // MARK: - Undo
+
+    /// Arrangements before the last edits of the objects (move, turn, tip, scale, copy, delete, arrange, cut).
+    @ObservationIgnored private var undoStack: [(plates: [[ModelObject]], plate: Int)] = []
+    /// Number of steps that can be undone (observed, for the button).
+    private(set) var undoSteps = 0
+
+    /// Remembers the arrangement before an edit. Meshes are shared copy-on-write, so a step costs little memory.
+    private func rememberForUndo() {
+        undoStack.append((plates, currentPlate))
+        if undoStack.count > 20 { undoStack.removeFirst() }
+        undoSteps = undoStack.count
+    }
+
+    /// Puts the objects back as they were before the last edit.
+    func undo() {
+        guard let last = undoStack.popLast() else { return }
+        undoSteps = undoStack.count
+        plates = last.plates
+        currentPlate = min(max(last.plate, 1), plates.count)
+        invalidate()
+        placementChanged(plate: currentPlate - 1)
     }
 
     // MARK: - Editing
@@ -173,7 +208,10 @@ final class PrintProject: Identifiable {
         }
     }
 
-    func finishColorSetup() { needsColorSetup = false }
+    func finishColorSetup() {
+        needsColorSetup = false
+        if pendingAutoTune { autoOptimize() }
+    }
     func reopenColorSetup() { needsColorSetup = true }
 
     /// Height-based colour changes of an object (sorted, one per height).
@@ -193,45 +231,102 @@ final class PrintProject: Identifiable {
 
     func remove(_ objectID: ModelObject.ID) {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         plates[loc.plate].remove(at: loc.index)
         changed(plate: loc.plate + 1)
     }
 
     func duplicate(_ objectID: ModelObject.ID) {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         var copy = plates[loc.plate][loc.index]
         copy.id = UUID()
         put([copy], preferred: loc.plate)
     }
 
     func rotate(_ objectID: ModelObject.ID, degrees: Double) {
-        transform(objectID, .rotationZ(degrees * .pi / 180))
+        transformInPlace(objectID, .rotationZ(degrees * .pi / 180))
     }
 
     func scale(_ objectID: ModelObject.ID, factor: Double) {
-        transform(objectID, .scale(Vec3(factor, factor, factor)))
+        transformInPlace(objectID, .scale(Vec3(factor, factor, factor)))
+    }
+
+    /// Tips the object over by `degrees` around the bed's X axis (forwards/backwards) or Y axis (sideways).
+    func tilt(_ objectID: ModelObject.ID, aroundX: Bool, degrees: Double) {
+        let a = degrees * .pi / 180
+        transformInPlace(objectID, aroundX ? .rotationX(a) : .rotationY(a))
+    }
+
+    /// Lays the object on one of its faces (see `TriangleMesh.lyingFaces`), at the same place on the bed.
+    func lay(_ objectID: ModelObject.ID, on face: LyingFace) {
+        transformInPlace(objectID, face.rotation)
+    }
+
+    /// Moves one object by (dx, dy) mm; the others stay where they are.
+    func move(_ objectID: ModelObject.ID, dx: Double, dy: Double) {
+        guard let loc = locate(objectID) else { return }
+        rememberForUndo()
+        plates[loc.plate][loc.index] = plates[loc.plate][loc.index].moved(dx: dx, dy: dy, bedSize: settings.bedSize)
+        placementChanged(plate: loc.plate)
+    }
+
+    /// Puts the centre of one object at (x, y) on the bed.
+    func place(_ objectID: ModelObject.ID, centerX x: Double, centerY y: Double) {
+        guard let loc = locate(objectID) else { return }
+        let c = plates[loc.plate][loc.index].boundingBox.center
+        move(objectID, dx: x - c.x, dy: y - c.y)
+    }
+
+    /// Rotation, scale or tilt about the object's own centre; it stays where it is and only moves back onto the bed
+    /// when it would stick out. The rest of the plate is not rearranged.
+    func transformInPlace(_ objectID: ModelObject.ID, _ t: Transform3D) {
+        guard let loc = locate(objectID) else { return }
+        rememberForUndo()
+        plates[loc.plate][loc.index] = plates[loc.plate][loc.index].transformedInPlace(t, bedSize: settings.bedSize)
+        placementChanged(plate: loc.plate)
+    }
+
+    /// Objects that overlap another one on the plate (shown, not moved: the user may want them close).
+    private(set) var overlapping: Set<ModelObject.ID> = []
+
+    private func placementChanged(plate: Int) {
+        let list = plates[plate]
+        var hits = Set<ModelObject.ID>()
+        for i in list.indices {
+            for j in list.indices where j > i && PlateArranger.hasOverlap([list[i], list[j]], tolerance: 0.5) {
+                hits.insert(list[i].id); hits.insert(list[j].id)
+            }
+        }
+        overlapping = hits
+        let tooBig = list.contains { o in
+            let s = o.boundingBox.size
+            return s.x > settings.bedSize || s.y > settings.bedSize || s.z > settings.maxHeight
+        }
+        warning = tooBig ? tooLargeWarning
+            : (hits.isEmpty ? nil : "Objekte überlappen sich. Verschiebe sie oder tippe auf „Automatisch anordnen“.")
+        changed(plate: plate + 1)
     }
 
     /// Replaces the shape of a simple (one-colour) object, e.g. with a reinforced variant.
     func replaceMesh(_ objectID: ModelObject.ID, with mesh: TriangleMesh) {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         var list = plates[loc.plate]
         list[loc.index].mesh = mesh
         list[loc.index].volumes = []
         rearrangePlate(loc.plate, list)
     }
 
+    /// Lays the object on its best face: the most contact with the bed and the least overhang.
     func layFlat(_ objectID: ModelObject.ID) {
-        guard let loc = locate(objectID) else { return }
-        var list = plates[loc.plate]
-        // Volumes follow the main mesh only for simple objects; lay-flat resets them.
-        list[loc.index].mesh = list[loc.index].mesh.laidFlat()
-        list[loc.index].volumes = []
-        rearrangePlate(loc.plate, list)
+        guard let loc = locate(objectID), let best = plates[loc.plate][loc.index].mesh.lyingFaces(limit: 1, supportAngle: settings.supportAngle).first else { return }
+        lay(objectID, on: best)
     }
 
     /// Arranges the current plate again; what no longer fits moves to the next plates.
     func autoArrange() {
+        rememberForUndo()
         rearrangePlate(currentPlate - 1, objects)
     }
 
@@ -259,6 +354,7 @@ final class PrintProject: Identifiable {
     /// Replaces an object by the pieces of a cut. Pieces that no longer fit next to the others move to other plates.
     func cut(_ objectID: ModelObject.ID, options: CutOptions) throws {
         guard let loc = locate(objectID) else { return }
+        rememberForUndo()
         let parts = try MeshCutter.cut(plates[loc.plate][loc.index], options)
         plates[loc.plate].remove(at: loc.index)
         put(parts, preferred: loc.plate)
@@ -273,7 +369,15 @@ final class PrintProject: Identifiable {
         var list = objects
         try PrintAdvisor.apply(action, settings: &s, objects: &list)
         settings = s
-        rearrangePlate(currentPlate - 1, list)
+        // Only a change of the models (split, other slot) touches the plate; a setting must not repack it.
+        if list.map(\.id) != objects.map(\.id) {
+            rearrangePlate(currentPlate - 1, list)
+        } else if list.map(\.allTools) != objects.map(\.allTools) {
+            plates[currentPlate - 1] = list
+            changed(plate: currentPlate)
+        } else {
+            refreshRecommendations()
+        }
     }
 
     // MARK: Plates
@@ -303,6 +407,7 @@ final class PrintProject: Identifiable {
             warning = "Das Objekt passt nicht mehr auf Platte \(target)."
             return
         }
+        rememberForUndo()
         plates[loc.plate].remove(at: loc.index)
         object.plate = target
         plates[target - 1] = arranged.map { var o = $0; o.plate = target; return o }
@@ -316,7 +421,9 @@ final class PrintProject: Identifiable {
 
     /// Puts objects onto plates (first fit, biggest first) and arranges the plates concerned.
     private func put(_ new: [ModelObject], preferred: Int) {
-        let layout = PlateArranger.place(new, into: plates, bedSize: settings.bedSize, preferred: preferred)
+        // Room between the parts for their brim and skirt.
+        let spacing = max(6, settings.brimWidth * 2 + 2)
+        let layout = PlateArranger.place(new, into: plates, bedSize: settings.bedSize, preferred: preferred, spacing: spacing)
         plates = layout.plates
         if !layout.unplaceable.isEmpty {
             let target = min(max(preferred, 0), plates.count - 1)
@@ -371,6 +478,72 @@ final class PrintProject: Identifiable {
     }
 
     // MARK: - Advice
+
+    /// Takes over every safe recommendation for the models on the plate (supports, brim, layer height, material tips …).
+    /// Calibration prints keep their fixed settings.
+    func autoOptimize() {
+        guard calibration == nil else { refreshRecommendations(); return }
+        // Colours and the model's own profile are chosen first; tuning then works on the final materials.
+        guard !needsColorSetup, profileReport == nil else { pendingAutoTune = true; refreshRecommendations(); return }
+        pendingAutoTune = false
+        let objects = self.objects, settings = self.settings, loaded = loadedTypes, humidity = dryerHumidity, skip = dismissed
+        let plate = currentPlate - 1
+        autoTuning = true
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                AutoTune.run(objects: objects, settings: settings, loadedTypes: loaded, dryerHumidity: humidity, excluding: skip)
+            }.value
+            guard let self else { return }
+            self.autoTuning = false
+            // The user changed something meanwhile: do not overwrite it.
+            guard self.settings == settings else { self.refreshRecommendations(); return }
+            if result.changed {
+                self.settings = result.settings
+                // Slots moved by the tuning (empty head → the one with the material), if the plate is still the same.
+                if self.plates.indices.contains(plate), self.plates[plate].map(\.id) == result.objects.map(\.id),
+                   self.plates[plate].map(\.allTools) != result.objects.map(\.allTools) {
+                    for (i, tuned) in result.objects.enumerated() {
+                        if self.toolsBeforeAutoTune[tuned.id] == nil { self.toolsBeforeAutoTune[tuned.id] = self.plates[plate][i] }
+                        self.plates[plate][i] = self.plates[plate][i].takingTools(of: tuned)
+                    }
+                    self.changed(plate: plate + 1)
+                }
+                // Keep the first "before": a second run must not make its own result the undo target.
+                if let earlier = self.autoTuned {
+                    self.autoTuned = AutoTuneResult(original: earlier.original, settings: result.settings, applied: earlier.applied + result.applied)
+                } else {
+                    self.autoTuned = result
+                }
+            }
+            self.refreshRecommendations()
+        }
+    }
+
+    /// Sets a print goal (robust, light, fast …) for the filaments this plate uses. Earlier automatic changes are kept,
+    /// but "undo" now starts from here.
+    func choose(_ purpose: PrintPurpose, autoTune: Bool) {
+        var s = settings
+        s.apply(purpose, usedTools: usedTools)
+        settings = s
+        autoTuned = nil
+        if autoTune { autoOptimize() } else { refreshRecommendations() }
+    }
+
+    /// Back to the settings before the automatic tuning.
+    func undoAutoOptimize() {
+        guard let tuned = autoTuned else { return }
+        settings = tuned.original
+        autoTuned = nil
+        for p in plates.indices {
+            for i in plates[p].indices {
+                if let before = toolsBeforeAutoTune[plates[p][i].id] { plates[p][i] = plates[p][i].takingTools(of: before) }
+            }
+        }
+        toolsBeforeAutoTune = [:]
+        invalidate()
+        // The tips stay visible, now as suggestions to tap.
+        refreshRecommendations()
+    }
 
     func refreshRecommendations() {
         adviceTask?.cancel()

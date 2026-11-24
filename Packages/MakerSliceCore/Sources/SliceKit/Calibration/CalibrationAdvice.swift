@@ -10,12 +10,13 @@ public struct CalibrationAdviceItem: Identifiable, Equatable, Sendable {
 }
 
 public enum CalibrationAdvice {
-    /// The order in which the tests build on each other.
-    public static let order: [CalibrationKind] = [.temperature, .retraction, .pressureAdvance, .flow, .maxFlow]
+    /// The order in which the tests build on each other (OrcaSlicer calibration guide): temperature, max flow, pressure
+    /// advance, flow, retraction – retraction last, because PA and flow change the pressure in the nozzle.
+    public static let order: [CalibrationKind] = [.temperature, .maxFlow, .pressureAdvance, .flow, .retraction]
 
     /// Tests without a saved result for this printer and filament, in a sensible order.
     public static func open(printer: PrinterModel, filament: String, book: CalibrationBook = .shared) -> [CalibrationKind] {
-        order.filter { book.result($0, printer: printer, filament: filament) == nil }
+        order.filter { book.result($0, printer: printer, filament: filament)?.isTest != true }
     }
 
     /// The test print showed nothing good: the usual causes in the order worth checking.
